@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Modal from '../components/Modal';
 import type { InventoryItem, Transaction, Purchase, Distributor, Customer, SalesReturn, PurchaseReturn, ModuleConfig, DoctorMaster } from '../types';
-import { getOutstandingBalance } from '../utils/helpers';
+import { calculateCustomerReceivableBreakdown, getCustomerInvoiceOutstandingTotalFromTransactions, getOutstandingBalance } from '../utils/helpers';
 import { getStockBreakup } from '../utils/stock';
 import { formatPackLooseQuantity } from '../utils/quantity';
 
@@ -645,14 +645,16 @@ const Reports: React.FC<ReportsProps> = ({
         const party = isCustomer ? customers.find(c => c.id === selectedPartyId) : distributors.find(d => d.id === selectedPartyId);
         const partyName = party?.name || 'Selected Party';
         title = `${title} - ${partyName}`;
-        const ledgerRows = (party?.ledger || []).filter((entry: any) => entry && isDateWithinRange(entry.date, startDate, endDate));
+        const allLedgerRows = (party?.ledger || []).filter((entry: any) => entry && entry.date);
+        const ledgerRows = allLedgerRows.filter((entry: any) => isDateWithinRange(entry.date, startDate, endDate));
         reportHeaders = ['Section', 'Date', 'Voucher Type', 'Voucher No', 'Reference Bill No', 'Narration', 'Debit', 'Credit', 'Running Balance', 'Balance Type', 'Status'];
         const statementRows = ledgerRows.map((entry: any) => {
           const runningBalance = Number(entry.balance || 0);
+          const status = entry.status || 'active';
           return {
             'Section': 'Ledger Statement',
             'Date': new Date(entry.date).toLocaleDateString('en-GB'),
-            'Voucher Type': entry.type === 'sale' ? 'Sales Invoice' : entry.type === 'purchase' ? 'Purchase Invoice' : entry.type === 'return' ? (isCustomer ? 'Credit Note / Sales Return' : 'Debit Note / Purchase Return') : entry.type === 'openingBalance' ? 'Opening Balance' : (isCustomer ? 'Receipt' : 'Payment'),
+            'Voucher Type': entry.type === 'sale' ? 'Sales Invoice' : entry.type === 'purchase' ? 'Purchase Invoice' : entry.type === 'return' ? (isCustomer ? 'Credit Note / Sales Return' : 'Debit Note / Purchase Return') : entry.type === 'openingBalance' ? 'Opening Balance' : (isCustomer ? 'Receipt / Payment' : 'Payment / Receipt'),
             'Voucher No': entry.journalEntryNumber || entry.id,
             'Reference Bill No': entry.referenceInvoiceNumber || '-',
             'Narration': entry.description || '-',
@@ -660,7 +662,7 @@ const Reports: React.FC<ReportsProps> = ({
             'Credit': round2(Number(entry.credit || 0)),
             'Running Balance': round2(Math.abs(runningBalance)),
             'Balance Type': runningBalance >= 0 ? (isCustomer ? 'Dr' : 'Cr') : (isCustomer ? 'Cr' : 'Dr'),
-            'Status': entry.status || 'active',
+            'Status': status,
           };
         });
         const billWiseRows = ledgerRows.filter((entry: any) => ['sale', 'purchase'].includes(entry.type)).map((entry: any) => {
@@ -688,14 +690,28 @@ const Reports: React.FC<ReportsProps> = ({
             'Debit': 0, 'Credit': 0, 'Running Balance': 0, 'Balance Type': '-', 'Status': entry.status || 'active',
           };
         });
-        const totalDebit = round2(statementRows.reduce((sum: number, row: any) => sum + Number(row.Debit || 0), 0));
-        const totalCredit = round2(statementRows.reduce((sum: number, row: any) => sum + Number(row.Credit || 0), 0));
-        const openingBalance = round2(Number((party as any)?.opening_balance || 0));
-        const closingBalanceSigned = round2(Number(party?.ledger?.[party.ledger.length - 1]?.balance || openingBalance));
+        const activeStatementRows = statementRows.filter((row: any) => String(row.Status || '').toLowerCase() !== 'cancelled');
+        const totalDebit = round2(activeStatementRows.reduce((sum: number, row: any) => sum + Number(row.Debit || 0), 0));
+        const totalCredit = round2(activeStatementRows.reduce((sum: number, row: any) => sum + Number(row.Credit || 0), 0));
+
+        const customerInvoiceOutstanding = isCustomer
+          ? getCustomerInvoiceOutstandingTotalFromTransactions((party as Customer) || null, transactions)
+          : 0;
+        const customerBreakdown = isCustomer
+          ? calculateCustomerReceivableBreakdown((party as Customer) || null, customerInvoiceOutstanding)
+          : null;
+
+        const openingBalance = round2(isCustomer ? Number(customerBreakdown?.openingBalanceSigned || 0) : Number((party as any)?.opening_balance || 0));
+        const closingBalanceSigned = round2(isCustomer ? Number(customerBreakdown?.netOutstanding || 0) : Number((party as any)?.ledger?.[(party as any)?.ledger?.length - 1]?.balance || openingBalance));
         const summaryRows = [
           { 'Section': 'Summary', 'Date': '-', 'Voucher Type': 'Opening Balance', 'Voucher No': '-', 'Reference Bill No': '-', 'Narration': '', 'Debit': openingBalance > 0 ? openingBalance : 0, 'Credit': openingBalance < 0 ? Math.abs(openingBalance) : 0, 'Running Balance': 0, 'Balance Type': openingBalance >= 0 ? 'Dr' : 'Cr', 'Status': '-' },
           { 'Section': 'Summary', 'Date': '-', 'Voucher Type': 'Total Debit', 'Voucher No': '-', 'Reference Bill No': '-', 'Narration': '', 'Debit': totalDebit, 'Credit': 0, 'Running Balance': 0, 'Balance Type': '-', 'Status': '-' },
           { 'Section': 'Summary', 'Date': '-', 'Voucher Type': 'Total Credit', 'Voucher No': '-', 'Reference Bill No': '-', 'Narration': '', 'Debit': 0, 'Credit': totalCredit, 'Running Balance': 0, 'Balance Type': '-', 'Status': '-' },
+          ...(isCustomer ? [
+            { 'Section': 'Summary', 'Date': '-', 'Voucher Type': 'Gross Receivable', 'Voucher No': '-', 'Reference Bill No': '-', 'Narration': 'Matches Sundry Debtors', 'Debit': round2(Number(customerBreakdown?.grossReceivable || 0)), 'Credit': 0, 'Running Balance': 0, 'Balance Type': 'Dr', 'Status': '-' },
+            { 'Section': 'Summary', 'Date': '-', 'Voucher Type': 'Adjusted Receipt', 'Voucher No': '-', 'Reference Bill No': '-', 'Narration': 'Receipt adjusted against invoices', 'Debit': 0, 'Credit': round2(Number(customerBreakdown?.adjustedReceipts || 0)), 'Running Balance': 0, 'Balance Type': '-', 'Status': '-' },
+            { 'Section': 'Summary', 'Date': '-', 'Voucher Type': 'Unadjusted Advance', 'Voucher No': '-', 'Reference Bill No': '-', 'Narration': 'Available customer advance', 'Debit': 0, 'Credit': round2(Number(customerBreakdown?.unadjustedAdvance || 0)), 'Running Balance': 0, 'Balance Type': 'Cr', 'Status': '-' },
+          ] : []),
           { 'Section': 'Summary', 'Date': '-', 'Voucher Type': 'Closing Balance', 'Voucher No': '-', 'Reference Bill No': '-', 'Narration': '', 'Debit': closingBalanceSigned > 0 ? closingBalanceSigned : 0, 'Credit': closingBalanceSigned < 0 ? Math.abs(closingBalanceSigned) : 0, 'Running Balance': round2(Math.abs(closingBalanceSigned)), 'Balance Type': closingBalanceSigned >= 0 ? (isCustomer ? 'Dr' : 'Cr') : (isCustomer ? 'Cr' : 'Dr'), 'Status': '-' },
         ];
         rows = [...statementRows, ...billWiseRows, ...paymentRows, ...summaryRows];

@@ -1,145 +1,127 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef, useState, useLayoutEffect, useCallback } from 'react';
 import type { DetailedBill, InventoryItem, AppConfigurations } from '../../types';
 import { numberToWords } from '../../utils/numberToWords';
-import { getDisplaySchemePercent, hasLineLevelSchemeDiscount, isRateFieldAvailable, resolveEffectivePricingMode, resolvePosLineAmountCalculationMode } from '../../utils/billing';
+import {
+  getDisplaySchemePercent,
+  hasLineLevelSchemeDiscount,
+  isRateFieldAvailable,
+  resolveEffectivePricingMode,
+  resolvePosLineAmountCalculationMode,
+} from '../../utils/billing';
 import { calculateCustomerReceivableBreakdown } from '../../utils/helpers';
 import { formatPackLooseQuantity } from '../../utils/quantity';
 import BankDetailsInline from './BankDetailsInline';
 
 interface TemplateProps {
-  bill: DetailedBill & { inventory?: InventoryItem[]; configurations: AppConfigurations; };
+  bill: DetailedBill & { inventory?: InventoryItem[]; configurations: AppConfigurations };
   orientation?: 'portrait' | 'landscape';
 }
 
-// ─── Page Capacity Constants ──────────────────────────────────────────────────
-// These represent the maximum number of item rows that fit on each page type.
-// "REGULAR" = a continuation page (smaller footer: just "page total" bar).
-// "LAST"    = the final page (larger footer: GST table, bank details, totals).
-//
-// TUNING GUIDE:
-//   - Increase LAST_CAP if the last page has too much empty space.
-//   - Decrease LAST_CAP if the footer is getting clipped.
-//   - At ~17px per row (row-height class) on A5:
-//       Portrait  usable ≈ 148mm × (96/25.4) px/mm ≈ 560px for items area
-//       Landscape usable ≈ 210mm × (96/25.4) px/mm ≈ 793px for items area
-//   - Header ≈ 58mm portrait / 45mm landscape
-//   - Main footer ≈ 55mm portrait / 42mm landscape
-//   - Continuation footer ≈ 10mm
+// ─── mm → px conversion (96 dpi screen, 25.4 mm/inch) ───────────────────────
+const MM_TO_PX = 96 / 25.4;
+function mmToPx(mm: number) { return mm * MM_TO_PX; }
 
-const PORTRAIT_REGULAR_CAP  = 26;   // items on a mid page (portrait)
-const PORTRAIT_LAST_CAP     = 18;   // items on the final page (portrait)
+// ─── Page physical dimensions ─────────────────────────────────────────────────
+const PAGE_DIMS = {
+  portrait:  { wMm: 148, hMm: 210 },
+  landscape: { wMm: 210, hMm: 148 },
+};
+const PAGE_PADDING_MM = 4; // 4 mm all sides
 
-const LANDSCAPE_REGULAR_CAP = 15;   // items on a mid page (landscape)
-const LANDSCAPE_LAST_CAP    = 10;   // items on the final page (landscape)
-
-// ─── Smart chunking ───────────────────────────────────────────────────────────
-// Splits `items` into pages such that:
-//   • every page except the last uses at most REGULAR_CAP rows
-//   • the last page uses at most LAST_CAP rows
-//   • we never create an empty final page
-//   • we never under-fill a mid-page when the remaining items would all fit
-//     on the last page anyway
-function chunkItems<T>(
-  items: T[],
+// ─────────────────────────────────────────────────────────────────────────────
+// Greedy chunker — purely index-based, caps supplied externally
+// ─────────────────────────────────────────────────────────────────────────────
+function chunkByCapacity(
+  totalItems: number,
   regularCap: number,
   lastCap: number,
-): T[][] {
-  const chunks: T[][] = [];
-  let idx = 0;
-  const total = items.length;
+): number[][] {
+  if (totalItems === 0) return [[]];
 
-  // Edge-case: 0 items → one empty page so the footer still renders
-  if (total === 0) return [[]];
+  const pages: number[][] = [];
+  let start = 0;
 
-  while (idx < total) {
-    const remaining = total - idx;
+  while (start < totalItems) {
+    const remaining = totalItems - start;
 
-    // If everything remaining fits on the last page, grab it all and stop.
-    if (remaining <= lastCap) {
-      chunks.push(items.slice(idx));
+    // Everything remaining fits on one page (as the final page)
+    if (remaining <= Math.max(regularCap, lastCap)) {
+      pages.push(Array.from({ length: remaining }, (_, i) => start + i));
       break;
     }
 
-    // If remaining items fit on ONE more regular page but won't leave enough
-    // for a proper final page, split smartly: fill this page leaving at least
-    // 1 item (ideally ≈ lastCap/2) for the final page to look balanced.
-    if (remaining <= regularCap + lastCap) {
-      // How many should go on the final page?
-      const wantOnLast = Math.max(1, Math.min(lastCap, Math.ceil(remaining / 2)));
-      const takeNow    = remaining - wantOnLast;
+    // How many will remain after filling this regular page?
+    const afterFull = remaining - regularCap;
 
-      // Only push a regular page if takeNow > 0
-      if (takeNow > 0) {
-        chunks.push(items.slice(idx, idx + takeNow));
-        idx += takeNow;
-      }
-      // The remaining wantOnLast items will be caught by the first `if` in the
-      // next iteration.
-      continue;
+    if (afterFull <= lastCap) {
+      // Fill this page fully, the tail goes on the last page
+      pages.push(Array.from({ length: regularCap }, (_, i) => start + i));
+      start += regularCap;
+      pages.push(Array.from({ length: afterFull }, (_, i) => start + i));
+      break;
     }
 
-    // Normal case: plenty of items left — fill this page completely.
-    chunks.push(items.slice(idx, idx + regularCap));
-    idx += regularCap;
+    // More items remain than can fit on two pages; fill and continue
+    pages.push(Array.from({ length: regularCap }, (_, i) => start + i));
+    start += regularCap;
   }
 
-  return chunks;
+  return pages;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// MargTemplate
+// ─────────────────────────────────────────────────────────────────────────────
 const MargTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrait' }) => {
-  const isNonGst   = bill.billType === 'non-gst';
+  const isNonGst    = bill.billType === 'non-gst';
   const isLandscape = orientation === 'landscape';
 
-  const REGULAR_CAP = isLandscape ? LANDSCAPE_REGULAR_CAP : PORTRAIT_REGULAR_CAP;
-  const LAST_CAP    = isLandscape ? LANDSCAPE_LAST_CAP    : PORTRAIT_LAST_CAP;
+  const displayOptions          = bill.configurations?.displayOptions || {};
+  const showBillDiscount        = displayOptions.showBillDiscountOnPrint !== false;
+  const isMode8                 = displayOptions.calculationMode === '8';
+  const showItemWiseDisc        = displayOptions.showItemWiseDiscountOnPrint !== false;
+  const showTradeDiscountColumn = showItemWiseDisc && (bill.items || []).some(item => (item.discountPercent || 0) > 0);
+  const showSchemeColumn        = (bill.items || []).some(item => hasLineLevelSchemeDiscount(item));
+  const showRateColumn          = isRateFieldAvailable(bill.configurations);
+  const posLineAmountMode       = resolvePosLineAmountCalculationMode(bill.configurations);
+  const isIncludingDiscountMode = posLineAmountMode === 'including_discount';
 
-  const displayOptions           = bill.configurations?.displayOptions || {};
-  const showBillDiscount         = displayOptions.showBillDiscountOnPrint !== false;
-  const isMode8                  = displayOptions.calculationMode === '8';
-  const showItemWiseDisc         = displayOptions.showItemWiseDiscountOnPrint !== false;
-  const showTradeDiscountColumn  = showItemWiseDisc && (bill.items || []).some(item => (item.discountPercent || 0) > 0);
-  const showSchemeColumn         = (bill.items || []).some(item => hasLineLevelSchemeDiscount(item));
-  const showRateColumn           = isRateFieldAvailable(bill.configurations);
-  const posLineAmountMode        = resolvePosLineAmountCalculationMode(bill.configurations);
-  const isIncludingDiscountMode  = posLineAmountMode === 'including_discount';
-
-  const calculations = useMemo(() => {
+  // ── Pre-compute all item data ──────────────────────────────────────────────
+  const { items, gstSummary, subtotalValue, totalGst, roundOff, grandTotal,
+          tradeDiscount, schemeDiscount, billDiscount, adjustment, taxableValue } = useMemo(() => {
     let subtotalValue = 0;
-    let totalSgst     = 0;
-    let totalCgst     = 0;
+    let totalSgst = 0;
+    let totalCgst = 0;
 
     const effectivePricingMode = resolveEffectivePricingMode(
       bill.pharmacy?.organization_type,
       bill.pricingMode,
-      bill.configurations
+      bill.configurations,
     );
 
     const items = (bill.items || []).map(item => {
       const inventoryItem = bill.inventory?.find(inv => inv.id === item.inventoryItemId);
 
-      const rate        = effectivePricingMode === 'mrp'
-        ? (item.mrp ?? 0)
-        : (item.rate ?? item.mrp ?? 0);
+      const rate         = effectivePricingMode === 'mrp' ? (item.mrp ?? 0) : (item.rate ?? item.mrp ?? 0);
       const unitsPerPack = item.unitsPerPack || 1;
       const billedQty    = (item.quantity || 0) + ((item.looseQuantity || 0) / unitsPerPack);
       const itemGross    = billedQty * rate;
-      const tradeDiscount    = itemGross * ((item.discountPercent || 0) / 100);
-      const lineManualFlat   = item.itemFlatDiscount || 0;
-      const schemeDiscount   = item.schemeDiscountAmount || 0;
+      const tradeDisc    = itemGross * ((item.discountPercent || 0) / 100);
+      const lineFlat     = item.itemFlatDiscount || 0;
+      const schemeDis    = item.schemeDiscountAmount || 0;
 
       const lineAmount = isIncludingDiscountMode
-        ? Math.max(0, itemGross - tradeDiscount - schemeDiscount - lineManualFlat)
+        ? Math.max(0, itemGross - tradeDisc - schemeDis - lineFlat)
         : Math.max(0, itemGross);
 
       const effectiveGst = isNonGst ? 0 : (item.gstPercent || 0);
       const isInclusive  = effectivePricingMode === 'mrp';
 
       const taxableVal = isInclusive && effectiveGst > 0
-        ? lineAmount / (1 + (effectiveGst / 100))
-        : lineAmount;
+        ? lineAmount / (1 + effectiveGst / 100) : lineAmount;
       const gstAmt = isInclusive
-        ? (lineAmount - taxableVal)
-        : (taxableVal * (effectiveGst / 100));
+        ? lineAmount - taxableVal
+        : taxableVal * (effectiveGst / 100);
 
       subtotalValue += lineAmount;
       totalSgst     += gstAmt / 2;
@@ -153,22 +135,18 @@ const MargTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrait' 
         expiry: item.expiry || (inventoryItem?.expiry
           ? new Date(inventoryItem.expiry).toLocaleDateString('en-GB', { month: '2-digit', year: '2-digit' })
           : ''),
-        billedQty,
-        billedRate: rate,
+        billedQty, billedRate: rate,
         displayAmount: lineAmount,
         displayQty: formatPackLooseQuantity(item.quantity, item.looseQuantity, item.freeQuantity),
-        taxableVal,
-        gstAmt,
-        lineTotal: lineAmount,
+        taxableVal, gstAmt, lineTotal: lineAmount,
         displayName: (() => {
-          const packLabel = item.packType?.trim() || inventoryItem?.packType?.trim() || '';
-          return packLabel ? `${item.name} (${packLabel})` : item.name;
-        })()
+          const p = item.packType?.trim() || inventoryItem?.packType?.trim() || '';
+          return p ? `${item.name} (${p})` : item.name;
+        })(),
       };
     });
 
-    // ── GST summary per rate ──────────────────────────────────────────────────
-    const gstSummary: { [rate: number]: { taxable: number; sgst: number; cgst: number } } = {};
+    const gstSummary: Record<number, { taxable: number; sgst: number; cgst: number }> = {};
     items.forEach(item => {
       const r = item.gstPercent || 0;
       if (!gstSummary[r]) gstSummary[r] = { taxable: 0, sgst: 0, cgst: 0 };
@@ -177,14 +155,6 @@ const MargTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrait' 
       gstSummary[r].cgst    += item.gstAmt / 2;
     });
 
-    // ── Page chunking ─────────────────────────────────────────────────────────
-    const chunks = chunkItems(items, REGULAR_CAP, LAST_CAP);
-
-    // Cumulative serial offsets for continuous numbering across pages
-    const chunkStartSerials = chunks.map((_, i) =>
-      chunks.slice(0, i).reduce((sum, c) => sum + c.length, 0)
-    );
-
     const tradeDiscount  = bill.totalItemDiscount || 0;
     const billDiscount   = showBillDiscount ? (bill.schemeDiscount || 0) : 0;
     const taxableValue   = Math.max(0, (bill.total || 0) - (bill.totalGst || 0) - (bill.roundOff || 0));
@@ -192,599 +162,472 @@ const MargTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrait' 
     const roundOff       = bill.roundOff || 0;
     const adjustment     = bill.adjustment || 0;
     const grandTotal     = bill.total || 0;
-    const schemeDiscount = (bill.items || []).reduce(
-      (sum, item) => sum + Number(item.schemeDiscountAmount || 0), 0
-    );
+    const schemeDiscount = (bill.items || []).reduce((s, it) => s + Number(it.schemeDiscountAmount || 0), 0);
 
-    return {
-      items, chunks, chunkStartSerials,
-      subtotalValue, totalSgst, totalCgst, gstSummary,
-      tradeDiscount, schemeDiscount, billDiscount, adjustment,
-      taxableValue, totalGst, roundOff, grandTotal
-    };
-  }, [bill, isNonGst, showBillDiscount, isIncludingDiscountMode, REGULAR_CAP, LAST_CAP]);
+    return { items, gstSummary, subtotalValue, totalSgst, totalCgst,
+             tradeDiscount, schemeDiscount, billDiscount, adjustment,
+             taxableValue, totalGst, roundOff, grandTotal };
+  }, [bill, isNonGst, showBillDiscount, isIncludingDiscountMode]);
 
-  // ── Address / contact helpers ─────────────────────────────────────────────
-  const toUpperDisplay = (value?: string | null) =>
-    (value || '').toString().trim().toUpperCase();
+  // ── Address helpers ────────────────────────────────────────────────────────
+  const toUpper = (v?: string | null) => (v || '').toString().trim().toUpperCase();
 
-  const customerAddressLine1   = toUpperDisplay(bill.customerDetails?.address_line1 || bill.customerDetails?.address);
-  const customerDistrict       = toUpperDisplay(bill.customerDetails?.district);
-  const customerState          = toUpperDisplay(bill.customerDetails?.state);
-  const customerPincode        = toUpperDisplay(bill.customerDetails?.pincode);
-  const customerAddressParts   = [customerAddressLine1, customerDistrict, customerState].filter(Boolean);
+  const customerAddressLine1 = toUpper(bill.customerDetails?.address_line1 || bill.customerDetails?.address);
+  const customerDistrict     = toUpper(bill.customerDetails?.district);
+  const customerState        = toUpper(bill.customerDetails?.state);
+  const customerPincode      = toUpper(bill.customerDetails?.pincode);
+  const customerAddressParts = [customerAddressLine1, customerDistrict, customerState].filter(Boolean);
   const customerAddressCompact = customerAddressParts.length > 0
     ? `${customerAddressParts.join(', ')}${customerPincode ? ` - ${customerPincode}` : ''}`
-    : (customerPincode || '');
+    : customerPincode || '';
 
-  const customerPhone       = toUpperDisplay(bill.customerPhone || bill.customerDetails?.phone);
-  const customerGstin       = toUpperDisplay(bill.customerDetails?.gstNumber);
-  const customerDrugLicense = toUpperDisplay(bill.customerDetails?.drugLicense);
-  const companyPhone        = toUpperDisplay(bill.pharmacy.mobile || '-');
-  const companyGstin        = toUpperDisplay(bill.pharmacy.gstin || '-');
-  const companyDrugLicense  = toUpperDisplay(
-    (bill.pharmacy as any).drug_license || (bill.pharmacy as any).drugLicense || '-'
-  );
+  const customerPhone       = toUpper(bill.customerPhone || bill.customerDetails?.phone);
+  const customerGstin       = toUpper(bill.customerDetails?.gstNumber);
+  const customerDrugLicense = toUpper(bill.customerDetails?.drugLicense);
+  const companyPhone        = toUpper(bill.pharmacy.mobile || '-');
+  const companyGstin        = toUpper(bill.pharmacy.gstin || '-');
+  const companyDrugLicense  = toUpper((bill.pharmacy as any).drug_license || (bill.pharmacy as any).drugLicense || '-');
   const companyBankName      = (bill.pharmacy as any).bank_account_name || (bill.pharmacy as any).bank_name;
   const companyAccountNumber = (bill.pharmacy as any).bank_account_number || (bill.pharmacy as any).account_number;
   const companyIfscCode      = (bill.pharmacy as any).bank_ifsc_code || (bill.pharmacy as any).ifsc_code;
 
-  // ── Balance calculations ───────────────────────────────────────────────────
-  const isCreditBill             = String(bill.paymentMode || '').trim().toLowerCase() === 'credit';
-  const hasSelectedCustomer      = Boolean(bill.customerDetails?.id);
-  const netOutstandingReceivable = hasSelectedCustomer
-    ? calculateCustomerReceivableBreakdown(bill.customerDetails).netOutstanding
-    : 0;
-  const capturedPreviousBalance    = Number(bill.previousBalanceBeforeBill);
-  const hasCapturedPreviousBalance = Number.isFinite(capturedPreviousBalance);
+  // ── Balance ────────────────────────────────────────────────────────────────
+  const isCreditBill           = String(bill.paymentMode || '').trim().toLowerCase() === 'credit';
+  const hasSelectedCustomer    = Boolean(bill.customerDetails?.id);
+  const netOutstanding         = hasSelectedCustomer
+    ? calculateCustomerReceivableBreakdown(bill.customerDetails).netOutstanding : 0;
+  const capturedPrev           = Number(bill.previousBalanceBeforeBill);
+  const hasCapturedPrev        = Number.isFinite(capturedPrev);
   const previousBalance = hasSelectedCustomer
-    ? (hasCapturedPreviousBalance
-        ? capturedPreviousBalance
-        : (isCreditBill
-            ? netOutstandingReceivable - calculations.grandTotal
-            : netOutstandingReceivable))
+    ? hasCapturedPrev ? capturedPrev
+      : isCreditBill ? netOutstanding - grandTotal : netOutstanding
     : 0;
   const balanceAfterBill = hasSelectedCustomer
-    ? (isCreditBill
-        ? Number((previousBalance + calculations.grandTotal).toFixed(2))
-        : Number(previousBalance.toFixed(2)))
+    ? isCreditBill ? Number((previousBalance + grandTotal).toFixed(2))
+      : Number(previousBalance.toFixed(2))
     : 0;
 
-  // ── Page dimensions ───────────────────────────────────────────────────────
+  // ── Page dimensions ────────────────────────────────────────────────────────
+  const dims  = PAGE_DIMS[isLandscape ? 'landscape' : 'portrait'];
   const pageW = isLandscape ? '210mm' : '148mm';
   const pageH = isLandscape ? '148mm' : '210mm';
+  const pageHPx = mmToPx(dims.hMm);
+  const pagePadPx = mmToPx(PAGE_PADDING_MM) * 2; // top + bottom
+
+  // ── Phase 1: measure refs ─────────────────────────────────────────────────
+  // We render ONE invisible probe page with all items + full footer,
+  // then measure header, footer, tbody-row heights.
+  const probeRef      = useRef<HTMLDivElement>(null);
+  const probeHeadRef  = useRef<HTMLDivElement>(null);
+  const probeFootRef  = useRef<HTMLDivElement>(null);
+  const probeCFRef    = useRef<HTMLDivElement>(null); // continuation footer
+  const probeTheadRef = useRef<HTMLTableSectionElement>(null);
+  const probeTbodyRef = useRef<HTMLTableSectionElement>(null);
+
+  // Measured caps — null = not yet measured (show probe only)
+  const [caps, setCaps] = useState<{ regular: number; last: number } | null>(null);
+
+  const measure = useCallback(() => {
+    const probe      = probeRef.current;
+    const head       = probeHeadRef.current;
+    const foot       = probeFootRef.current;
+    const cfoot      = probeCFRef.current;
+    const thead      = probeTheadRef.current;
+    const tbody      = probeTbodyRef.current;
+
+    if (!probe || !head || !foot || !cfoot || !thead || !tbody) return;
+
+    const availH     = pageHPx - pagePadPx;
+
+    const headH      = head.getBoundingClientRect().height;
+    const theadH     = thead.getBoundingClientRect().height;
+    const footH      = foot.getBoundingClientRect().height;      // full last-page footer
+    const cfootH     = cfoot.getBoundingClientRect().height;    // continuation footer
+
+    // Average row height from however many rows are in the probe tbody
+    const rows = Array.from(tbody.rows);
+    const rowH = rows.length > 0
+      ? rows.reduce((s, r) => s + r.getBoundingClientRect().height, 0) / rows.length
+      : 14; // fallback ~14px
+
+    // Available body height for each page type
+    const bodyAvailRegular = availH - headH - theadH - cfootH;
+    const bodyAvailLast    = availH - headH - theadH - footH;
+
+    const regularCap = Math.max(1, Math.floor(bodyAvailRegular / rowH));
+    const lastCap    = Math.max(1, Math.floor(bodyAvailLast    / rowH));
+
+    setCaps({ regular: regularCap, last: lastCap });
+  }, [pageHPx, pagePadPx]);
+
+  useLayoutEffect(() => {
+    // Give browser one frame to paint the probe, then measure
+    const id = requestAnimationFrame(() => { measure(); });
+    return () => cancelAnimationFrame(id);
+  }, [measure, orientation, bill]);
+
+  // ── Phase 2: chunk using measured caps ───────────────────────────────────
+  const pages = useMemo(() => {
+    if (!caps) return null;
+    const indices = chunkByCapacity(items.length, caps.regular, caps.last);
+    return indices.map(idxArr => idxArr.map(i => items[i]));
+  }, [caps, items]);
+
+  // ── Shared CSS ─────────────────────────────────────────────────────────────
+  const sharedStyles = `
+    @media print {
+      @page { margin: 0mm !important; size: ${pageW} ${pageH}; }
+      body  { margin: 0; padding: 0; }
+      .marg-page {
+        width: ${pageW}; height: ${pageH};
+        padding: ${PAGE_PADDING_MM}mm !important;
+        box-sizing: border-box;
+        display: flex !important; flex-direction: column !important;
+        overflow: hidden; background: white !important;
+        page-break-after: always; break-after: always;
+        page-break-inside: avoid; break-inside: avoid;
+      }
+      .marg-page:last-child { page-break-after: auto; break-after: auto; }
+      .marg-items-wrapper { flex: 0 0 auto !important; overflow: hidden !important; }
+      .marg-spacer        { flex: 1 1 0 !important; min-height: 0 !important; }
+      .marg-header              { flex-shrink: 0; }
+      .invoice-footer-block     { flex-shrink: 0; page-break-inside: avoid; break-inside: avoid; }
+      .marg-continuation-footer { flex-shrink: 0; }
+      .invoice-items tr         { page-break-inside: avoid; break-inside: avoid; }
+    }
+    @media screen {
+      .marg-page {
+        width: ${pageW}; min-height: ${pageH};
+        padding: ${PAGE_PADDING_MM}mm;
+        background: white; box-shadow: 0 2px 8px rgba(0,0,0,.12);
+        margin-bottom: 12px; box-sizing: border-box;
+        display: flex; flex-direction: column;
+      }
+      .marg-items-wrapper { flex: 0 0 auto; }
+      .marg-spacer        { flex: 1 1 0; }
+    }
+    /* Probe page: invisible but still laid out so measurements are accurate */
+    .marg-probe {
+      position: fixed; top: 0; left: -9999px;
+      width: ${pageW};
+      height: ${pageH};
+      padding: ${PAGE_PADDING_MM}mm;
+      box-sizing: border-box;
+      display: flex; flex-direction: column;
+      visibility: hidden; pointer-events: none; z-index: -1;
+      overflow: hidden;
+    }
+    .erp-table { border: 1px solid black; border-collapse: collapse; }
+    .erp-table th { border: 1px solid black; padding: 1px 3px; font-weight: 600; font-size: 7.5pt; }
+    .erp-table td { border-left: 1px solid black; border-right: 1px solid black; padding: 1px 3px; font-size: 8pt; font-weight: 500; }
+    .invoice-items {
+      width: 100%; table-layout: fixed; border-collapse: collapse;
+      border-top: 1px solid #000; border-left: 1px solid #000; border-right: 1px solid #000; border-bottom: none;
+    }
+    .invoice-items thead tr { background: #f3f4f6; }
+    .invoice-items thead th {
+      border: none; border-bottom: 1.5px solid #000; border-right: 1px solid #d1d5db;
+      padding: 2px 3px; font-size: 7pt; font-weight: 700; line-height: 1.15;
+      vertical-align: middle; white-space: nowrap;
+    }
+    .invoice-items thead th:last-child { border-right: none; }
+    .invoice-items tbody td {
+      border: none !important;
+      padding: 1.5px 3px; font-size: 8pt; font-weight: 500; line-height: 1.2;
+      vertical-align: middle; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .invoice-items tbody tr { background: white; }
+    .footer-border { border: 1px solid black; }
+    .invoice-bottom { display: flex; justify-content: space-between; align-items: flex-end; }
+    .invoice-header-right { width: 100%; display: flex; justify-content: flex-end; }
+    .invoice-meta { display: flex; justify-content: flex-end; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+  `;
+
+  // ── Sub-components ─────────────────────────────────────────────────────────
+  const TableHeader = () => (
+    <tr>
+      <th style={{ width: '4%',  textAlign: 'center' }}>#</th>
+      <th style={{ width: '10%', textAlign: 'center' }}>QTY+F</th>
+      <th style={{ width: '23%', textAlign: 'left'   }}>DESCRIPTION</th>
+      <th style={{ width: '8%',  textAlign: 'center' }}>HSN</th>
+      <th style={{ width: '7%',  textAlign: 'center' }}>PACK</th>
+      <th style={{ width: '9%',  textAlign: 'center' }}>BATCH</th>
+      <th style={{ width: '7%',  textAlign: 'center' }}>EXP.</th>
+      <th style={{ width: '8%',  textAlign: 'right'  }}>M.R.P</th>
+      {showRateColumn          && <th style={{ width: '8%', textAlign: 'right'  }}>RATE</th>}
+      {showTradeDiscountColumn && <th style={{ width: '5%', textAlign: 'center' }}>D%</th>}
+      {showSchemeColumn        && <th style={{ width: '5%', textAlign: 'center' }}>SCH%</th>}
+      <th style={{ width: '5%',  textAlign: 'center' }}>GST%</th>
+      <th style={{ width: '11%', textAlign: 'right'  }}>AMOUNT</th>
+    </tr>
+  );
+
+  const ItemRow = ({ item, serial }: { item: (typeof items)[0]; serial: number }) => (
+    <tr key={item.id}>
+      <td style={{ textAlign: 'center', fontWeight: 900 }}>{serial}</td>
+      <td style={{ textAlign: 'center', fontWeight: 900 }}>{item.displayQty}</td>
+      <td style={{ fontWeight: 900, textTransform: 'uppercase', color: '#111827', maxWidth: 0 }}>{item.displayName}</td>
+      <td style={{ textAlign: 'center' }}>{item.hsn}</td>
+      <td style={{ textAlign: 'center', fontSize: '7pt' }}>{item.pack}</td>
+      <td style={{ textAlign: 'center' }}>{item.batch}</td>
+      <td style={{ textAlign: 'center', fontSize: '7pt' }}>{item.expiry}</td>
+      <td style={{ textAlign: 'right' }}>{(item.mrp || 0).toFixed(2)}</td>
+      {showRateColumn          && <td style={{ textAlign: 'right',  color: '#1e40af', fontWeight: 700 }}>{(item.billedRate || 0).toFixed(2)}</td>}
+      {showTradeDiscountColumn && <td style={{ textAlign: 'center', color: '#dc2626' }}>{item.discountPercent || '0'}</td>}
+      {showSchemeColumn        && <td style={{ textAlign: 'center', color: '#059669' }}>{getDisplaySchemePercent(item) > 0 ? getDisplaySchemePercent(item).toFixed(2) : ''}</td>}
+      <td style={{ textAlign: 'center' }}>{(item.gstPercent || 0).toFixed(0)}</td>
+      <td style={{ textAlign: 'right', fontWeight: 900, color: '#111827' }}>{(item.displayAmount || 0).toFixed(2)}</td>
+    </tr>
+  );
+
+  const PageHeader = () => (
+    <div className="marg-header">
+      <div className="grid grid-cols-3 border-t border-x border-black">
+        <div className="p-1.5 border-r border-black">
+          <h1 className="text-base font-black uppercase text-blue-900 mb-0.5 leading-none">{bill.pharmacy.pharmacy_name}</h1>
+          {bill.pharmacy.address && (
+            <p className="text-[6.5pt] uppercase font-bold text-gray-700 leading-tight whitespace-pre-line">{bill.pharmacy.address}</p>
+          )}
+          <p className="text-[7.5pt] mt-0.5 font-normal leading-none">PH: {companyPhone}</p>
+          <p className="text-[7.5pt] font-normal leading-none">GSTIN: {companyGstin}</p>
+          <p className="text-[7.5pt] font-normal leading-none">DL NO: {companyDrugLicense}</p>
+        </div>
+        <div className="flex flex-col items-center justify-center border-r border-black p-1">
+          {bill.pharmacy.pharmacy_logo_url
+            ? <img src={bill.pharmacy.pharmacy_logo_url} alt="Logo" className="h-8 w-auto object-contain mb-0.5" />
+            : <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center font-black text-sm border border-black mb-0.5">M</div>}
+          <span className="text-[8pt] font-black uppercase text-center border-y border-black w-full py-0.5 bg-gray-50">
+            {bill.paymentMode === 'Credit' ? 'CREDIT' : 'CASH'}
+          </span>
+        </div>
+        <div className="p-1.5">
+          <h3 className="text-[6pt] font-black uppercase underline mb-0.5 text-gray-500">Party Details:</h3>
+          <p className="uppercase text-[8.5pt] text-gray-950 leading-tight">{toUpper(bill.customerName)}</p>
+          <div className="mt-0.5 space-y-0.5 text-[7pt] font-normal text-gray-700">
+            {customerPhone        && <p>PH: {customerPhone}</p>}
+            {customerAddressCompact && <p className="leading-tight">ADDRESS: {customerAddressCompact}</p>}
+            {customerGstin
+              ? <p>GSTIN: {customerGstin}</p>
+              : bill.customerDetails?.panNumber ? <p>PAN: {toUpper(bill.customerDetails.panNumber)}</p> : null}
+            {customerDrugLicense  && <p>DL NO: {customerDrugLicense}</p>}
+          </div>
+        </div>
+      </div>
+      <div className="grid grid-cols-3 border-y border-x border-black bg-gray-100">
+        <div className="col-span-2 py-0.5 flex items-center justify-center border-r border-black">
+          <h2 className="text-lg font-black uppercase tracking-[0.2em] text-gray-900 leading-none">
+            {isNonGst ? 'ESTIMATE' : 'GST INVOICE'}
+          </h2>
+        </div>
+        <div className="p-0.5 pl-2 flex items-center">
+          <div className="invoice-header-right">
+            <div className="invoice-meta">
+              <span>INV: <span className="font-mono font-black text-blue-900">{bill.invoiceNumber || bill.id}</span></span>
+              <span>|</span>
+              <span>DATE: {new Date(bill.date).toLocaleDateString('en-GB')}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const LastPageFooter = () => (
+    <div className="invoice-footer-block">
+      <div className="invoice-footer grid grid-cols-2 footer-border bg-white">
+        <div className="border-r border-black p-1.5 flex flex-col justify-between">
+          {!isNonGst && (
+            <table className="w-full erp-table" style={{ fontSize: '6.5pt', borderCollapse: 'collapse', marginBottom: 4 }}>
+              <thead className="bg-gray-100 uppercase font-black">
+                <tr>
+                  <th className="text-left py-0.5">GST Rate</th>
+                  <th className="text-right py-0.5">Taxable</th>
+                  <th className="text-right py-0.5">SGST</th>
+                  <th className="text-right py-0.5">CGST</th>
+                </tr>
+              </thead>
+              <tbody className="font-black">
+                {Object.entries(gstSummary).map(([rate, vals]) => {
+                  if (parseFloat(rate) === 0) return null;
+                  return (
+                    <tr key={rate}>
+                      <td className="font-black">{rate}%</td>
+                      <td className="text-right">{vals.taxable.toFixed(2)}</td>
+                      <td className="text-right">{vals.sgst.toFixed(2)}</td>
+                      <td className="text-right">{vals.cgst.toFixed(2)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+          <div style={{ marginTop: 4 }}>
+            <BankDetailsInline
+              bankName={companyBankName} accountNumber={companyAccountNumber} ifscCode={companyIfscCode}
+              className="bank-details text-[7pt] text-gray-700 leading-tight mb-1.5"
+            />
+            <p className="amount-in-words font-black uppercase text-gray-950 leading-tight"
+              style={{ fontSize: '7.5pt', borderBottom: '1px dashed #d1d5db', paddingBottom: 4, marginBottom: 4 }}>
+              {numberToWords(grandTotal)}
+            </p>
+            <div className="invoice-bottom" style={{ marginTop: 8 }}>
+              <div>
+                {hasSelectedCustomer && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: '8pt', fontWeight: 900, textTransform: 'uppercase' }}>Previous Bal:</span>
+                      <span style={{ fontSize: '8pt', fontWeight: 900, color: '#dc2626' }}>₹{previousBalance.toFixed(2)}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: '8pt', fontWeight: 900, textTransform: 'uppercase' }}>Balance After Bill:</span>
+                      <span style={{ fontSize: '8pt', fontWeight: 900, color: '#dc2626' }}>₹{balanceAfterBill.toFixed(2)}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="text-center" style={{ paddingRight: 4 }}>
+                <p className="font-black uppercase" style={{ fontSize: '6pt', letterSpacing: '0.05em', marginBottom: 16 }}>
+                  FOR {bill.pharmacy.pharmacy_name}
+                </p>
+                <p className="font-black uppercase leading-none"
+                  style={{ fontSize: '7pt', borderTop: '1px solid black', paddingTop: 2, paddingLeft: 16, paddingRight: 16, display: 'inline-block' }}>
+                  Auth. Signatory
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(249,250,251,0.8)' }}>
+          <div style={{ padding: 8, flex: 1 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '8.5pt', fontWeight: 700 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>SUB TOTAL</span>
+                <span style={{ fontWeight: 900 }}>₹ {(subtotalValue || 0).toFixed(2)}</span>
+              </div>
+              {!isIncludingDiscountMode && tradeDiscount > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#4338ca', fontWeight: 900 }}>
+                  <span>Trade Discount (₹)</span><span>- {tradeDiscount.toFixed(2)}</span>
+                </div>
+              )}
+              {schemeDiscount > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#059669', fontWeight: 900 }}>
+                  <span>Scheme Discount (₹)</span><span>- {schemeDiscount.toFixed(2)}</span>
+                </div>
+              )}
+              {showBillDiscount && billDiscount > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#4338ca', fontWeight: 900 }}>
+                  <span>{isMode8 ? 'Adjustment (Mode 8)' : 'Bill Discount'}</span><span>- {billDiscount.toFixed(2)}</span>
+                </div>
+              )}
+              {!isNonGst && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#4b5563' }}>
+                  <span>Tax Amount</span>
+                  <span style={{ fontWeight: 900, color: '#111827' }}>{(totalGst || 0).toFixed(2)}</span>
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#6b7280' }}>
+                <span>Round Off</span>
+                <span style={{ fontWeight: 400 }}>{(roundOff || 0).toFixed(2)}</span>
+              </div>
+            </div>
+          </div>
+          <div style={{ padding: 8, background: 'white', borderTop: '1px solid black', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.875rem', fontWeight: 900, color: '#1f2937', letterSpacing: '-0.025em' }}>GRAND TOTAL</span>
+            <span style={{ fontSize: '1.5rem',   fontWeight: 900, color: '#1d4ed8', letterSpacing: '-0.025em' }}>
+              ₹ {grandTotal.toFixed(2)}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const ContinuationFooter = ({ pageNum, totalPages, pageTotal }: { pageNum: number; totalPages: number; pageTotal: number }) => (
+    <div className="marg-continuation-footer grid grid-cols-2 border border-black bg-white">
+      <div className="border-r border-black p-1.5">
+        <p className="text-[8pt] font-black text-gray-700 uppercase">
+          Continued on next page… (Page {pageNum} of {totalPages})
+        </p>
+      </div>
+      <div className="p-1.5 flex justify-between items-center bg-gray-50">
+        <span className="text-sm font-black text-gray-800 tracking-tighter">PAGE TOTAL</span>
+        <span className="text-2xl font-black text-blue-900 tracking-tighter">₹ {pageTotal.toFixed(2)}</span>
+      </div>
+    </div>
+  );
+
+  // ── Font size ──────────────────────────────────────────────────────────────
+  const baseFontSize = isLandscape ? '8pt' : '8.5pt';
 
   return (
     <div
       className="invoice-container bg-white text-black font-sans w-full mx-auto leading-tight antialiased"
-      style={{ fontSize: isLandscape ? '8pt' : '8.5pt' }}
+      style={{ fontSize: baseFontSize }}
     >
-      <style>{`
-        /* ═══════════════════════════════════════════════════════════════════
-           PRINT STYLES
-           Key insight: each .marg-page is exactly one physical A5 page.
-           We use flexbox with flex-direction:column so the items wrapper
-           (flex:1 1 0) absorbs all leftover vertical space, pushing the
-           footer to the physical bottom of the page every time.
-           overflow:hidden on the wrapper ensures rows never bleed past the
-           page boundary — the cap constants control actual row count.
-        ═══════════════════════════════════════════════════════════════════ */
-        @media print {
-          @page {
-            margin: 0mm !important;
-            size: ${pageW} ${pageH};
-          }
-          body { margin: 0; padding: 0; }
+      <style>{sharedStyles}</style>
 
-          /* Each page = exact physical sheet */
-          .marg-page {
-            width:  ${pageW};
-            height: ${pageH};
-            padding: 4mm !important;
-            box-sizing: border-box;
+      {/* ══════════════════════════════════════════════════════════════════
+          PHASE 1 — INVISIBLE PROBE PAGE
+          Contains: real header + all items + real last-page footer + real
+          continuation footer. We read their heights after first paint.
+      ══════════════════════════════════════════════════════════════════ */}
+      <div ref={probeRef} className="marg-probe" aria-hidden="true">
+        {/* Header */}
+        <div ref={probeHeadRef}><PageHeader /></div>
 
-            /* Flex column → header | items(flex:1) | footer */
-            display: flex !important;
-            flex-direction: column !important;
+        {/* Items table — all rows for accurate avg row-height */}
+        <div className="marg-items-wrapper">
+          <table className="invoice-items">
+            <thead ref={probeTheadRef}><TableHeader /></thead>
+            <tbody ref={probeTbodyRef}>
+              {items.map((item, i) => <ItemRow key={item.id} item={item} serial={i + 1} />)}
+            </tbody>
+          </table>
+        </div>
 
-            overflow: hidden;
-            background: white !important;
+        {/* Spacer */}
+        <div className="marg-spacer" style={{ borderLeft: '1px solid #000', borderRight: '1px solid #000' }} />
 
-            page-break-after:  always;
-            break-after:       always;
-            page-break-inside: avoid;
-            break-inside:      avoid;
-          }
-          .marg-page:last-child {
-            page-break-after: auto;
-            break-after: auto;
-          }
+        {/* Real last-page footer — measure this to know how much it costs */}
+        <div ref={probeFootRef}><LastPageFooter /></div>
 
-          /* Items section fills all remaining space */
-          .marg-items-wrapper {
-            flex: 1 1 0 !important;
-            min-height: 0 !important;
-            overflow: hidden !important;
-            display: flex !important;
-            flex-direction: column !important;
-          }
+        {/* Real continuation footer */}
+        <div ref={probeCFRef}>
+          <ContinuationFooter pageNum={1} totalPages={99} pageTotal={0} />
+        </div>
+      </div>
 
-          /* Items table fills the wrapper height */
-          .marg-items-wrapper .invoice-items {
-            flex: 1 1 0 !important;
-          }
-
-          /* Prevent rows / footer from splitting across pages */
-          .invoice-items tr           { page-break-inside: avoid; break-inside: avoid; }
-          .invoice-footer-block       { page-break-inside: avoid; break-inside: avoid; flex-shrink: 0; }
-          .marg-continuation-footer   { flex-shrink: 0; }
-          .marg-header                { flex-shrink: 0; }
-        }
-
-        /* ═══════════════════════════════════════════════════════════════════
-           SCREEN STYLES
-           Use block layout so each card auto-sizes to its content.
-           min-height gives a visual A5 feel without forcing exact height.
-        ═══════════════════════════════════════════════════════════════════ */
-        @media screen {
-          .marg-page {
-            width:     ${pageW};
-            min-height: ${pageH};
-            padding:   4mm;
-            background: white;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.12);
-            margin-bottom: 12px;
-            display: block;
-            box-sizing: border-box;
-          }
-          .marg-items-wrapper {
-            display: block;
-          }
-        }
-
-        /* ═══════════════════════════════════════════════════════════════════
-           SHARED TABLE STYLES
-        ═══════════════════════════════════════════════════════════════════ */
-        .erp-table { border: 1px solid black; border-collapse: collapse; }
-        .erp-table th {
-          border: 1px solid black;
-          padding: 1px 3px;
-          font-weight: 600;
-          font-size: 7.5pt;
-        }
-        .erp-table td {
-          border-left:  1px solid black;
-          border-right: 1px solid black;
-          padding: 1px 3px;
-          font-size: 8pt;
-          font-weight: 500;
-        }
-
-        .items-table th,
-        .items-table td {
-          line-height: 1.05;
-          padding-top:    1px;
-          padding-bottom: 1px;
-          padding-left:   2px;
-          padding-right:  2px;
-          vertical-align: middle;
-        }
-
-        /* Main items table */
-        .invoice-items {
-          width: 100%;
-          border-collapse: collapse;
-          table-layout: fixed;
-        }
-        .invoice-items thead th {
-          border: 1px solid #000;
-          background: #f3f4f6;
-        }
-        .invoice-items tbody td {
-          border-left:   1px solid #000;
-          border-right:  1px solid #000;
-          border-bottom: 1px solid #e5e7eb;
-        }
-        /* Seal the last row */
-        .invoice-items tbody tr:last-child td {
-          border-bottom: 1px solid #000;
-        }
-        /* Fixed row height — critical for cap accuracy */
-        .row-height { height: 17px; }
-
-        /* Footer outer border */
-        .footer-border { border: 1px solid black; border-top: 0; }
-
-        /* Misc layout */
-        .invoice-bottom {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-end;
-        }
-        .amount-in-words,
-        .bank-details,
-        .invoice-footer { page-break-inside: avoid; break-inside: avoid; }
-
-        .invoice-header-right { width: 100%; display: flex; justify-content: flex-end; }
-        .invoice-meta {
-          display: flex;
-          justify-content: flex-end;
-          align-items: center;
-          gap: 6px;
-          font-size: 11px;
-          font-weight: 600;
-          white-space: nowrap;
-        }
-      `}</style>
-
-      {calculations.chunks.map((chunk, pageIdx) => {
-        const isLastPage  = pageIdx === calculations.chunks.length - 1;
-        const startSerial = calculations.chunkStartSerials[pageIdx];
-        const pageTotal   = chunk.reduce((acc, item) => acc + (item.displayAmount || 0), 0);
-        const totalPages  = calculations.chunks.length;
+      {/* ══════════════════════════════════════════════════════════════════
+          PHASE 2 — ACTUAL PAGES (rendered only after measurement)
+      ══════════════════════════════════════════════════════════════════ */}
+      {pages && pages.map((chunk, pageIdx) => {
+        const isLastPage = pageIdx === pages.length - 1;
+        const startSerial = pages.slice(0, pageIdx).reduce((s, c) => s + c.length, 0);
+        const pageTotal  = chunk.reduce((s, it) => s + (it.displayAmount || 0), 0);
 
         return (
           <div key={pageIdx} className="marg-page">
+            <PageHeader />
 
-            {/* ── HEADER (every page) ───────────────────────────────────── */}
-            <div className="marg-header invoice-header">
-              <div className="grid grid-cols-3 border-t border-x border-black">
-                {/* Left: pharmacy info */}
-                <div className="p-1.5 border-r border-black">
-                  <h1 className="text-base font-black uppercase text-blue-900 mb-0.5 leading-none">
-                    {bill.pharmacy.pharmacy_name}
-                  </h1>
-                  {bill.pharmacy.address && (
-                    <p className="text-[6.5pt] uppercase font-bold text-gray-700 leading-tight whitespace-pre-line">
-                      {bill.pharmacy.address}
-                    </p>
-                  )}
-                  <p className="text-[7.5pt] mt-0.5 font-normal leading-none">PH: {companyPhone}</p>
-                  <p className="text-[7.5pt] font-normal leading-none">GSTIN: {companyGstin}</p>
-                  <p className="text-[7.5pt] font-normal leading-none">DL NO: {companyDrugLicense}</p>
-                </div>
-
-                {/* Centre: logo + bill type badge */}
-                <div className="flex flex-col items-center justify-center border-r border-black p-1">
-                  {bill.pharmacy.pharmacy_logo_url ? (
-                    <img
-                      src={bill.pharmacy.pharmacy_logo_url}
-                      alt="Logo"
-                      className="h-8 w-auto object-contain mb-0.5"
-                    />
-                  ) : (
-                    <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center font-black text-sm border border-black mb-0.5">
-                      M
-                    </div>
-                  )}
-                  <span className="text-[8pt] font-black uppercase text-center border-y border-black w-full py-0.5 bg-gray-50">
-                    {bill.paymentMode === 'Credit' ? 'CREDIT' : 'CASH'}
-                  </span>
-                </div>
-
-                {/* Right: customer details */}
-                <div className="p-1.5">
-                  <h3 className="text-[6pt] font-black uppercase underline mb-0.5 text-gray-500">Party Details:</h3>
-                  <p className="uppercase text-[8.5pt] text-gray-950 leading-tight">
-                    {toUpperDisplay(bill.customerName)}
-                  </p>
-                  <div className="mt-0.5 space-y-0.5 text-[7pt] font-normal text-gray-700">
-                    {customerPhone && <p>PH: {customerPhone}</p>}
-                    {customerAddressCompact && (
-                      <p className="leading-tight">ADDRESS: {customerAddressCompact}</p>
-                    )}
-                    {customerGstin
-                      ? <p>GSTIN: {customerGstin}</p>
-                      : bill.customerDetails?.panNumber
-                        ? <p>PAN: {toUpperDisplay(bill.customerDetails.panNumber)}</p>
-                        : null
-                    }
-                    {customerDrugLicense && <p>DL NO: {customerDrugLicense}</p>}
-                  </div>
-                </div>
-              </div>
-
-              {/* Invoice title + number/date bar */}
-              <div className="grid grid-cols-3 border-y border-x border-black bg-gray-100">
-                <div className="col-span-2 py-0.5 flex items-center justify-center border-r border-black">
-                  <h2 className="text-lg font-black uppercase tracking-[0.2em] text-gray-900 leading-none">
-                    {isNonGst ? 'ESTIMATE' : 'GST INVOICE'}
-                  </h2>
-                </div>
-                <div className="p-0.5 pl-2 flex items-center">
-                  <div className="invoice-header-right">
-                    <div className="invoice-meta">
-                      <span>
-                        INV:{' '}
-                        <span className="font-mono font-black text-blue-900">
-                          {bill.invoiceNumber || bill.id}
-                        </span>
-                      </span>
-                      <span>|</span>
-                      <span>DATE: {new Date(bill.date).toLocaleDateString('en-GB')}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            {/* ── END HEADER ───────────────────────────────────────────── */}
-
-            {/* ── ITEMS TABLE WRAPPER ───────────────────────────────────── */}
-            {/* On print: flex:1 so it expands to fill all space between
-                header and footer, keeping footer pinned to the page bottom.
-                On screen: display:block so it auto-sizes to content.     */}
+            {/* Items */}
             <div className="marg-items-wrapper">
-              <table
-                className="invoice-items erp-table items-table"
-                style={{ width: '100%', borderCollapse: 'collapse' }}
-              >
-                <thead>
-                  <tr className="text-[7pt] font-semibold uppercase">
-                    <th style={{ width: '4%' }}>#</th>
-                    <th style={{ width: '10%' }}>QTY+F</th>
-                    <th className="text-left" style={{ width: '23%' }}>DESCRIPTION</th>
-                    <th style={{ width: '8%' }}>HSN</th>
-                    <th style={{ width: '7%' }}>PACK</th>
-                    <th style={{ width: '9%' }}>BATCH</th>
-                    <th style={{ width: '7%' }}>EXP.</th>
-                    <th className="text-right" style={{ width: '8%' }}>M.R.P</th>
-                    {showRateColumn && (
-                      <th className="text-right" style={{ width: '8%' }}>RATE</th>
-                    )}
-                    {showTradeDiscountColumn && (
-                      <th style={{ width: '5%' }}>D%</th>
-                    )}
-                    {showSchemeColumn && (
-                      <th style={{ width: '5%' }}>SCH%</th>
-                    )}
-                    <th style={{ width: '5%' }}>GST%</th>
-                    <th className="text-right" style={{ width: '11%', borderRight: 0 }}>AMOUNT</th>
-                  </tr>
-                </thead>
-                <tbody className="text-[8.5pt] font-medium">
-                  {chunk.map((item, idx) => {
-                    const sn = startSerial + idx + 1;
-                    return (
-                      <tr key={item.id} className="row-height">
-                        <td className="text-center font-black">{sn}</td>
-                        <td className="text-center font-black">{item.displayQty}</td>
-                        <td
-                          className="font-black uppercase text-gray-900"
-                          style={{
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                            maxWidth: 0,
-                          }}
-                        >
-                          {item.displayName}
-                        </td>
-                        <td className="text-center">{item.hsn}</td>
-                        <td className="text-center text-[7pt]">{item.pack}</td>
-                        <td className="text-center">{item.batch}</td>
-                        <td className="text-center text-[7pt]">{item.expiry}</td>
-                        <td className="text-right">{(item.mrp || 0).toFixed(2)}</td>
-                        {showRateColumn && (
-                          <td className="text-right text-blue-900">{(item.billedRate || 0).toFixed(2)}</td>
-                        )}
-                        {showTradeDiscountColumn && (
-                          <td className="text-center text-red-600">{item.discountPercent || '0'}</td>
-                        )}
-                        {showSchemeColumn && (
-                          <td className="text-center text-emerald-700">
-                            {getDisplaySchemePercent(item) > 0 ? getDisplaySchemePercent(item).toFixed(2) : ''}
-                          </td>
-                        )}
-                        <td className="text-center">{(item.gstPercent || 0).toFixed(0)}</td>
-                        <td className="text-right font-black text-gray-950" style={{ borderRight: 0 }}>
-                          {(item.displayAmount || 0).toFixed(2)}
-                        </td>
-                      </tr>
-                    );
-                  })}
+              <table className="invoice-items">
+                <thead><TableHeader /></thead>
+                <tbody>
+                  {chunk.map((item, idx) => (
+                    <ItemRow key={item.id} item={item} serial={startSerial + idx + 1} />
+                  ))}
                 </tbody>
               </table>
             </div>
-            {/* ── END ITEMS TABLE WRAPPER ───────────────────────────────── */}
 
-            {/* ── CONTINUATION FOOTER (non-last pages) ─────────────────── */}
-            {!isLastPage && (
-              <div className="marg-continuation-footer grid grid-cols-2 border-x border-b border-black bg-white">
-                <div className="border-r border-black p-1.5">
-                  <p className="text-[8pt] font-black text-gray-700 uppercase">
-                    Continued on next page… (Page {pageIdx + 1} of {totalPages})
-                  </p>
-                </div>
-                <div className="p-1.5 flex justify-between items-center bg-gray-50">
-                  <span className="text-sm font-black text-gray-800 tracking-tighter">PAGE TOTAL</span>
-                  <span className="text-2xl font-black text-blue-900 tracking-tighter">
-                    ₹ {pageTotal.toFixed(2)}
-                  </span>
-                </div>
-              </div>
-            )}
+            {/* Spacer keeps footer pinned to bottom */}
+            <div className="marg-spacer" style={{ borderLeft: '1px solid #000', borderRight: '1px solid #000' }} />
 
-            {/* ── MAIN FOOTER (last page only) ──────────────────────────── */}
-            {isLastPage && (
-              <div className="invoice-footer-block">
-                <div className="invoice-footer grid grid-cols-2 footer-border bg-white">
-
-                  {/* LEFT: GST summary + bank + words + balance + signatory */}
-                  <div className="border-r border-black p-1.5 flex flex-col justify-between">
-
-                    {/* GST breakdown table (GST bills only) */}
-                    {!isNonGst && (
-                      <table
-                        className="w-full erp-table"
-                        style={{ fontSize: '6.5pt', borderCollapse: 'collapse', marginBottom: 4 }}
-                      >
-                        <thead className="bg-gray-100 uppercase font-black">
-                          <tr>
-                            <th className="text-left py-0.5">GST Rate</th>
-                            <th className="text-right py-0.5">Taxable</th>
-                            <th className="text-right py-0.5">SGST</th>
-                            <th className="text-right py-0.5">CGST</th>
-                          </tr>
-                        </thead>
-                        <tbody className="font-black">
-                          {Object.entries(calculations.gstSummary).map(([rate, vals]) => {
-                            const v = vals as any;
-                            if (parseFloat(rate) === 0) return null;
-                            return (
-                              <tr key={rate}>
-                                <td className="font-black">{rate}%</td>
-                                <td className="text-right">{v.taxable.toFixed(2)}</td>
-                                <td className="text-right">{v.sgst.toFixed(2)}</td>
-                                <td className="text-right">{v.cgst.toFixed(2)}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    )}
-
-                    <div style={{ marginTop: 4 }}>
-                      <BankDetailsInline
-                        bankName={companyBankName}
-                        accountNumber={companyAccountNumber}
-                        ifscCode={companyIfscCode}
-                        className="bank-details text-[7pt] text-gray-700 leading-tight mb-1.5"
-                      />
-                      <p
-                        className="amount-in-words font-black uppercase text-gray-950 leading-tight"
-                        style={{
-                          fontSize: '7.5pt',
-                          borderBottom: '1px dashed #d1d5db',
-                          paddingBottom: 4,
-                          marginBottom: 4,
-                        }}
-                      >
-                        {numberToWords(calculations.grandTotal)}
-                      </p>
-
-                      <div className="invoice-bottom" style={{ marginTop: 8 }}>
-                        <div>
-                          {hasSelectedCustomer && (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <span style={{ fontSize: '8pt', fontWeight: 900, textTransform: 'uppercase' }}>
-                                  Previous Bal:
-                                </span>
-                                <span style={{ fontSize: '8pt', fontWeight: 900, color: '#dc2626' }}>
-                                  ₹{previousBalance.toFixed(2)}
-                                </span>
-                              </div>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <span style={{ fontSize: '8pt', fontWeight: 900, textTransform: 'uppercase' }}>
-                                  Balance After Bill:
-                                </span>
-                                <span style={{ fontSize: '8pt', fontWeight: 900, color: '#dc2626' }}>
-                                  ₹{balanceAfterBill.toFixed(2)}
-                                </span>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                        <div className="text-center" style={{ paddingRight: 4 }}>
-                          <p
-                            className="font-black uppercase"
-                            style={{ fontSize: '6pt', letterSpacing: '0.05em', marginBottom: 16 }}
-                          >
-                            FOR {bill.pharmacy.pharmacy_name}
-                          </p>
-                          <p
-                            className="font-black uppercase leading-none"
-                            style={{
-                              fontSize: '7pt',
-                              borderTop: '1px solid black',
-                              paddingTop: 2,
-                              paddingLeft: 16,
-                              paddingRight: 16,
-                              display: 'inline-block',
-                            }}
-                          >
-                            Auth. Signatory
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* RIGHT: Totals breakdown + grand total */}
-                  <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(249,250,251,0.8)' }}>
-                    <div style={{ padding: 8, flex: 1 }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '8.5pt', fontWeight: 700 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span>SUB TOTAL</span>
-                          <span style={{ fontWeight: 900 }}>₹ {(calculations.subtotalValue || 0).toFixed(2)}</span>
-                        </div>
-
-                        {!isIncludingDiscountMode && calculations.tradeDiscount > 0 && (
-                          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#4338ca', fontWeight: 900 }}>
-                            <span>Trade Discount (₹)</span>
-                            <span>- {calculations.tradeDiscount.toFixed(2)}</span>
-                          </div>
-                        )}
-
-                        {calculations.schemeDiscount > 0 && (
-                          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#059669', fontWeight: 900 }}>
-                            <span>Scheme Discount (₹)</span>
-                            <span>- {calculations.schemeDiscount.toFixed(2)}</span>
-                          </div>
-                        )}
-
-                        {showBillDiscount && calculations.billDiscount > 0 && (
-                          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#4338ca', fontWeight: 900 }}>
-                            <span>{isMode8 ? 'Adjustment (Mode 8)' : 'Bill Discount'}</span>
-                            <span>- {calculations.billDiscount.toFixed(2)}</span>
-                          </div>
-                        )}
-
-                        {!isNonGst && (
-                          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#4b5563' }}>
-                            <span>Tax Amount</span>
-                            <span style={{ fontWeight: 900, color: '#111827' }}>
-                              {(calculations.totalGst || 0).toFixed(2)}
-                            </span>
-                          </div>
-                        )}
-
-                        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#6b7280' }}>
-                          <span>Round Off</span>
-                          <span style={{ fontWeight: 400 }}>{(calculations.roundOff || 0).toFixed(2)}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div
-                      style={{
-                        padding: 8,
-                        background: 'white',
-                        borderTop: '1px solid black',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.06)',
-                      }}
-                    >
-                      <span
-                        style={{ fontSize: '0.875rem', fontWeight: 900, color: '#1f2937', letterSpacing: '-0.025em' }}
-                      >
-                        GRAND TOTAL
-                      </span>
-                      <span
-                        style={{ fontSize: '1.5rem', fontWeight: 900, color: '#1d4ed8', letterSpacing: '-0.025em' }}
-                      >
-                        ₹ {calculations.grandTotal.toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
-
-                </div>
-              </div>
-            )}
-            {/* ── END MAIN FOOTER ──────────────────────────────────────── */}
-
+            {/* Footer */}
+            {isLastPage
+              ? <LastPageFooter />
+              : <ContinuationFooter pageNum={pageIdx + 1} totalPages={pages.length} pageTotal={pageTotal} />}
           </div>
         );
       })}

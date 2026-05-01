@@ -153,12 +153,12 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, 
   };
 
   const templates = [
-    { id: 'marg', name: 'MEDI 2' },
-    { id: 'medi-1', name: 'MEDI-1 (A5)' },
-    { id: 'gft', name: 'GFT Pharma' },
-    { id: 'abhigyan', name: 'Classic GST' },
-    { id: 'medi-3', name: 'MEDI-3' },
-    { id: 'thermal', name: 'THERMAL 3×8' },
+    { id: 'marg', name: 'Invoice-1' },
+    { id: 'medi-1', name: 'Invoice-2' },
+    { id: 'gft', name: 'Invoice-3' },
+    { id: 'abhigyan', name: 'Invoice-4' },
+    { id: 'medi-3', name: 'Invoice-5' },
+    { id: 'thermal', name: 'Invoice-6' },
   ];
 
   const renderTemplate = () => {

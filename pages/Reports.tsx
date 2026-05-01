@@ -26,6 +26,7 @@ interface ReportDefinition {
 
 type SortDirection = 'asc' | 'desc';
 type MfrSalesViewMode = 'detailed' | 'productSummary';
+type StockMovementViewMode = 'detailed' | 'productSummary';
 
 const round2 = (value: number) => Number((Number(value || 0)).toFixed(2));
 
@@ -110,6 +111,7 @@ const Reports: React.FC<ReportsProps> = ({
   const [filterModalOpen, setFilterModalOpen] = useState(false);
   const [columnModalOpen, setColumnModalOpen] = useState(false);
   const [mfrSalesViewMode, setMfrSalesViewMode] = useState<MfrSalesViewMode>('detailed');
+  const [stockMovementViewMode, setStockMovementViewMode] = useState<StockMovementViewMode>('detailed');
 
   const reportById = useMemo(() => new Map(REPORT_LIST.map(r => [r.id, r])), []);
   const groupedReports = useMemo(() => {
@@ -656,90 +658,79 @@ const Reports: React.FC<ReportsProps> = ({
         break;
 
       case 'stockMovementSummary': {
-        reportHeaders = ['Product Name', 'MFR', 'Rate', 'Opening Qty', 'Opening Value', 'Receipt Qty', 'Receipt Value', 'Issue Qty', 'Issue Value', 'Closing Qty', 'Closing Value'];
+        const summaryHeaders = ['Product Name', 'MFR', 'Rate', 'Opening Qty', 'Opening Value', 'Receipt Qty', 'Receipt Value', 'Issue Qty', 'Issue Value', 'Closing Qty', 'Closing Value'];
+        const detailedHeaders = ['Product Name', 'MFR', 'Rate', 'Batch', 'Movement Type', 'Reference No', 'Opening Qty', 'Opening Value', 'Receipt Qty', 'Receipt Value', 'Issue Qty', 'Issue Value', 'Closing Qty', 'Closing Value'];
+        reportHeaders = stockMovementViewMode === 'productSummary' ? summaryHeaders : detailedHeaders;
 
-        const map = new Map<string, any>();
-        const ensureRow = (name: string, manufacturer: string, category: string, rate: number) => {
-          const key = `${name}__${manufacturer || 'N/A'}`;
-          const existing = map.get(key);
-          if (existing) {
-            if (!existing.Rate && rate) existing.Rate = round2(rate);
-            return existing;
-          }
-          const row = {
-            'Product Name': name,
-            'MFR': manufacturer || 'N/A',
-            'Rate': round2(rate || 0),
-            'Opening Qty': 0,
-            'Opening Value': 0,
-            'Receipt Qty': 0,
-            'Receipt Value': 0,
-            'Issue Qty': 0,
-            'Issue Value': 0,
-            'Closing Qty': 0,
-            'Closing Value': 0,
-            'Category': category || 'N/A',
-          };
-          map.set(key, row);
-          return row;
-        };
-
-        const stockInBefore = purchases
-          .filter(p => p.status !== 'draft' && p.status !== 'cancelled' && new Date(p.date) < new Date(startDate));
-        const stockInPeriod = purchases
-          .filter(p => p.status !== 'draft' && p.status !== 'cancelled' && isDateWithinRange(p.date, startDate, endDate));
-        const stockOutBefore = transactions
-          .filter(tx => tx.status !== 'draft' && tx.status !== 'cancelled' && new Date(tx.date) < new Date(startDate));
-        const stockOutPeriod = transactions
-          .filter(tx => tx.status !== 'draft' && tx.status !== 'cancelled' && isDateWithinRange(tx.date, startDate, endDate));
-
-        stockInBefore.forEach(p => p.items.forEach((item: any) => {
-          const qty = Number(item.quantity || 0) + Number(item.freeQuantity || 0);
-          const rate = Number(item.purchasePrice || item.ptr || 0);
-          const row = ensureRow(item.name, item.manufacturer || item.brand || '', item.category || '', rate);
-          row['Opening Qty'] = round2(row['Opening Qty'] + qty);
-        }));
-
-        stockOutBefore.forEach(tx => tx.items.forEach((item: any) => {
-          const qty = Number(item.quantity || 0) + Number(item.freeQuantity || 0);
-          const rate = Number(item.rate ?? item.ptr ?? item.purchasePrice ?? 0);
-          const inv = inventory.find(i => i.name === item.name && (!item.batch || !i.batch || i.batch === item.batch));
-          const row = ensureRow(item.name, item.manufacturer || inv?.manufacturer || item.brand || '', item.category || inv?.category || '', rate || Number(inv?.ptr || inv?.purchasePrice || 0));
-          row['Opening Qty'] = round2(row['Opening Qty'] - qty);
-        }));
-
-        stockInPeriod.forEach(p => p.items.forEach((item: any) => {
-          const qty = Number(item.quantity || 0) + Number(item.freeQuantity || 0);
-          const rate = Number(item.purchasePrice || item.ptr || 0);
-          const row = ensureRow(item.name, item.manufacturer || item.brand || '', item.category || '', rate);
-          row['Receipt Qty'] = round2(row['Receipt Qty'] + qty);
-        }));
-
-        stockOutPeriod.forEach(tx => tx.items.forEach((item: any) => {
-          const qty = Number(item.quantity || 0) + Number(item.freeQuantity || 0);
-          const rate = Number(item.rate ?? item.ptr ?? item.purchasePrice ?? 0);
-          const inv = inventory.find(i => i.name === item.name && (!item.batch || !i.batch || i.batch === item.batch));
-          const row = ensureRow(item.name, item.manufacturer || inv?.manufacturer || item.brand || '', item.category || inv?.category || '', rate || Number(inv?.ptr || inv?.purchasePrice || 0));
-          row['Issue Qty'] = round2(row['Issue Qty'] + qty);
-        }));
-
-        rows = Array.from(map.values()).map((row: any) => {
-          const rate = Number(row['Rate'] || 0);
-          const openingQty = Number(row['Opening Qty'] || 0);
-          const receiptQty = Number(row['Receipt Qty'] || 0);
-          const issueQty = Number(row['Issue Qty'] || 0);
+        const detailedRows: any[] = [];
+        const addDetailedRow = (payload: any) => {
+          const rate = round2(Number(payload.rate || 0));
+          const openingQty = round2(Number(payload.openingQty || 0));
+          const receiptQty = round2(Number(payload.receiptQty || 0));
+          const issueQty = round2(Number(payload.issueQty || 0));
           const closingQty = round2(openingQty + receiptQty - issueQty);
-          return {
-            ...row,
+          detailedRows.push({
+            'Product Name': payload.name,
+            'MFR': payload.manufacturer || 'N/A',
+            'Rate': rate,
+            'Batch': payload.batch || 'N/A',
+            'Movement Type': payload.movementType,
+            'Reference No': payload.referenceNo || '-',
+            'Opening Qty': openingQty,
             'Opening Value': round2(openingQty * rate),
+            'Receipt Qty': receiptQty,
             'Receipt Value': round2(receiptQty * rate),
+            'Issue Qty': issueQty,
             'Issue Value': round2(issueQty * rate),
             'Closing Qty': closingQty,
             'Closing Value': round2(closingQty * rate),
-          };
-        })
-          .filter(row => row['Product Name'])
-          .sort((a, b) => String(a['Product Name']).localeCompare(String(b['Product Name'])));
+          });
+        };
+
+        purchases.filter(p => p.status !== 'draft' && p.status !== 'cancelled' && new Date(p.date) < new Date(startDate)).forEach(p => {
+          (p.items || []).forEach((item: any) => {
+            const qty = Number(item.quantity || 0) + Number(item.freeQuantity || 0);
+            addDetailedRow({ name: item.name, manufacturer: item.manufacturer || item.brand || '', batch: item.batch, rate: Number(item.purchasePrice || item.ptr || 0), movementType: 'Opening', referenceNo: p.invoiceNumber || p.id, openingQty: qty });
+          });
+        });
+        transactions.filter(tx => tx.status !== 'draft' && tx.status !== 'cancelled' && new Date(tx.date) < new Date(startDate)).forEach(tx => {
+          (tx.items || []).forEach((item: any) => {
+            const inv = inventory.find(i => i.name === item.name && (!item.batch || !i.batch || i.batch === item.batch));
+            const qty = Number(item.quantity || 0) + Number(item.freeQuantity || 0);
+            addDetailedRow({ name: item.name, manufacturer: item.manufacturer || inv?.manufacturer || item.brand || '', batch: item.batch || inv?.batch, rate: Number(item.rate ?? item.ptr ?? item.purchasePrice ?? inv?.ptr ?? inv?.purchasePrice ?? 0), movementType: 'Opening Adjustment', referenceNo: tx.invoiceNumber || tx.id, openingQty: -qty });
+          });
+        });
+        purchases.filter(p => p.status !== 'draft' && p.status !== 'cancelled' && isDateWithinRange(p.date, startDate, endDate)).forEach(p => {
+          (p.items || []).forEach((item: any) => {
+            const qty = Number(item.quantity || 0) + Number(item.freeQuantity || 0);
+            addDetailedRow({ name: item.name, manufacturer: item.manufacturer || item.brand || '', batch: item.batch, rate: Number(item.purchasePrice || item.ptr || 0), movementType: 'Receipt', referenceNo: p.invoiceNumber || p.id, receiptQty: qty });
+          });
+        });
+        transactions.filter(tx => tx.status !== 'draft' && tx.status !== 'cancelled' && isDateWithinRange(tx.date, startDate, endDate)).forEach(tx => {
+          (tx.items || []).forEach((item: any) => {
+            const inv = inventory.find(i => i.name === item.name && (!item.batch || !i.batch || i.batch === item.batch));
+            const qty = Number(item.quantity || 0) + Number(item.freeQuantity || 0);
+            addDetailedRow({ name: item.name, manufacturer: item.manufacturer || inv?.manufacturer || item.brand || '', batch: item.batch || inv?.batch, rate: Number(item.rate ?? item.ptr ?? item.purchasePrice ?? inv?.ptr ?? inv?.purchasePrice ?? 0), movementType: 'Issue', referenceNo: tx.invoiceNumber || tx.id, issueQty: qty });
+          });
+        });
+
+        if (stockMovementViewMode === 'productSummary') {
+          const grouped = new Map<string, any>();
+          detailedRows.forEach((row: any) => {
+            const key = `${String(row['Product Name']).trim().toLowerCase()}|${String(row['MFR']).trim().toLowerCase()}|${Number(row['Rate'] || 0)}`;
+            const current = grouped.get(key) || { ...summaryHeaders.reduce((acc: any, h) => ({ ...acc, [h]: 0 }), {}), 'Product Name': row['Product Name'], 'MFR': row['MFR'], 'Rate': row['Rate'] };
+            current['Opening Qty'] = round2(Number(current['Opening Qty']) + Number(row['Opening Qty']));
+            current['Opening Value'] = round2(Number(current['Opening Value']) + Number(row['Opening Value']));
+            current['Receipt Qty'] = round2(Number(current['Receipt Qty']) + Number(row['Receipt Qty']));
+            current['Receipt Value'] = round2(Number(current['Receipt Value']) + Number(row['Receipt Value']));
+            current['Issue Qty'] = round2(Number(current['Issue Qty']) + Number(row['Issue Qty']));
+            current['Issue Value'] = round2(Number(current['Issue Value']) + Number(row['Issue Value']));
+            grouped.set(key, current);
+          });
+          rows = Array.from(grouped.values()).map((row: any) => ({ ...row, 'Closing Qty': round2(Number(row['Opening Qty']) + Number(row['Receipt Qty']) - Number(row['Issue Qty'])), 'Closing Value': round2((Number(row['Opening Qty']) + Number(row['Receipt Qty']) - Number(row['Issue Qty'])) * Number(row['Rate'])) })).sort((a,b)=>String(a['Product Name']).localeCompare(String(b['Product Name'])));
+        } else {
+          rows = detailedRows.sort((a,b)=>String(a['Product Name']).localeCompare(String(b['Product Name'])));
+        }
         break;
       }
       case 'reorderLevelReport':
@@ -1046,6 +1037,12 @@ const Reports: React.FC<ReportsProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mfrSalesViewMode]);
 
+  useEffect(() => {
+    if (activeReportId !== 'stockMovementSummary') return;
+    loadReportData(activeReportId, periodStartDate, periodEndDate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stockMovementViewMode]);
+
   const filterOptions = useMemo(() => {
     return headers.reduce<Record<string, string[]>>((acc, col) => {
       acc[col] = Array.from(new Set(baseData.map(row => String(row[col] ?? '')).filter(Boolean))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
@@ -1119,6 +1116,21 @@ const Reports: React.FC<ReportsProps> = ({
     };
   }, [activeReportId, filteredData]);
 
+  const stockMovementTotalRow = useMemo(() => {
+    if (activeReportId !== 'stockMovementSummary') return null;
+    const numericKeys = ['Opening Qty', 'Opening Value', 'Receipt Qty', 'Receipt Value', 'Issue Qty', 'Issue Value', 'Closing Qty', 'Closing Value'];
+    const row: Record<string, any> = { 'Product Name': 'TOTAL', 'MFR': '-', 'Rate': '-' };
+    numericKeys.forEach(key => {
+      row[key] = round2(filteredData.reduce((sum, item) => sum + Number(item[key] || 0), 0));
+    });
+    return row;
+  }, [activeReportId, filteredData]);
+
+  const reportDataWithTotalRow = useMemo(() => {
+    if (activeReportId !== 'stockMovementSummary' || !stockMovementTotalRow) return filteredData;
+    return [...filteredData, stockMovementTotalRow];
+  }, [activeReportId, filteredData, stockMovementTotalRow]);
+
   const activeFilterChips = useMemo(() => {
     return Object.entries(activeFilters).flatMap(([field, values]) => values.map(value => ({ field, value })));
   }, [activeFilters]);
@@ -1175,21 +1187,21 @@ const Reports: React.FC<ReportsProps> = ({
   };
 
   const exportCsv = () => {
-    const rows = [visibleColumns.join(','), ...filteredData.map(row => visibleColumns.map(col => `"${String(row[col] ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
+    const rows = [visibleColumns.join(','), ...reportDataWithTotalRow.map(row => visibleColumns.map(col => `"${String(row[col] ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
     downloadFile(`${activeReportTitle.replace(/\s+/g, '_')}.csv`, rows, 'text/csv;charset=utf-8;');
   };
 
   const exportXlsx = () => {
-    const rows = [visibleColumns.join('\t'), ...filteredData.map(row => visibleColumns.map(col => String(row[col] ?? '')).join('\t'))].join('\n');
+    const rows = [visibleColumns.join('\t'), ...reportDataWithTotalRow.map(row => visibleColumns.map(col => String(row[col] ?? '')).join('\t'))].join('\n');
     downloadFile(`${activeReportTitle.replace(/\s+/g, '_')}.xlsx`, rows, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   };
 
   const handlePreview = () => {
-    onPrintReport({ title: activeReportTitle, data: filteredData, headers: visibleColumns, filters: { startDate: periodStartDate, endDate: periodEndDate, activeFilters } });
+    onPrintReport({ title: activeReportTitle, data: reportDataWithTotalRow, headers: visibleColumns, filters: { startDate: periodStartDate, endDate: periodEndDate, activeFilters } });
   };
 
   const handlePrint = () => {
-    onPrintReport({ title: `${activeReportTitle} (Print)`, data: filteredData, headers: visibleColumns, filters: { startDate: periodStartDate, endDate: periodEndDate, activeFilters } });
+    onPrintReport({ title: `${activeReportTitle} (Print)`, data: reportDataWithTotalRow, headers: visibleColumns, filters: { startDate: periodStartDate, endDate: periodEndDate, activeFilters } });
   };
 
   const onPickReport = (reportId: string) => {
@@ -1238,13 +1250,20 @@ const Reports: React.FC<ReportsProps> = ({
               <div className="text-[10px] text-gray-500">Period: {new Date(periodStartDate).toLocaleDateString('en-GB')} to {new Date(periodEndDate).toLocaleDateString('en-GB')}</div>
             </div>
             <div className="flex gap-1 text-[10px] items-center">
-              {activeReportId === 'mfrWiseSalesDetailedReport' && (
+              {(activeReportId === 'mfrWiseSalesDetailedReport' || activeReportId === 'stockMovementSummary') && (
                 <div className="flex items-center gap-1 mr-2">
                   <span className="text-gray-600">View Mode:</span>
-                  <select value={mfrSalesViewMode} onChange={(e) => setMfrSalesViewMode(e.target.value as MfrSalesViewMode)} className="px-1 py-1 border border-gray-300 bg-white">
-                    <option value="detailed">Detailed View</option>
-                    <option value="productSummary">Product Summary View</option>
-                  </select>
+                  {activeReportId === 'mfrWiseSalesDetailedReport' ? (
+                    <select value={mfrSalesViewMode} onChange={(e) => setMfrSalesViewMode(e.target.value as MfrSalesViewMode)} className="px-1 py-1 border border-gray-300 bg-white">
+                      <option value="detailed">Detailed View</option>
+                      <option value="productSummary">Product Summary View</option>
+                    </select>
+                  ) : (
+                    <select value={stockMovementViewMode} onChange={(e) => setStockMovementViewMode(e.target.value as StockMovementViewMode)} className="px-1 py-1 border border-gray-300 bg-white">
+                      <option value="detailed">Detailed View</option>
+                      <option value="productSummary">Product Summary View</option>
+                    </select>
+                  )}
                 </div>
               )}
               <button onClick={() => setFilterModalOpen(true)} className="px-2 py-1 border border-gray-300 hover:bg-gray-100">Filter</button>
@@ -1294,6 +1313,15 @@ const Reports: React.FC<ReportsProps> = ({
                     </tr>
                   ))}
                 </tbody>
+                {activeReportId === 'stockMovementSummary' && stockMovementTotalRow && (
+                  <tfoot>
+                    <tr className="bg-gray-200 font-bold">
+                      {visibleColumns.map(col => (
+                        <td key={`total-${col}`} className={`px-2 py-1 border-t border-r whitespace-nowrap ${typeof stockMovementTotalRow[col] === 'number' ? 'text-right' : 'text-left'}`}>{String(stockMovementTotalRow[col] ?? '-')}</td>
+                      ))}
+                    </tr>
+                  </tfoot>
+                )}
               </table>
             )}
           </div>

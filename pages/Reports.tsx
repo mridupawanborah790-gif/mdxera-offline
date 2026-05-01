@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Modal from '../components/Modal';
 import type { InventoryItem, Transaction, Purchase, Distributor, Customer, SalesReturn, PurchaseReturn, ModuleConfig, DoctorMaster } from '../types';
-import { calculateCustomerReceivableBreakdown, getCustomerInvoiceOutstandingTotalFromTransactions, getOutstandingBalance } from '../utils/helpers';
+import { calculateCustomerReceivableBreakdown, calculateSupplierPayableBreakdown, getCustomerInvoiceOutstandingTotalFromTransactions, getOutstandingBalance } from '../utils/helpers';
 import { getStockBreakup } from '../utils/stock';
 import { formatPackLooseQuantity } from '../utils/quantity';
 
@@ -654,9 +654,9 @@ const Reports: React.FC<ReportsProps> = ({
           const status = entry.status || 'active';
           const rawDebit = round2(Number(entry.debit || 0));
           const rawCredit = round2(Number(entry.credit || 0));
-          const displayDebit = isCustomer ? rawDebit : rawCredit;
-          const displayCredit = isCustomer ? rawCredit : rawDebit;
-          const movement = round2(displayDebit - displayCredit);
+          const displayDebit = rawDebit;
+          const displayCredit = rawCredit;
+          const movement = round2(displayCredit - displayDebit);
           const runningBalanceSigned = isCustomer ? round2(Number(entry.balance || 0)) : round2((supplierRunningBalance += movement));
           return {
             'Section': 'Ledger Statement',
@@ -673,20 +673,20 @@ const Reports: React.FC<ReportsProps> = ({
             'Status': status,
           };
         });
-        const billWiseRows = ledgerRows.filter((entry: any) => ['sale', 'purchase'].includes(entry.type)).map((entry: any) => {
-          const billAmount = isCustomer ? Number(entry.debit || 0) : Number(entry.credit || 0);
+        const billWiseRows = ledgerRows.filter((entry: any) => ['sale', 'purchase'].includes(entry.type) && String(entry.status || '').toLowerCase() !== 'cancelled').map((entry: any) => {
+          const billAmount = isCustomer ? Number(entry.debit || 0) : Number(entry.debit || 0);
           return {
             'Section': 'Bill-wise Outstanding',
             'Date': new Date(entry.date).toLocaleDateString('en-GB'),
             'Voucher Type': isCustomer ? 'Sales Invoice' : 'Purchase Invoice',
             'Voucher No': entry.journalEntryNumber || entry.id,
             'Reference Bill No': entry.referenceInvoiceNumber || '-',
-            'Narration': `Bill Amount: ${round2(billAmount)} | Paid/Adjusted: 0 | Outstanding: ${round2(billAmount)} | Due Days: ${Math.max(0, Math.ceil((new Date().getTime() - new Date(entry.date).getTime()) / (1000 * 60 * 60 * 24)))}`,
+            'Narration': `Bill Amount: ${round2(billAmount)} | Paid/Adjusted: 0 | Outstanding: ${round2(Math.max(billAmount, 0))} | Due Days: ${Math.max(0, Math.ceil((new Date().getTime() - new Date(entry.date).getTime()) / (1000 * 60 * 60 * 24)))}`,
             'Supplier Name': partyName, 'Debit': 0, 'Credit': 0, 'Running Balance': 0, 'Balance Type': '-', 'Status': entry.status || 'active',
           };
         });
-        const paymentRows = ledgerRows.filter((entry: any) => entry.type === 'payment').map((entry: any) => {
-          const amount = isCustomer ? Number(entry.credit || 0) : Number(entry.debit || 0);
+        const paymentRows = ledgerRows.filter((entry: any) => entry.type === 'payment' && String(entry.status || '').toLowerCase() !== 'cancelled').map((entry: any) => {
+          const amount = isCustomer ? Number(entry.credit || 0) : (Number(entry.credit || 0) > 0 ? Number(entry.credit || 0) : Number(entry.debit || 0));
           const adjusted = Number(entry.adjustedAmount || 0);
           return {
             'Section': 'Payment History',
@@ -709,9 +709,11 @@ const Reports: React.FC<ReportsProps> = ({
           ? calculateCustomerReceivableBreakdown((party as Customer) || null, customerInvoiceOutstanding)
           : null;
 
-        const openingBalance = round2(isCustomer ? Number(customerBreakdown?.openingBalanceSigned || 0) : Number((party as any)?.opening_balance || 0));
-        const supplierClosingBalance = round2(statementRows.filter((row: any) => String(row.Status || '').toLowerCase() !== 'cancelled').reduce((last: number, row: any) => row['Balance Type'] === 'Cr' ? -Number(row['Running Balance'] || 0) : Number(row['Running Balance'] || 0), 0));
-        const closingBalanceSigned = round2(isCustomer ? Number(customerBreakdown?.netOutstanding || 0) : supplierClosingBalance);
+        const supplierBreakdown = !isCustomer
+          ? calculateSupplierPayableBreakdown((party as Distributor) || null)
+          : null;
+        const openingBalance = round2(isCustomer ? Number(customerBreakdown?.openingBalanceSigned || 0) : Number(supplierBreakdown?.openingBalanceSigned || 0));
+        const closingBalanceSigned = round2(isCustomer ? Number(customerBreakdown?.netOutstanding || 0) : Number(supplierBreakdown?.netOutstanding || 0));
         const summaryRows = [
           { 'Section': 'Summary', 'Date': '-', 'Voucher Type': 'Opening Balance', 'Supplier Name': partyName, 'Voucher No': '-', 'Reference Bill No': '-', 'Narration': '', 'Debit': openingBalance > 0 ? openingBalance : 0, 'Credit': openingBalance < 0 ? Math.abs(openingBalance) : 0, 'Running Balance': 0, 'Balance Type': openingBalance >= 0 ? 'Dr' : 'Cr', 'Status': '-' },
           { 'Section': 'Summary', 'Date': '-', 'Voucher Type': 'Total Debit', 'Supplier Name': partyName, 'Voucher No': '-', 'Reference Bill No': '-', 'Narration': '', 'Debit': totalDebit, 'Credit': 0, 'Running Balance': 0, 'Balance Type': '-', 'Status': '-' },

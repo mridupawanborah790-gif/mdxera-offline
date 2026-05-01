@@ -219,6 +219,56 @@ export const calculateCustomerReceivableBreakdown = (
     };
 };
 
+
+export const getSupplierInvoiceOutstandingTotalFromPurchases = (
+    supplier: Distributor | null | undefined,
+    purchases: Array<any> = []
+): number => {
+    if (!supplier || !Array.isArray(purchases)) return 0;
+
+    const supplierName = (supplier.name || '').trim().toLowerCase();
+    const supplierId = String((supplier as any).id || '').trim();
+
+    const supplierBills = purchases
+        .filter((p) => p && p.status !== 'cancelled')
+        .filter((p) => {
+            const nameMatch = ((p.supplier || '').trim().toLowerCase() === supplierName);
+            const idMatch = supplierId && String((p as any).supplierId || '').trim() === supplierId;
+            return nameMatch || idMatch;
+        })
+        .map((p) => ({
+            id: String(p.id || ''),
+            invoiceNumber: String(p.invoiceNumber || '').trim().toLowerCase(),
+            invoiceAmount: Number(p.totalAmount || 0),
+            paid: 0,
+            balance: Number(p.totalAmount || 0),
+        }));
+
+    if (supplierBills.length === 0) return 0;
+
+    const byInvoiceId = new Map(supplierBills.map((row) => [row.id, row]));
+    const byInvoiceNumber = new Map(supplierBills.filter((row) => row.invoiceNumber).map((row) => [row.invoiceNumber, row.id]));
+    const ledger = Array.isArray(supplier.ledger) ? supplier.ledger : [];
+
+    for (const entry of ledger) {
+        if (!entry || entry.type !== 'payment' || entry.status === 'cancelled') continue;
+        const entryCategory = String(entry.entryCategory || '');
+        if (!['invoice_payment_adjustment', 'down_payment_adjustment', 'invoice_payment_adjustment_reversal', 'down_payment_adjustment_reversal'].includes(entryCategory)) continue;
+
+        const invoiceId = String(entry.referenceInvoiceId || byInvoiceNumber.get(String(entry.referenceInvoiceNumber || '').trim().toLowerCase()) || '');
+        const target = invoiceId ? byInvoiceId.get(invoiceId) : undefined;
+        if (!target) continue;
+
+        const adjustedAmount = Number(entry.adjustedAmount || 0);
+        const multiplier = entryCategory.endsWith('_reversal') ? -1 : 1;
+        target.paid += adjustedAmount * multiplier;
+        target.balance = Number((target.invoiceAmount - target.paid).toFixed(2));
+        if (target.balance < 0) target.balance = 0;
+    }
+
+    return round2(Array.from(byInvoiceId.values()).reduce((sum, row) => sum + Number(row.balance || 0), 0));
+};
+
 export const getCustomerInvoiceOutstandingTotalFromTransactions = (
     customer: Customer | null | undefined,
     transactions: Transaction[] = []

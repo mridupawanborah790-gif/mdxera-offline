@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Modal from '../components/Modal';
 import type { InventoryItem, Transaction, Purchase, Distributor, Customer, SalesReturn, PurchaseReturn, ModuleConfig, DoctorMaster } from '../types';
-import { calculateCustomerReceivableBreakdown, calculateSupplierPayableBreakdown, getCustomerInvoiceOutstandingTotalFromTransactions, getOutstandingBalance } from '../utils/helpers';
+import { calculateCustomerReceivableBreakdown, calculateSupplierPayableBreakdown, getCustomerInvoiceOutstandingTotalFromTransactions, getOutstandingBalance, getSupplierInvoiceOutstandingTotalFromPurchases } from '../utils/helpers';
 import { getStockBreakup } from '../utils/stock';
 import { formatPackLooseQuantity } from '../utils/quantity';
 
@@ -751,12 +751,24 @@ const Reports: React.FC<ReportsProps> = ({
             .filter((entry: any) => entry.type === 'payment' && entry.status !== 'cancelled')
             .map((entry: any) => ({ ...entry, debit: round2(Number(entry.credit || entry.debit || 0)), credit: 0 }));
 
-          return [...purchaseRows, ...supplierReturnRows, ...paymentRows];
+          const openingRaw = Number((party as any)?.opening_balance || (party as any)?.openingBalance || 0);
+          const openingRows = openingRaw !== 0 ? [{
+            id: `opening-${supplierId || supplierNameNormalized || 'supplier'}`,
+            date: startDate,
+            type: 'openingBalance',
+            description: 'Opening balance from supplier master',
+            debit: openingRaw < 0 ? round2(Math.abs(openingRaw)) : 0,
+            credit: openingRaw > 0 ? round2(openingRaw) : 0,
+            referenceInvoiceNumber: '-',
+            journalEntryNumber: 'OPENING',
+            status: 'active',
+          }] : [];
+
+          return [...openingRows, ...purchaseRows, ...supplierReturnRows, ...paymentRows];
         })() : [];
-        const hasSupplierTransactionalRows = !isCustomer && ledgerRows.some((entry: any) => ['purchase', 'payment', 'return', 'openingBalance'].includes(String(entry.type || '')) && String(entry.status || '').toLowerCase() !== 'cancelled');
         const baseLedgerRows = isCustomer
           ? (!ledgerRows.length ? [...generatedCustomerRows, ...generatedCustomerReturnRows] : ledgerRows)
-          : (hasSupplierTransactionalRows ? ledgerRows : supplierGeneratedRows);
+          : supplierGeneratedRows;
         reportHeaders = ['Section', 'Date', 'Voucher Type', 'Voucher No', 'Reference Bill No', 'Supplier Name', 'Narration', 'Debit', 'Credit', 'Running Balance', 'Balance Type', 'Status'];
         let supplierRunningBalance = 0;
         let customerRunningBalance = 0;
@@ -822,8 +834,11 @@ const Reports: React.FC<ReportsProps> = ({
           ? calculateCustomerReceivableBreakdown((party as Customer) || null, customerInvoiceOutstanding)
           : null;
 
+        const supplierInvoiceOutstanding = !isCustomer
+          ? getSupplierInvoiceOutstandingTotalFromPurchases((party as Distributor) || null, purchases)
+          : 0;
         const supplierBreakdown = !isCustomer
-          ? calculateSupplierPayableBreakdown((party as Distributor) || null)
+          ? calculateSupplierPayableBreakdown((party as Distributor) || null, supplierInvoiceOutstanding)
           : null;
         const openingBalance = round2(isCustomer ? Number(customerBreakdown?.openingBalanceSigned || 0) : Number(supplierBreakdown?.openingBalanceSigned || 0));
         const closingBalanceSigned = round2(isCustomer ? Number(customerBreakdown?.netOutstanding || 0) : Number(supplierBreakdown?.netOutstanding || 0));

@@ -89,6 +89,8 @@ interface StockValidationIssue {
     reason: 'insufficient' | 'no_stock' | 'batch_missing';
 }
 
+type PrescriptionAlertAction = 'proceed' | 'cancel';
+
 const uniformTextStyle = "text-sm font-bold tracking-tight uppercase leading-tight";
 const matrixRowTextStyle = "text-base font-bold tracking-tight uppercase leading-tight";
 const NO_BATCH_PLACEHOLDERS = new Set(['', 'N/A', 'NA', 'NEW-STOCK', 'NEW-BATCH', 'UNSET', 'NO BATCH', 'NO-BATCH']);
@@ -116,6 +118,7 @@ const parseExpiryForSort = (expiry?: string | null): number => {
 };
 
 const normalizeLookupToken = (value?: string | null): string => (value || '').trim().toLowerCase();
+const isValidTenDigitPhone = (value?: string | null): boolean => /^\d{10}$/.test(String(value || '').trim());
 
 const resolveSearchPriority = (item: InventoryItem, searchTerm: string): number => {
     const term = normalizeLookupToken(searchTerm);
@@ -469,6 +472,9 @@ const POS = forwardRef<any, POSProps>(({
     const [hoveredRowId, setHoveredRowId] = useState<string | null>(null);
     const [stockValidationIssues, setStockValidationIssues] = useState<StockValidationIssue[]>([]);
     const [isStockIssueModalOpen, setIsStockIssueModalOpen] = useState(false);
+    const [isPrescriptionAlertOpen, setIsPrescriptionAlertOpen] = useState(false);
+    const [prescriptionAlertShown, setPrescriptionAlertShown] = useState(false);
+    const [pendingPrescriptionItemId, setPendingPrescriptionItemId] = useState<string | null>(null);
 
     const activeRowIdRef = useRef<string | null>(null);
     const isProcessingBarcodeRef = useRef(false);
@@ -598,6 +604,17 @@ const POS = forwardRef<any, POSProps>(({
         openChallanExposure: effectiveOpenChallanExposure,
         moduleName: 'POS'
     }), [selectedCustomer, grandTotal, effectiveOpenChallanExposure]);
+
+    const hasPrescriptionItem = useMemo(() => cartItems.some((item) => {
+        const inventoryRow = inventory.find(inv => inv.id === item.inventoryItemId);
+        const inventoryCode = normalizeLookupToken(inventoryRow?.code);
+        const medicine = medicines.find((med) => {
+            if (med.id === item.inventoryItemId) return true;
+            const medCode = normalizeLookupToken(med.materialCode);
+            return !!inventoryCode && !!medCode && inventoryCode === medCode;
+        });
+        return medicine?.isPrescriptionRequired === true;
+    }), [cartItems, inventory, medicines]);
 
 
     const activeBillItem = useMemo(() => {
@@ -1010,6 +1027,49 @@ const POS = forwardRef<any, POSProps>(({
             return;
         }
 
+        if (hasPrescriptionItem) {
+            addNotification('This bill contains prescription medicines. Customer details are required to continue.', 'warning');
+            const organizationType = currentUser?.organization_type || 'Retail';
+            const normalizedName = (customerSearch || selectedCustomer?.name || '').trim();
+            const normalizedPhone = (customerPhone || selectedCustomer?.phone || '').trim();
+
+            if (organizationType === 'Retail') {
+                if (!normalizedName) {
+                    addNotification("Customer Name is required for prescription medicines. Please enter the customer's name to proceed.", 'error');
+                    setIsSaving(false);
+                    return;
+                }
+                if (!normalizedPhone) {
+                    addNotification('Customer Phone Number is required for prescription medicines. Please enter a valid phone number.', 'error');
+                    setIsSaving(false);
+                    return;
+                }
+                if (!isValidTenDigitPhone(normalizedPhone)) {
+                    addNotification('Please enter a valid 10-digit phone number for prescription medicines.', 'error');
+                    setIsSaving(false);
+                    return;
+                }
+            }
+
+            if (organizationType === 'Distributor') {
+                if (!selectedCustomer?.id) {
+                    addNotification('Customer selection is required for prescription medicines. Please select a customer from Customer Master.', 'error');
+                    setIsSaving(false);
+                    return;
+                }
+                if ((customerSearch || '').trim() !== (selectedCustomer.name || '').trim()) {
+                    addNotification('Manual customer entry is not allowed for prescription medicines. Please select a customer from the list.', 'error');
+                    setIsSaving(false);
+                    return;
+                }
+                if (!normalizedPhone) {
+                    addNotification('Customer phone number is missing. Please update the customer details in Customer Master.', 'error');
+                    setIsSaving(false);
+                    return;
+                }
+            }
+        }
+
         if (billCategory === 'Credit' && !selectedCustomer?.id) {
             addNotification('Customer selection is required for Credit bill.', 'error');
             setIsSaving(false);
@@ -1090,7 +1150,7 @@ const POS = forwardRef<any, POSProps>(({
         } finally {
             setIsSaving(false);
         }
-    }, [cartItems, totals, selectedCustomer, invoiceDate, configurations, isNonGst, isSaving, onSaveOrUpdateTransaction, transactionToEdit, currentUser, customerSearch, customerPhone, onPrintBill, addNotification, lumpsumDiscount, billCategory, referredBy, prescriptions, shouldPreventNegativeStock, inventory, roundOff, grandTotal, reservedVoucherNumber, nextVoucherNumberHint, reserveNextVoucherNumber, creditCheck, doctorId, narration, adjustment, getCustomerInvoiceOutstandingTotal, onCancel, fetchStats]);
+    }, [cartItems, totals, selectedCustomer, invoiceDate, configurations, isNonGst, isSaving, onSaveOrUpdateTransaction, transactionToEdit, currentUser, customerSearch, customerPhone, onPrintBill, addNotification, lumpsumDiscount, billCategory, referredBy, prescriptions, shouldPreventNegativeStock, inventory, roundOff, grandTotal, reservedVoucherNumber, nextVoucherNumberHint, reserveNextVoucherNumber, creditCheck, doctorId, narration, adjustment, getCustomerInvoiceOutstandingTotal, onCancel, fetchStats, hasPrescriptionItem]);
 
     const resetForm = useCallback(() => {
         setCartItems([]);
@@ -1108,6 +1168,9 @@ const POS = forwardRef<any, POSProps>(({
         setReservedVoucherNumber(null);
         setNextVoucherNumberHint(null);
         lastReservedType.current = null;
+        setPrescriptionAlertShown(false);
+        setIsPrescriptionAlertOpen(false);
+        setPendingPrescriptionItemId(null);
     }, []);
 
     useEffect(() => {
@@ -1654,6 +1717,7 @@ const POS = forwardRef<any, POSProps>(({
         };
 
         const newItem = normalizePackConversion(selectedItem);
+        const isPrescriptionItem = linkedMedicine?.isPrescriptionRequired === true;
 
         setCartItems(prev => {
             const index = prev.findIndex(p => p.id === activeRowIdRef.current);
@@ -1664,6 +1728,11 @@ const POS = forwardRef<any, POSProps>(({
             }
             return [...prev, newItem];
         });
+        if (isPrescriptionItem && !prescriptionAlertShown) {
+            setIsPrescriptionAlertOpen(true);
+            setPrescriptionAlertShown(true);
+            setPendingPrescriptionItemId(newItem.id);
+        }
 
         setSearchTerm('');
         setIsSearchModalOpen(false);
@@ -3080,6 +3149,43 @@ const POS = forwardRef<any, POSProps>(({
                 initialName={customerSearch.trim()}
                 initialPhone={customerPhone.trim()}
             />
+
+            <Modal
+                isOpen={isPrescriptionAlertOpen}
+                onClose={() => setIsPrescriptionAlertOpen(false)}
+                title="⚠️ Prescription Required"
+            >
+                <div className="p-4 space-y-3">
+                    <p className="text-xs font-semibold text-gray-800">
+                        This item requires a valid prescription. Please ensure prescription details are verified before billing.
+                    </p>
+                    <div className="text-[10px] font-bold uppercase text-gray-600">
+                        Prescription items require customer details as per compliance rules.
+                    </div>
+                    <div className="pt-2 flex justify-end gap-2">
+                        <button
+                            type="button"
+                            className="px-4 py-2 text-xs font-black uppercase border border-gray-300 text-gray-700"
+                            onClick={() => setIsPrescriptionAlertOpen(false)}
+                        >
+                            Proceed Anyway
+                        </button>
+                        <button
+                            type="button"
+                            className="px-4 py-2 text-xs font-black uppercase bg-red-600 text-white"
+                            onClick={() => {
+                                if (pendingPrescriptionItemId) {
+                                    setCartItems(prev => prev.filter(item => item.id !== pendingPrescriptionItemId));
+                                }
+                                setPendingPrescriptionItemId(null);
+                                setIsPrescriptionAlertOpen(false);
+                            }}
+                        >
+                            Cancel Item
+                        </button>
+                    </div>
+                </div>
+            </Modal>
 
             <Modal
                 isOpen={isDoctorQuickAddOpen}

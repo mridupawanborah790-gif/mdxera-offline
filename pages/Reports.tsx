@@ -215,11 +215,51 @@ const Reports: React.FC<ReportsProps> = ({
         break;
       case 'rxMedicineSalesReport': {
         reportHeaders = ['Bill Date', 'Sales Bill Number', 'Product Name', 'Batch', 'Qty', 'Rate', 'Taxable Amount', 'GST Amount', 'Bill Amount (With GST)', 'Without GST Amount', 'Customer Name', 'Phone Number', 'Address', 'Referred By', 'Bill Category', 'User / Operator', 'Bill Number', 'Doctor Name'];
+        const normalize = (value: unknown) => String(value ?? '')
+          .trim()
+          .toLowerCase()
+          .replace(/\s+/g, ' ');
+        const inventoryById = new Map(inventory.map(inv => [String(inv.id), inv]));
+        const inventoryByCode = new Map(
+          inventory
+            .filter(inv => String((inv as any).code ?? '').trim())
+            .map(inv => [String((inv as any).code).trim().toLowerCase(), inv] as const)
+        );
+        const inventoryBySku = new Map(
+          inventory
+            .filter(inv => String((inv as any).sku ?? '').trim())
+            .map(inv => [String((inv as any).sku).trim().toLowerCase(), inv] as const)
+        );
+        const inventoryByName = new Map(
+          inventory
+            .filter(inv => normalize(inv.name))
+            .map(inv => [normalize(inv.name), inv] as const)
+        );
+
         rows = completedSales.flatMap(tx => {
           return (tx.items || [])
             .filter(item => {
-              const linkedInventory = inventory.find(inv => inv.id === item.inventoryItemId);
-              return (linkedInventory as any)?.isPrescriptionRequired === true;
+              const rxSignals = [
+                (item as any).is_rx,
+                (item as any).rx_flag,
+                (item as any).isPrescriptionRequired,
+                (item as any).prescriptionRequired,
+              ];
+
+              const linkedInventory = inventoryById.get(String((item as any).inventoryItemId || ''))
+                || inventoryById.get(String((item as any).product_id || ''))
+                || inventoryById.get(String((item as any).material_id || ''))
+                || inventoryById.get(String((item as any).sku_id || ''))
+                || inventoryBySku.get(String((item as any).sku || '').trim().toLowerCase())
+                || inventoryByCode.get(String((item as any).itemCode || (item as any).code || '').trim().toLowerCase())
+                || inventoryByName.get(normalize((item as any).name));
+
+              const masterRxSignals = [
+                (linkedInventory as any)?.isPrescriptionRequired,
+                (linkedInventory as any)?.prescription_required,
+              ];
+
+              return [...rxSignals, ...masterRxSignals].some(value => value === true || value === 'true' || value === 1 || value === '1');
             })
             .map(item => {
               const qty = Number(item.quantity || 0) + Number(item.looseQuantity || 0);

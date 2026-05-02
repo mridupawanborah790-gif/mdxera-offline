@@ -34,6 +34,7 @@ const REPORT_LIST: ReportDefinition[] = [
   { id: 'salesRegister', name: 'Sales Register', group: 'Sales Reports' },
   { id: 'salesSummary', name: 'Sales Summary', group: 'Sales Reports' },
   { id: 'billWiseSales', name: 'Bill-wise Sales', group: 'Sales Reports' },
+  { id: 'rxMedicineSalesReport', name: 'RX Medicine Sales Report', group: 'Sales Reports' },
   { id: 'dateWiseSales', name: 'Date-wise Sales', group: 'Sales Reports' },
   { id: 'partyWiseSales', name: 'Party-wise Sales', group: 'Sales Reports' },
   { id: 'doctorWiseSales', name: 'Doctor-wise Sales', group: 'Sales Reports' },
@@ -212,6 +213,44 @@ const Reports: React.FC<ReportsProps> = ({
           'Final Bill Amount': round2(tx.total || 0),
         }));
         break;
+      case 'rxMedicineSalesReport': {
+        reportHeaders = ['Bill Date', 'Sales Bill Number', 'Product Name', 'Batch', 'Qty', 'Rate', 'Taxable Amount', 'GST Amount', 'Bill Amount (With GST)', 'Without GST Amount', 'Customer Name', 'Phone Number', 'Address', 'Referred By', 'Bill Category', 'User / Operator', 'Bill Number', 'Doctor Name'];
+        rows = completedSales.flatMap(tx => {
+          return (tx.items || [])
+            .filter(item => {
+              const linkedInventory = inventory.find(inv => inv.id === item.inventoryItemId);
+              return (linkedInventory as any)?.isPrescriptionRequired === true;
+            })
+            .map(item => {
+              const qty = Number(item.quantity || 0) + Number(item.looseQuantity || 0);
+              const rate = Number(item.rate ?? item.mrp ?? 0);
+              const taxableAmount = round2(Number(item.finalAmount ?? item.amount ?? rate * qty));
+              const gstAmount = round2(taxableAmount * (Number(item.gstPercent || 0) / 100));
+              const billAmount = round2(taxableAmount + gstAmount);
+              return {
+                'Bill Date': new Date(tx.date).toLocaleDateString('en-GB'),
+                'Sales Bill Number': tx.invoiceNumber || tx.id,
+                'Product Name': item.name || '-',
+                'Batch': item.batch || '-',
+                'Qty': round2(qty),
+                'Rate': round2(rate),
+                'Taxable Amount': taxableAmount,
+                'GST Amount': gstAmount,
+                'Bill Amount (With GST)': billAmount,
+                'Without GST Amount': taxableAmount,
+                'Customer Name': tx.customerName || '-',
+                'Phone Number': tx.customerPhone || '-',
+                'Address': tx.customerAddress || '-',
+                'Referred By': tx.referredBy || '-',
+                'Bill Category': tx.billType || 'regular',
+                'User / Operator': tx.billedByName || tx.user_id || '-',
+                'Bill Number': tx.invoiceNumber || tx.id,
+                'Doctor Name': tx.referredBy || '-',
+              };
+            });
+        });
+        break;
+      }
       case 'dateWiseSales': {
         reportHeaders = ['Date', 'Number of Bills', 'Gross Sales', 'Discount', 'GST', 'Net Sales'];
         const map = new Map<string, any>();
@@ -1288,7 +1327,9 @@ const Reports: React.FC<ReportsProps> = ({
 
           <div className="min-h-0 flex-1 overflow-auto">
             {filteredData.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-sm text-gray-500">No records found for selected period</div>
+              <div className="h-full flex items-center justify-center text-sm text-gray-500">
+                {activeReportId === 'rxMedicineSalesReport' ? 'No Prescription Medicine Sales Found For Selected Period' : 'No records found for selected period'}
+              </div>
             ) : (
               <table className="w-full text-[11px] border-collapse">
                 <thead className="sticky top-0 bg-gray-100 z-10">

@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS public.sales_bill (
     customer_name text NOT NULL,
     customer_id uuid, -- Links to public.customers.id
     customer_phone text,
+    customer_address text,
     referred_by text, -- Doctor/RMP Name
     
     -- Item Data
@@ -100,3 +101,4 @@ COMMENT ON COLUMN public.sales_bill.id IS 'Primary key. Stored as text to allow 
 COMMENT ON COLUMN public.sales_bill.items IS 'JSONB array of BillItem objects. Critical for reconstructing the bill without looking up historical product states.';
 
 NOTIFY pgrst, 'reload schema';
+COMMENT ON COLUMN public.sales_bill.customer_address IS 'Billing address captured at POS for this sale.';

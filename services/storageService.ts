@@ -220,7 +220,7 @@ const normalizeMaterialMasterType = (value: unknown): string | undefined => {
 
     const SALES_BILL_ALLOWED_FIELDS = [
         'id', 'invoiceNumber', 'organization_id', 'user_id', 'created_by_id', 'date',
-        'customerName', 'customerId', 'customerPhone', 'referredBy',
+        'customerName', 'customerId', 'customerPhone', 'customerAddress', 'referredBy',
         'items', 'itemCount',
         'subtotal', 'totalItemDiscount', 'totalGst', 'schemeDiscount', 'adjustment', 'narration', 'roundOff', 'total', 'amountReceived',
         'status', 'paymentMode', 'billType',

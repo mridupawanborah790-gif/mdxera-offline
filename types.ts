@@ -355,6 +355,7 @@ export interface Transaction {
     customerName: string;
     customerId?: string | null;
     customerPhone?: string;
+    customerAddress?: string;
     referredBy?: string;
     doctorId?: string | null;
     items: BillItem[];

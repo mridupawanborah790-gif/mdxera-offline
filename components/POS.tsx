@@ -2185,6 +2185,32 @@ const POS = forwardRef<any, POSProps>(({
         setIsDoctorPickerOpen(false);
     }, [handleReferredByChange]);
 
+    const handleUseTypedDoctorName = useCallback(() => {
+        const typedValue = doctorSearchTerm.trim();
+        if (!typedValue) return;
+        handleReferredByChange(typedValue);
+        setIsDoctorPickerOpen(false);
+    }, [doctorSearchTerm, handleReferredByChange]);
+
+    const handleAddTypedDoctorToMaster = useCallback(async () => {
+        if (!currentUser) return;
+        const typedValue = doctorSearchTerm.trim();
+        if (!typedValue) return;
+        const payload: DoctorMaster = {
+            id: crypto.randomUUID(),
+            organization_id: currentUser.organization_id,
+            doctorCode: '',
+            name: typedValue,
+            mobile: '',
+            specialization: '',
+            is_active: true,
+        };
+        await storage.saveData('doctor_master', payload, currentUser);
+        handleReferredByChange(payload.name, payload.id);
+        setIsDoctorPickerOpen(false);
+        addNotification('Doctor added to master and selected.', 'success');
+    }, [addNotification, currentUser, doctorSearchTerm, handleReferredByChange]);
+
     const handleQuickDoctorSave = async () => {
         if (!currentUser || !quickDoctorName.trim()) return;
         const payload: DoctorMaster = {
@@ -3276,7 +3302,11 @@ const POS = forwardRef<any, POSProps>(({
                             } else if (e.key === 'Enter') {
                                 e.preventDefault();
                                 const selectedDoctor = filteredDoctors[doctorHighlightedIndex];
-                                if (selectedDoctor) handleDoctorSelect(selectedDoctor);
+                                if (selectedDoctor) {
+                                    handleDoctorSelect(selectedDoctor);
+                                } else if (filteredDoctors.length === 0) {
+                                    handleUseTypedDoctorName();
+                                }
                             } else if (e.key === 'Escape') {
                                 e.preventDefault();
                                 setIsDoctorPickerOpen(false);
@@ -3311,8 +3341,31 @@ const POS = forwardRef<any, POSProps>(({
                                         </tr>
                                     )) : (
                                         <tr>
-                                            <td colSpan={4} className="px-3 py-6 text-center text-gray-500 font-semibold">
-                                                No active doctors found
+                                            <td colSpan={4} className="px-3 py-6 text-center text-gray-500">
+                                                <p className="font-semibold">No active doctors found</p>
+                                                {doctorSearchTerm.trim() && (
+                                                    <>
+                                                        <p className="mt-1 text-[11px] font-medium">
+                                                            Press ENTER to use "{doctorSearchTerm.trim()}"
+                                                        </p>
+                                                        <button
+                                                            type="button"
+                                                            className="mt-2 text-[11px] font-bold text-primary underline underline-offset-2"
+                                                            onClick={handleUseTypedDoctorName}
+                                                        >
+                                                            Use "{doctorSearchTerm.trim()}" as entered doctor
+                                                        </button>
+                                                        <div className="mt-2">
+                                                            <button
+                                                                type="button"
+                                                                className="text-[11px] font-bold text-green-700 underline underline-offset-2"
+                                                                onClick={() => void handleAddTypedDoctorToMaster()}
+                                                            >
+                                                                + Add "{doctorSearchTerm.trim()}" to Doctor Master
+                                                            </button>
+                                                        </div>
+                                                    </>
+                                                )}
                                             </td>
                                         </tr>
                                     )}

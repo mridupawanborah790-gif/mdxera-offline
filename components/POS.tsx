@@ -3342,38 +3342,24 @@ const POS = forwardRef<any, POSProps>(({
                                     )) : (
                                         <tr>
                                             <td colSpan={4} className="px-3 py-4 text-gray-500">
-                                                <div className="empty-state">
-                                                    <p className="font-semibold">No active doctors found</p>
+                                                <div className="doctor-empty">
+                                                    <div className="empty-text">No active doctors found</div>
                                                     {doctorSearchTerm.trim() && (
                                                         <>
-                                                            <div
-                                                                role="button"
-                                                                tabIndex={0}
-                                                                className="action-item use-doctor"
+                                                            <button
+                                                                type="button"
+                                                                className="btn-use-doctor"
                                                                 onClick={handleUseTypedDoctorName}
-                                                                onKeyDown={(e) => {
-                                                                    if (e.key === 'Enter' || e.key === ' ') {
-                                                                        e.preventDefault();
-                                                                        handleUseTypedDoctorName();
-                                                                    }
-                                                                }}
                                                             >
                                                                 👉 Use <b>{doctorSearchTerm.trim()}</b> as entered doctor
-                                                            </div>
-                                                            <div
-                                                                role="button"
-                                                                tabIndex={0}
-                                                                className="action-item add-doctor"
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                className="btn-add-doctor"
                                                                 onClick={() => void handleAddTypedDoctorToMaster()}
-                                                                onKeyDown={(e) => {
-                                                                    if (e.key === 'Enter' || e.key === ' ') {
-                                                                        e.preventDefault();
-                                                                        void handleAddTypedDoctorToMaster();
-                                                                    }
-                                                                }}
                                                             >
                                                                 ➕ Add "{doctorSearchTerm.trim()}" to Doctor Master
-                                                            </div>
+                                                            </button>
                                                         </>
                                                     )}
                                                 </div>

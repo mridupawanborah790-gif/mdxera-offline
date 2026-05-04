@@ -9,6 +9,7 @@ import GftTemplate from './invoice-templates/GftTemplate';
 import AbhigyanTemplate from './invoice-templates/AbhigyanTemplate';
 import MediThreeTemplate from './invoice-templates/MediThreeTemplate';
 import ThermalTemplate from './invoice-templates/ThermalTemplate';
+import Invoice7Template from './invoice-templates/Invoice7Template';
 
 // Declare html2pdf for TypeScript since it's loaded via CDN
 declare const html2pdf: any;
@@ -22,7 +23,7 @@ interface PrintBillModalProps {
 }
 
 const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, medicines: _medicines }) => {
-  const [template, setTemplate] = useState<'medi-1' | 'marg' | 'gft' | 'abhigyan' | 'medi-3' | 'thermal'>('marg');
+  const [template, setTemplate] = useState<'medi-1' | 'marg' | 'gft' | 'abhigyan' | 'medi-3' | 'thermal' | 'invoice-7'>('marg');
   const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('landscape');
   const [isSharing, setIsSharing] = useState(false);
 
@@ -67,8 +68,9 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, 
   const effectiveOrientation: 'portrait' | 'landscape' = orientation;
   const isLandscape = effectiveOrientation === 'landscape';
   const isThermal = template === 'thermal';
-  const printWidth = isThermal ? '76mm' : (isLandscape ? '210mm' : '148mm');
-  const printMinHeight = isThermal ? 'auto' : (template === 'medi-3' ? 'auto' : (isLandscape ? '148mm' : '210mm'));
+  const isInvoice7 = template === 'invoice-7';
+  const printWidth = isInvoice7 ? '100mm' : (isThermal ? '76mm' : (isLandscape ? '210mm' : '148mm'));
+  const printMinHeight = (isThermal || isInvoice7) ? 'auto' : (template === 'medi-3' ? 'auto' : (isLandscape ? '148mm' : '210mm'));
     
   if (!isOpen || !bill) return null;
 
@@ -124,8 +126,8 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, 
         html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
         jsPDF: {
           unit: 'mm',
-          format: isThermal ? [thermalContentHeightMm, 76] : 'a5',
-          orientation: isThermal ? 'portrait' : effectiveOrientation
+          format: isInvoice7 ? [150, 100] : (isThermal ? [thermalContentHeightMm, 76] : 'a5'),
+          orientation: (isThermal || isInvoice7) ? 'portrait' : effectiveOrientation
         }
     };
 
@@ -159,6 +161,7 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, 
     { id: 'abhigyan', name: 'Invoice-4' },
     { id: 'medi-3', name: 'Invoice-5' },
     { id: 'thermal', name: 'Invoice-6' },
+    { id: 'invoice-7', name: 'Invoice-7' },
   ];
 
   const renderTemplate = () => {
@@ -169,6 +172,7 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, 
         case 'abhigyan': return <AbhigyanTemplate bill={bill} />;
         case 'medi-3': return <MediThreeTemplate bill={bill} orientation={effectiveOrientation} />;
         case 'thermal': return <ThermalTemplate bill={bill} />;
+        case 'invoice-7': return <Invoice7Template bill={bill} />;
         default: return <MargTemplate bill={bill} orientation={effectiveOrientation} />;
     }
   };
@@ -188,14 +192,14 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, 
                 <span className="text-[10px] font-bold text-gray-400 uppercase">Orientation:</span>
                 <button 
                   onClick={() => setOrientation('portrait')}
-                  disabled={isThermal}
+                  disabled={isThermal || isInvoice7}
                   className={`px-2 py-0.5 text-xs rounded border transition-all ${effectiveOrientation === 'portrait' ? 'bg-primary text-white border-primary' : 'bg-gray-100 text-gray-600 border-gray-200'}`}
                 >
                   Portrait
                 </button>
                 <button 
                   onClick={() => setOrientation('landscape')}
-                  disabled={isThermal}
+                  disabled={isThermal || isInvoice7}
                   className={`px-2 py-0.5 text-xs rounded border transition-all ${effectiveOrientation === 'landscape' ? 'bg-primary text-white border-primary' : 'bg-gray-100 text-gray-600 border-gray-200'}`}
                 >
                   Landscape
@@ -223,7 +227,7 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, 
         <div className="flex-1 overflow-y-auto bg-gray-100 p-4 print:p-0 print:bg-white print:overflow-visible">
             <div
               id="print-area"
-              className={`invoice-container p-0 text-black bg-white shadow-lg mx-auto overflow-visible print:shadow-none print:mx-0 ${isThermal ? 'w-[76mm]' : (isLandscape ? 'w-[210mm] min-h-[148mm]' : 'w-[148mm] min-h-[210mm]')} ${template === 'medi-3' || isThermal ? 'h-auto overflow-visible' : ''}`}
+              className={`invoice-container p-0 text-black bg-white shadow-lg mx-auto overflow-visible print:shadow-none print:mx-0 ${isInvoice7 ? 'w-[100mm] max-w-[100mm]' : (isThermal ? 'w-[76mm]' : (isLandscape ? 'w-[210mm] min-h-[148mm]' : 'w-[148mm] min-h-[210mm]'))} ${template === 'medi-3' || isThermal || isInvoice7 ? 'h-auto overflow-visible' : ''}`}
             >
                 {renderTemplate()}
             </div>
@@ -255,7 +259,7 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, 
           .invoice-footer, .amount-in-words, .bank-details { page-break-inside: avoid; break-inside: avoid; }
           @page {
             margin: 0;
-            size: ${isThermal ? '76mm auto' : `A5 ${effectiveOrientation}`};
+            size: ${isInvoice7 ? '100mm 150mm' : (isThermal ? '76mm auto' : `A5 ${effectiveOrientation}`)};
           }
 
           html, body {

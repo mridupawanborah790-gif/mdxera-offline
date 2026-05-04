@@ -20,7 +20,7 @@ type BillItem = {
 const MM_TO_PX = 3.7795275591;
 const PAGE_HEIGHT_MM = 150;
 const PAGE_PADDING_MM = 4;
-const PAGE_HEIGHT_PX = PAGE_HEIGHT_MM * MM_TO_PX;
+const PAGE_HEIGHT_PX = 566; // 150mm thermal page height baseline used for pagination
 const VERTICAL_PADDING_PX = PAGE_PADDING_MM * 2 * MM_TO_PX;
 
 // Fixed sections for smart pagination (header/footer).
@@ -133,25 +133,25 @@ const Invoice7Template: React.FC<TemplateProps> = ({ bill }) => {
       cursor += rowsWithoutFooter;
     }
 
-    while (pages.length > 1 && pages[pages.length - 1].length < rowsWithFooter) {
-      const last = pages[pages.length - 1];
-      const prev = pages[pages.length - 2];
-      if (prev.length <= 1) break;
-      last.unshift(prev.pop() as BillItem);
-    }
-
-    if (pages[0]?.length === 0) {
+    if (pages.length > 0 && pages[0].length === 0) {
       pages.shift();
     }
 
+    const renderedItems = pages.flat().length;
+    if (renderedItems !== allItems.length) {
+      console.error('Pagination error: Missing items', { expected: allItems.length, renderedItems });
+    }
+
     console.log({
+      totalItems: allItems.length,
+      rowsPerPage: rowsWithoutFooter,
+      totalPages: pages.length,
+      renderedItems,
       pageHeight: PAGE_HEIGHT_PX,
       headerHeight: headerPx,
       footerHeight: footerPx,
       rowHeight: rowHeightPx,
-      rowsPerPage: rowsWithoutFooter,
-      totalItems: allItems.length,
-      totalPages: pages.length,
+      rowsWithFooter,
     });
 
     return pages;
@@ -237,7 +237,7 @@ const Invoice7Template: React.FC<TemplateProps> = ({ bill }) => {
                 <tbody>
                   {pageItems.map((item: any) => (
                     item.__empty ? null : (
-                      <tr key={item.id} className="align-top">
+                      <tr key={item.id} className="item-row align-top">
                         <td className="py-0.5 text-center">{formatPackLooseQuantity(item.quantity, item.looseQuantity, item.freeQuantity)}</td>
                         <td className="py-0.5 pr-1 break-words">
                           <div className="font-semibold">{item.name}</div>

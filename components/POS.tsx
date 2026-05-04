@@ -3316,7 +3316,7 @@ const POS = forwardRef<any, POSProps>(({
                         className="h-9 w-full border border-gray-300 px-3 text-xs font-semibold outline-none focus:ring-2 focus:ring-blue-200"
                     />
                     <div className="mt-3 border border-gray-200 rounded shadow-sm overflow-hidden flex-1 min-h-0">
-                        <div className="overflow-auto h-full">
+                        <div className="overflow-auto h-full popup-content">
                             <table className="w-full text-xs">
                                 <thead className="sticky top-0 bg-gray-50 z-10">
                                     <tr className="text-left text-[11px] font-bold text-gray-600">
@@ -3341,31 +3341,42 @@ const POS = forwardRef<any, POSProps>(({
                                         </tr>
                                     )) : (
                                         <tr>
-                                            <td colSpan={4} className="px-3 py-6 text-center text-gray-500">
-                                                <p className="font-semibold">No active doctors found</p>
-                                                {doctorSearchTerm.trim() && (
-                                                    <>
-                                                        <p className="mt-1 text-[11px] font-medium">
-                                                            Press ENTER to use "{doctorSearchTerm.trim()}"
-                                                        </p>
-                                                        <button
-                                                            type="button"
-                                                            className="mt-2 text-[11px] font-bold text-primary underline underline-offset-2"
-                                                            onClick={handleUseTypedDoctorName}
-                                                        >
-                                                            Use "{doctorSearchTerm.trim()}" as entered doctor
-                                                        </button>
-                                                        <div className="mt-2">
-                                                            <button
-                                                                type="button"
-                                                                className="text-[11px] font-bold text-green-700 underline underline-offset-2"
-                                                                onClick={() => void handleAddTypedDoctorToMaster()}
+                                            <td colSpan={4} className="px-3 py-4 text-gray-500">
+                                                <div className="empty-state">
+                                                    <p className="font-semibold">No active doctors found</p>
+                                                    {doctorSearchTerm.trim() && (
+                                                        <>
+                                                            <div
+                                                                role="button"
+                                                                tabIndex={0}
+                                                                className="action-item use-doctor"
+                                                                onClick={handleUseTypedDoctorName}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter' || e.key === ' ') {
+                                                                        e.preventDefault();
+                                                                        handleUseTypedDoctorName();
+                                                                    }
+                                                                }}
                                                             >
-                                                                + Add "{doctorSearchTerm.trim()}" to Doctor Master
-                                                            </button>
-                                                        </div>
-                                                    </>
-                                                )}
+                                                                👉 Use <b>{doctorSearchTerm.trim()}</b> as entered doctor
+                                                            </div>
+                                                            <div
+                                                                role="button"
+                                                                tabIndex={0}
+                                                                className="action-item add-doctor"
+                                                                onClick={() => void handleAddTypedDoctorToMaster()}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter' || e.key === ' ') {
+                                                                        e.preventDefault();
+                                                                        void handleAddTypedDoctorToMaster();
+                                                                    }
+                                                                }}
+                                                            >
+                                                                ➕ Add "{doctorSearchTerm.trim()}" to Doctor Master
+                                                            </div>
+                                                        </>
+                                                    )}
+                                                </div>
                                             </td>
                                         </tr>
                                     )}

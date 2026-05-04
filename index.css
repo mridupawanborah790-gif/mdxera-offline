@@ -44,3 +44,34 @@
   from { transform: scale(0.95); }
   to { transform: scale(1); }
 }
+
+.empty-state {
+  padding: 12px;
+  text-align: center;
+}
+
+.action-item {
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.use-doctor {
+  background: #f5f5f5;
+}
+
+.add-doctor {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.action-item:hover {
+  background: #d0f0d0;
+}
+
+.popup-content {
+  max-height: 300px;
+  overflow-y: auto;
+}

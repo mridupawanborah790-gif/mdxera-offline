@@ -158,25 +158,48 @@ const Invoice7Template: React.FC<TemplateProps> = ({ bill }) => {
   }, [billDetails.items, layoutMetrics]);
 
   return (
-    <div className="invoice-7 w-[100mm] max-w-[100mm] text-black font-mono" style={{ ['--invoice-font' as string]: dynamicFontSize, fontSize: 'var(--invoice-font, 9px)' }}>
+    <div className="invoice-7 invoice-wrapper invoice-print-root w-[100mm] max-w-[100mm] text-black font-mono" style={{ ['--invoice-font' as string]: dynamicFontSize, fontSize: 'var(--invoice-font, 9px)' }}>
       <style>{`
         @media print {
           @page { size: 100mm 150mm; margin: 4mm; }
-          body { margin: 0; }
-          .invoice-7 { width: 100mm !important; max-width: 100mm !important; }
+          html, body {
+            height: auto !important;
+            overflow: visible !important;
+          }
+          body {
+            margin: 0;
+            padding: 0;
+          }
+          .invoice-wrapper {
+            height: auto !important;
+            min-height: auto !important;
+            transform: none !important;
+          }
+          .invoice-print-root {
+            width: 100mm;
+            margin: 0 auto;
+          }
           .invoice-page {
             width: 100mm;
-            height: 150mm;
+            min-height: 150mm;
+            padding: 4mm;
+            box-sizing: border-box;
             display: flex;
             flex-direction: column;
             justify-content: flex-start;
             page-break-after: always;
+            page-break-before: auto;
             page-break-inside: avoid;
             break-inside: avoid;
-            overflow: hidden;
+          }
+          .invoice-page:first-child {
+            page-break-before: auto !important;
+          }
+          .invoice-page:empty {
+            display: none !important;
           }
           .header { flex: 0 0 auto; }
-          .items { flex: 1 1 auto; overflow: hidden; }
+          .items { flex: 1 1 auto; }
           .footer { flex: 0 0 auto; }
           .invoice-page:last-child { page-break-after: auto; }
         }
@@ -197,7 +220,7 @@ const Invoice7Template: React.FC<TemplateProps> = ({ bill }) => {
         const isLastPage = pageIndex === paginatedItems.length - 1;
 
         return (
-          <div key={`invoice-7-page-${pageIndex}`} className="invoice-page px-[4mm] py-[4mm] leading-[1.2]">
+          <div key={`invoice-7-page-${pageIndex}`} className="invoice-page leading-[1.2]">
             <div className="header">
               <div className="text-center mb-1">
                 <h1 className="text-[10px] font-bold uppercase tracking-tight">{bill.pharmacy.pharmacy_name}</h1>

@@ -345,24 +345,18 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, 
           }
 
           body * {
-            display: none !important;
+            visibility: hidden !important;
           }
 
-
-          #print-bill-modal-container,
-          #print-bill-modal-container > div,
-          #print-area {
-            display: block !important;
-          }
-
-          .invoice-6-receipt,
-          .invoice-6-receipt * {
-            display: block !important;
+          #invoice-6-print-area,
+          #invoice-6-print-area * {
             visibility: visible !important;
           }
 
-          .invoice-6-receipt {
-            position: static !important;
+          #invoice-6-print-area {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
             width: 80mm !important;
             max-width: 80mm !important;
             height: auto !important;
@@ -374,6 +368,7 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, 
             break-before: avoid !important;
             break-after: avoid !important;
             overflow: visible !important;
+            background: #fff !important;
           }
           ` : ''}
           #print-bill-modal-container,

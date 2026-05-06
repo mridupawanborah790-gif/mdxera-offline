@@ -97,7 +97,7 @@ const ThermalTemplate: React.FC<TemplateProps> = ({ bill }) => {
   }, [bill, isNonGst, isIncludingDiscountMode]);
 
   return (
-    <div className="w-[76mm] max-w-[76mm] text-black font-mono text-[10px] leading-tight px-1 py-1">
+    <div className="invoice-6-receipt w-[76mm] max-w-[76mm] text-black font-mono text-[10px] leading-tight px-1 py-1">
       <div className="text-center mb-1">
         <h1 className="text-sm font-bold uppercase tracking-tight">{bill.pharmacy.pharmacy_name}</h1>
         <p className="text-[9px] leading-snug whitespace-pre-line">{bill.pharmacy.address}</p>

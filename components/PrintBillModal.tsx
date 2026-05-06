@@ -304,17 +304,13 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, 
 
           #print-area {
             width: ${printWidth} !important;
-            min-height: ${printMinHeight} !important;
+            min-height: ${isThermal ? '0' : printMinHeight} !important;
             height: auto !important;
             box-shadow: none !important;
             margin: 0 !important;
             padding: 0 !important;
             overflow: visible !important;
             visibility: visible !important;
-            page-break-before: auto !important;
-            page-break-after: auto !important;
-            break-before: auto !important;
-            break-after: auto !important;
           }
 
           #print-area,
@@ -332,6 +328,44 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, 
             display: none !important;
           }
 
+
+          ${isThermal ? `
+          @page {
+            size: 80mm auto;
+            margin: 0;
+          }
+
+          html, body {
+            width: 80mm !important;
+            height: auto !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: visible !important;
+          }
+
+          .invoice-6-receipt,
+          .invoice-6-receipt * {
+            visibility: visible !important;
+          }
+
+          .invoice-6-receipt {
+            display: block !important;
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 80mm !important;
+            max-width: 80mm !important;
+            height: auto !important;
+            min-height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            page-break-before: avoid !important;
+            page-break-after: avoid !important;
+            break-before: avoid !important;
+            break-after: avoid !important;
+            overflow: visible !important;
+          }
+          ` : ''}
           #print-bill-modal-container,
           #print-bill-modal-container * {
             -webkit-print-color-adjust: exact !important;

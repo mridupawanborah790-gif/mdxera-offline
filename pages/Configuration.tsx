@@ -115,6 +115,28 @@ const buildNumberPreview = (cfg: Partial<InvoiceNumberConfig>, number: number) =
     return `${prefix}${padded}${cfg.useFiscalYear ? `-${fy}` : ''}`;
 };
 
+const FY_REGEX = /^(\d{4})-(\d{4})$/;
+const FISCAL_YEAR_ERROR_MESSAGE = 'Invalid fiscal year. Please enter fiscal year in YYYY-YYYY format or select valid start and end dates.';
+
+const toFiscalYearFromDates = (startDate?: string, endDate?: string) => {
+    if (!startDate || !endDate) return null;
+    if (endDate <= startDate) return null;
+    return `${startDate.slice(0, 4)}-${endDate.slice(0, 4)}`;
+};
+
+const toDatesFromFiscalYear = (fiscalYear?: string) => {
+    const match = FY_REGEX.exec((fiscalYear || '').trim());
+    if (!match) return null;
+    const startYear = Number(match[1]);
+    const endYear = Number(match[2]);
+    if (endYear !== startYear + 1) return null;
+    return {
+        fiscalYearStartDate: `${startYear}-04-01`,
+        fiscalYearEndDate: `${endYear}-03-31`,
+        currentFiscalYear: `${startYear}-${endYear}`,
+    };
+};
+
 function renderVoucherSeriesInput(label: string, key: keyof AppConfigurations, configs: AppConfigurations, onChange: (section: keyof AppConfigurations, field: string, value: any) => void, liveSequences: Record<string, { currentNumber: number, documentNumber: string }>, isLoadingLive: boolean) {
     const merged = { ...getVoucherSchemeDefaults(), ...(configs[key] as InvoiceNumberConfig || {}) };
     const systemFy = getFinancialYearLabel();
@@ -490,6 +512,22 @@ const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
 
                 if (isEnableNegativeStock) {
                     updatedSectionData.strictStock = !value;
+                }
+            }
+
+            if (section === 'fiscalYearConfig') {
+                if (field === 'currentFiscalYear') {
+                    const derivedDates = toDatesFromFiscalYear(String(value || '').trim());
+                    if (derivedDates) {
+                        updatedSectionData = { ...updatedSectionData, ...derivedDates };
+                    }
+                }
+
+                if (field === 'fiscalYearStartDate' || field === 'fiscalYearEndDate') {
+                    const derivedFiscalYear = toFiscalYearFromDates(updatedSectionData.fiscalYearStartDate, updatedSectionData.fiscalYearEndDate);
+                    if (derivedFiscalYear) {
+                        updatedSectionData.currentFiscalYear = derivedFiscalYear;
+                    }
                 }
             }
             
@@ -1528,7 +1566,27 @@ const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
                                     masterShortcutOrder: sanitizedOrder 
                                 } as AppConfigurations);
 
-                                onUpdateConfigurations(normalizeStockHandlingConfig(normalizedConfigs));
+                                const fyConfig = normalizedConfigs.fiscalYearConfig || {};
+                                const derivedFiscalYear = toFiscalYearFromDates(fyConfig.fiscalYearStartDate, fyConfig.fiscalYearEndDate);
+                                const isDatesValid = !!derivedFiscalYear;
+                                const isCurrentYearValid = !!toDatesFromFiscalYear(fyConfig.currentFiscalYear);
+
+                                if (!isDatesValid || !isCurrentYearValid) {
+                                    addNotification(FISCAL_YEAR_ERROR_MESSAGE, 'error');
+                                    return;
+                                }
+
+                                const parsedFiscalYearDates = toDatesFromFiscalYear(fyConfig.currentFiscalYear)!;
+                                const syncedFiscalYearConfig = {
+                                    ...fyConfig,
+                                    ...parsedFiscalYearDates,
+                                    currentFiscalYear: derivedFiscalYear
+                                };
+
+                                onUpdateConfigurations(normalizeStockHandlingConfig({
+                                    ...normalizedConfigs,
+                                    fiscalYearConfig: syncedFiscalYearConfig
+                                }));
                                     addNotification('Accepted Changes and sanitized shortcut list.', 'success');
                             }} className="px-16 py-4 tally-button-primary shadow-2xl uppercase text-[11px] font-black tracking-[0.3em] active:scale-95">Accept (Enter)</button>
                         </div>

@@ -6,7 +6,7 @@ export const getDefaultFiscalYearWindow = (date = new Date()) => {
   const startYear = month >= 4 ? year : year - 1;
   const start = `${startYear}-04-01`;
   const end = `${startYear + 1}-03-31`;
-  return { start, end, label: `${startYear}-${startYear + 1}` };
+  return { start, end, label: `${startYear}` };
 };
 
 export const resolveFiscalYearConfig = (config?: AppConfigurations) => {

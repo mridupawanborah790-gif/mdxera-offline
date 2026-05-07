@@ -115,25 +115,23 @@ const buildNumberPreview = (cfg: Partial<InvoiceNumberConfig>, number: number) =
     return `${prefix}${padded}${cfg.useFiscalYear ? `-${fy}` : ''}`;
 };
 
-const FY_REGEX = /^(\d{4})-(\d{4})$/;
-const FISCAL_YEAR_ERROR_MESSAGE = 'Invalid fiscal year. Please enter fiscal year in YYYY-YYYY format or select valid start and end dates.';
+const FY_REGEX = /^(\d{4})$/;
+const FISCAL_YEAR_ERROR_MESSAGE = 'Invalid fiscal year. Please enter only starting fiscal year in YYYY format.';
 
 const toFiscalYearFromDates = (startDate?: string, endDate?: string) => {
     if (!startDate || !endDate) return null;
     if (endDate <= startDate) return null;
-    return `${startDate.slice(0, 4)}-${endDate.slice(0, 4)}`;
+    return `${startDate.slice(0, 4)}`;
 };
 
 const toDatesFromFiscalYear = (fiscalYear?: string) => {
     const match = FY_REGEX.exec((fiscalYear || '').trim());
     if (!match) return null;
     const startYear = Number(match[1]);
-    const endYear = Number(match[2]);
-    if (endYear !== startYear + 1) return null;
     return {
         fiscalYearStartDate: `${startYear}-04-01`,
-        fiscalYearEndDate: `${endYear}-03-31`,
-        currentFiscalYear: `${startYear}-${endYear}`,
+        fiscalYearEndDate: `${startYear + 1}-03-31`,
+        currentFiscalYear: `${startYear}`,
     };
 };
 
@@ -1007,7 +1005,7 @@ const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Fiscal Year Start Date</label><input type="date" value={localConfigs.fiscalYearConfig?.fiscalYearStartDate || ''} onChange={e => handleConfigChange('fiscalYearConfig', 'fiscalYearStartDate', e.target.value)} className="w-full tally-input !text-sm"/></div>
                                             <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Fiscal Year End Date</label><input type="date" value={localConfigs.fiscalYearConfig?.fiscalYearEndDate || ''} onChange={e => handleConfigChange('fiscalYearConfig', 'fiscalYearEndDate', e.target.value)} className="w-full tally-input !text-sm"/></div>
-                                            <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Current Fiscal Year</label><input type="text" value={localConfigs.fiscalYearConfig?.currentFiscalYear || ''} onChange={e => handleConfigChange('fiscalYearConfig', 'currentFiscalYear', e.target.value)} placeholder="2024-2025" className="w-full tally-input !text-sm"/></div>
+                                            <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Current Fiscal Year</label><input type="text" value={localConfigs.fiscalYearConfig?.currentFiscalYear || ''} onChange={e => handleConfigChange('fiscalYearConfig', 'currentFiscalYear', e.target.value)} placeholder="2026" className="w-full tally-input !text-sm"/></div>
                                             <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Voucher Numbering Mode</label><select value={localConfigs.fiscalYearConfig?.voucherNumberingMode || 'reset'} onChange={e => handleConfigChange('fiscalYearConfig', 'voucherNumberingMode', e.target.value)} className="w-full tally-input !text-sm"><option value="reset">Reset each fiscal year</option><option value="continue">Continue sequence</option></select></div>
                                         </div>
                                         <Toggle label="Auto Fiscal Year Detection" enabled={localConfigs.fiscalYearConfig?.autoFiscalYearDetection ?? true} setEnabled={(v) => handleConfigChange('fiscalYearConfig', 'autoFiscalYearDetection', v)} />

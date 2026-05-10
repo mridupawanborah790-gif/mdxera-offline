@@ -71,6 +71,8 @@ const REPORT_LIST: ReportDefinition[] = [
   { id: 'stockMovementSummary', name: 'Stock Movement Summary', group: 'Inventory Reports' },
 
   { id: 'ledgerReport', name: 'Account Ledger', group: 'Accounting Reports' },
+  { id: 'accountLedgerCustomer', name: 'Account Ledger for Customer', group: 'Accounting Reports' },
+  { id: 'accountLedgerSupplier', name: 'Account Ledger for Supplier', group: 'Accounting Reports' },
   { id: 'dayBook', name: 'Day Book', group: 'Accounting Reports' },
   { id: 'outstandingReceivables', name: 'Outstanding Receivables', group: 'Accounting Reports' },
   { id: 'outstandingPayables', name: 'Outstanding Payables', group: 'Accounting Reports' },
@@ -858,8 +860,10 @@ const Reports: React.FC<ReportsProps> = ({
         }).filter(r => r['Balance Outstanding'] > 0);
         break;
       case 'customerPartyWiseFullStatement':
-      case 'supplierPartyWiseFullStatement': {
-        const isCustomer = reportId === 'customerPartyWiseFullStatement';
+      case 'supplierPartyWiseFullStatement':
+      case 'accountLedgerCustomer':
+      case 'accountLedgerSupplier': {
+        const isCustomer = reportId === 'customerPartyWiseFullStatement' || reportId === 'accountLedgerCustomer';
         const party = isCustomer ? customers.find(c => c.id === selectedPartyId) : distributors.find(d => d.id === selectedPartyId);
         const partyName = party?.name || 'Selected Party';
         title = `${title} - ${partyName}`;
@@ -998,7 +1002,7 @@ const Reports: React.FC<ReportsProps> = ({
         const baseLedgerRows = isCustomer
           ? (!ledgerRows.length ? [...generatedCustomerRows, ...generatedCustomerReturnRows] : ledgerRows)
           : supplierGeneratedRows;
-        reportHeaders = ['Section', 'Date', 'Voucher Type', 'Voucher No', 'Reference Bill No', 'Supplier Name', 'Payment Mode', 'Bank/Cash Account', 'Narration', 'Debit', 'Credit', 'Adjusted Amount', 'Unadjusted Amount', 'Running Balance', 'Balance Type', 'Status'];
+        reportHeaders = ['Section', 'Date', 'Ref. Type', 'Voucher No', 'Reference Bill No', isCustomer ? 'Customer Name' : 'Supplier Name', 'Payment Mode', 'Bank/Cash Account', 'Description/Narration', 'Debit', 'Credit', 'Running Balance', 'Balance Type', 'Adjusted Amount', 'Unadjusted Amount', 'Status'];
         let supplierRunningBalance = 0;
         let customerRunningBalance = 0;
         const sortedLedgerRows = [...baseLedgerRows].sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -1015,13 +1019,13 @@ const Reports: React.FC<ReportsProps> = ({
           return {
             'Section': 'Ledger Statement',
             'Date': new Date(entry.date).toLocaleDateString('en-GB'),
-            'Voucher Type': entry.type === 'sale' ? 'Sales Invoice' : entry.type === 'purchase' ? 'Purchase Invoice' : entry.type === 'return' ? (isCustomer ? 'Credit Note / Sales Return' : 'Debit Note / Purchase Return') : entry.type === 'openingBalance' ? 'Opening Balance' : (isCustomer ? 'Receipt / Payment' : 'Payment / Voucher'),
+            'Ref. Type': entry.type === 'sale' ? 'Sales Invoice' : entry.type === 'purchase' ? 'Purchase Invoice' : entry.type === 'return' ? (isCustomer ? 'Credit Note / Sales Return' : 'Debit Note / Purchase Return') : entry.type === 'openingBalance' ? 'Opening Balance' : (isCustomer ? 'Receipt / Payment' : 'Payment / Voucher'),
             'Voucher No': entry.journalEntryNumber || entry.id,
             'Reference Bill No': entry.referenceInvoiceNumber || '-',
-            'Supplier Name': entry.supplierName || partyName,
+            [isCustomer ? 'Customer Name' : 'Supplier Name']: entry.supplierName || partyName,
             'Payment Mode': entry.type === 'payment' ? (entry.paymentMode || '-') : '-',
             'Bank/Cash Account': entry.type === 'payment' ? (entry.bankName || 'Cash') : '-',
-            'Narration': entry.description || '-',
+            'Description/Narration': entry.description || '-',
             'Debit': displayDebit,
             'Credit': displayCredit,
             'Adjusted Amount': entry.type === 'payment' ? round2(Number(entry.adjustedAmount || 0)) : 0,
@@ -1036,11 +1040,11 @@ const Reports: React.FC<ReportsProps> = ({
           return {
             'Section': 'Bill-wise Outstanding',
             'Date': new Date(entry.date).toLocaleDateString('en-GB'),
-            'Voucher Type': isCustomer ? 'Sales Invoice' : 'Purchase Invoice',
+            'Ref. Type': isCustomer ? 'Sales Invoice' : 'Purchase Invoice',
             'Voucher No': entry.journalEntryNumber || entry.id,
             'Reference Bill No': entry.referenceInvoiceNumber || '-',
-            'Narration': `Bill Amount: ${round2(billAmount)} | Paid/Adjusted: 0 | Outstanding: ${round2(Math.max(billAmount, 0))} | Due Days: ${Math.max(0, Math.ceil((new Date().getTime() - new Date(entry.date).getTime()) / (1000 * 60 * 60 * 24)))}`,
-            'Supplier Name': partyName, 'Payment Mode': '-', 'Bank/Cash Account': '-', 'Debit': 0, 'Credit': 0, 'Adjusted Amount': 0, 'Unadjusted Amount': 0, 'Running Balance': 0, 'Balance Type': '-', 'Status': entry.status || 'active',
+            'Description/Narration': `Bill Amount: ${round2(billAmount)} | Paid/Adjusted: 0 | Outstanding: ${round2(Math.max(billAmount, 0))} | Due Days: ${Math.max(0, Math.ceil((new Date().getTime() - new Date(entry.date).getTime()) / (1000 * 60 * 60 * 24)))}`,
+            [isCustomer ? 'Customer Name' : 'Supplier Name']: partyName, 'Payment Mode': '-', 'Bank/Cash Account': '-', 'Debit': 0, 'Credit': 0, 'Adjusted Amount': 0, 'Unadjusted Amount': 0, 'Running Balance': 0, 'Balance Type': '-', 'Status': entry.status || 'active',
           };
         });
         const paymentRows = baseLedgerRows.filter((entry: any) => entry.type === 'payment' && String(entry.status || '').toLowerCase() !== 'cancelled').map((entry: any) => {
@@ -1049,11 +1053,11 @@ const Reports: React.FC<ReportsProps> = ({
           return {
             'Section': 'Payment History',
             'Date': new Date(entry.date).toLocaleDateString('en-GB'),
-            'Voucher Type': isCustomer ? 'Receipt' : 'Payment',
+            'Ref. Type': isCustomer ? 'Receipt' : 'Payment',
             'Voucher No': entry.journalEntryNumber || entry.id,
             'Reference Bill No': entry.referenceInvoiceNumber || '-',
-            'Narration': `Mode: ${entry.paymentMode || '-'} | A/C: ${entry.bankName || 'Cash'} | Amount: ${round2(amount)} | Adjusted: ${round2(adjusted)} | Unadjusted: ${round2(Math.max(amount - adjusted, 0))} | ${entry.description || '-'}`,
-            'Supplier Name': partyName, 'Payment Mode': entry.paymentMode || '-', 'Bank/Cash Account': entry.bankName || 'Cash', 'Debit': isCustomer ? 0 : round2(amount), 'Credit': isCustomer ? round2(amount) : 0, 'Adjusted Amount': round2(adjusted), 'Unadjusted Amount': round2(Math.max(amount - adjusted, 0)), 'Running Balance': 0, 'Balance Type': '-', 'Status': entry.status || 'active',
+            'Description/Narration': `Mode: ${entry.paymentMode || '-'} | A/C: ${entry.bankName || 'Cash'} | Amount: ${round2(amount)} | Adjusted: ${round2(adjusted)} | Unadjusted: ${round2(Math.max(amount - adjusted, 0))} | ${entry.description || '-'}`,
+            [isCustomer ? 'Customer Name' : 'Supplier Name']: partyName, 'Payment Mode': entry.paymentMode || '-', 'Bank/Cash Account': entry.bankName || 'Cash', 'Debit': isCustomer ? 0 : round2(amount), 'Credit': isCustomer ? round2(amount) : 0, 'Adjusted Amount': round2(adjusted), 'Unadjusted Amount': round2(Math.max(amount - adjusted, 0)), 'Running Balance': 0, 'Balance Type': '-', 'Status': entry.status || 'active',
           };
         });
         const activeStatementRows = statementRows.filter((row: any) => String(row.Status || '').toLowerCase() !== 'cancelled');
@@ -1075,18 +1079,35 @@ const Reports: React.FC<ReportsProps> = ({
           : null;
         const openingBalance = round2(isCustomer ? Number(customerBreakdown?.openingBalanceSigned || 0) : Number(supplierBreakdown?.openingBalanceSigned || 0));
         const closingBalanceSigned = round2(isCustomer ? Number(customerBreakdown?.netOutstanding || 0) : Number(supplierBreakdown?.netOutstanding || 0));
+        const monthlySummaryRows: any[] = [];
+        const monthAccumulator = new Map<string, { debit: number; credit: number; closing: number }>();
+        activeStatementRows.forEach((row: any) => {
+          const d = row.Date ? row.Date.split('/').reverse().join('-') : '';
+          if (!d) return;
+          const dt = new Date(d);
+          const key = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`;
+          const prev = monthAccumulator.get(key) || { debit: 0, credit: 0, closing: 0 };
+          prev.debit = round2(prev.debit + Number(row.Debit || 0));
+          prev.credit = round2(prev.credit + Number(row.Credit || 0));
+          prev.closing = Number(row['Running Balance'] || prev.closing);
+          monthAccumulator.set(key, prev);
+        });
+        Array.from(monthAccumulator.entries()).sort((a,b)=>a[0].localeCompare(b[0])).forEach(([month, sums]) => {
+          monthlySummaryRows.push({ 'Section': 'Monthly Summary', 'Date': '-', 'Ref. Type': `Month ${month}`, [isCustomer ? 'Customer Name' : 'Supplier Name']: partyName, 'Voucher No': '-', 'Reference Bill No': '-', 'Payment Mode': '-', 'Bank/Cash Account': '-', 'Description/Narration': 'Monthly Difference', 'Debit': round2(sums.debit), 'Credit': round2(sums.credit), 'Running Balance': round2(Math.abs(sums.closing)), 'Balance Type': sums.closing >= 0 ? 'Dr' : 'Cr', 'Adjusted Amount': 0, 'Unadjusted Amount': 0, 'Status': '-' });
+        });
+
         const summaryRows = [
-          { 'Section': 'Summary', 'Date': '-', 'Voucher Type': 'Opening Balance', 'Supplier Name': partyName, 'Voucher No': '-', 'Reference Bill No': '-', 'Payment Mode': '-', 'Bank/Cash Account': '-', 'Narration': '', 'Debit': openingBalance > 0 ? openingBalance : 0, 'Credit': openingBalance < 0 ? Math.abs(openingBalance) : 0, 'Adjusted Amount': 0, 'Unadjusted Amount': 0, 'Running Balance': 0, 'Balance Type': openingBalance >= 0 ? 'Dr' : 'Cr', 'Status': '-' },
-          { 'Section': 'Summary', 'Date': '-', 'Voucher Type': 'Total Debit', 'Supplier Name': partyName, 'Voucher No': '-', 'Reference Bill No': '-', 'Payment Mode': '-', 'Bank/Cash Account': '-', 'Narration': '', 'Debit': totalDebit, 'Credit': 0, 'Adjusted Amount': 0, 'Unadjusted Amount': 0, 'Running Balance': 0, 'Balance Type': '-', 'Status': '-' },
-          { 'Section': 'Summary', 'Date': '-', 'Voucher Type': 'Total Credit', 'Supplier Name': partyName, 'Voucher No': '-', 'Reference Bill No': '-', 'Payment Mode': '-', 'Bank/Cash Account': '-', 'Narration': '', 'Debit': 0, 'Credit': totalCredit, 'Adjusted Amount': 0, 'Unadjusted Amount': 0, 'Running Balance': 0, 'Balance Type': '-', 'Status': '-' },
+          { 'Section': 'Summary', 'Date': '-', 'Ref. Type': 'Opening Balance', [isCustomer ? 'Customer Name' : 'Supplier Name']: partyName, 'Voucher No': '-', 'Reference Bill No': '-', 'Payment Mode': '-', 'Bank/Cash Account': '-', 'Description/Narration': '', 'Debit': openingBalance > 0 ? openingBalance : 0, 'Credit': openingBalance < 0 ? Math.abs(openingBalance) : 0, 'Adjusted Amount': 0, 'Unadjusted Amount': 0, 'Running Balance': 0, 'Balance Type': openingBalance >= 0 ? 'Dr' : 'Cr', 'Status': '-' },
+          { 'Section': 'Summary', 'Date': '-', 'Ref. Type': 'Total Debit', [isCustomer ? 'Customer Name' : 'Supplier Name']: partyName, 'Voucher No': '-', 'Reference Bill No': '-', 'Payment Mode': '-', 'Bank/Cash Account': '-', 'Description/Narration': '', 'Debit': totalDebit, 'Credit': 0, 'Adjusted Amount': 0, 'Unadjusted Amount': 0, 'Running Balance': 0, 'Balance Type': '-', 'Status': '-' },
+          { 'Section': 'Summary', 'Date': '-', 'Ref. Type': 'Total Credit', [isCustomer ? 'Customer Name' : 'Supplier Name']: partyName, 'Voucher No': '-', 'Reference Bill No': '-', 'Payment Mode': '-', 'Bank/Cash Account': '-', 'Description/Narration': '', 'Debit': 0, 'Credit': totalCredit, 'Adjusted Amount': 0, 'Unadjusted Amount': 0, 'Running Balance': 0, 'Balance Type': '-', 'Status': '-' },
           ...(isCustomer ? [
-            { 'Section': 'Summary', 'Date': '-', 'Voucher Type': 'Gross Receivable', 'Supplier Name': partyName, 'Voucher No': '-', 'Reference Bill No': '-', 'Payment Mode': '-', 'Bank/Cash Account': '-', 'Narration': 'Matches Sundry Debtors', 'Debit': round2(Number(customerBreakdown?.grossReceivable || 0)), 'Credit': 0, 'Adjusted Amount': 0, 'Unadjusted Amount': 0, 'Running Balance': 0, 'Balance Type': 'Dr', 'Status': '-' },
-            { 'Section': 'Summary', 'Date': '-', 'Voucher Type': 'Adjusted Receipt', 'Supplier Name': partyName, 'Voucher No': '-', 'Reference Bill No': '-', 'Payment Mode': '-', 'Bank/Cash Account': '-', 'Narration': 'Receipt adjusted against invoices', 'Debit': 0, 'Credit': round2(Number(customerBreakdown?.adjustedReceipts || 0)), 'Adjusted Amount': 0, 'Unadjusted Amount': 0, 'Running Balance': 0, 'Balance Type': '-', 'Status': '-' },
-            { 'Section': 'Summary', 'Date': '-', 'Voucher Type': 'Unadjusted Advance', 'Supplier Name': partyName, 'Voucher No': '-', 'Reference Bill No': '-', 'Payment Mode': '-', 'Bank/Cash Account': '-', 'Narration': 'Available customer advance', 'Debit': 0, 'Credit': round2(Number(customerBreakdown?.unadjustedAdvance || 0)), 'Adjusted Amount': 0, 'Unadjusted Amount': 0, 'Running Balance': 0, 'Balance Type': 'Cr', 'Status': '-' },
+            { 'Section': 'Summary', 'Date': '-', 'Ref. Type': 'Gross Receivable', [isCustomer ? 'Customer Name' : 'Supplier Name']: partyName, 'Voucher No': '-', 'Reference Bill No': '-', 'Payment Mode': '-', 'Bank/Cash Account': '-', 'Description/Narration': 'Matches Sundry Debtors', 'Debit': round2(Number(customerBreakdown?.grossReceivable || 0)), 'Credit': 0, 'Adjusted Amount': 0, 'Unadjusted Amount': 0, 'Running Balance': 0, 'Balance Type': 'Dr', 'Status': '-' },
+            { 'Section': 'Summary', 'Date': '-', 'Ref. Type': 'Adjusted Receipt', [isCustomer ? 'Customer Name' : 'Supplier Name']: partyName, 'Voucher No': '-', 'Reference Bill No': '-', 'Payment Mode': '-', 'Bank/Cash Account': '-', 'Description/Narration': 'Receipt adjusted against invoices', 'Debit': 0, 'Credit': round2(Number(customerBreakdown?.adjustedReceipts || 0)), 'Adjusted Amount': 0, 'Unadjusted Amount': 0, 'Running Balance': 0, 'Balance Type': '-', 'Status': '-' },
+            { 'Section': 'Summary', 'Date': '-', 'Ref. Type': 'Unadjusted Advance', [isCustomer ? 'Customer Name' : 'Supplier Name']: partyName, 'Voucher No': '-', 'Reference Bill No': '-', 'Payment Mode': '-', 'Bank/Cash Account': '-', 'Description/Narration': 'Available customer advance', 'Debit': 0, 'Credit': round2(Number(customerBreakdown?.unadjustedAdvance || 0)), 'Adjusted Amount': 0, 'Unadjusted Amount': 0, 'Running Balance': 0, 'Balance Type': 'Cr', 'Status': '-' },
           ] : []),
-          { 'Section': 'Summary', 'Date': '-', 'Voucher Type': 'Closing Balance', 'Supplier Name': partyName, 'Voucher No': '-', 'Reference Bill No': '-', 'Payment Mode': '-', 'Bank/Cash Account': '-', 'Narration': '', 'Debit': closingBalanceSigned > 0 ? closingBalanceSigned : 0, 'Credit': closingBalanceSigned < 0 ? Math.abs(closingBalanceSigned) : 0, 'Adjusted Amount': 0, 'Unadjusted Amount': 0, 'Running Balance': round2(Math.abs(closingBalanceSigned)), 'Balance Type': closingBalanceSigned >= 0 ? (isCustomer ? 'Dr' : 'Cr') : (isCustomer ? 'Cr' : 'Dr'), 'Status': '-' },
+          { 'Section': 'Summary', 'Date': '-', 'Ref. Type': 'Closing Balance', [isCustomer ? 'Customer Name' : 'Supplier Name']: partyName, 'Voucher No': '-', 'Reference Bill No': '-', 'Payment Mode': '-', 'Bank/Cash Account': '-', 'Description/Narration': '', 'Debit': closingBalanceSigned > 0 ? closingBalanceSigned : 0, 'Credit': closingBalanceSigned < 0 ? Math.abs(closingBalanceSigned) : 0, 'Adjusted Amount': 0, 'Unadjusted Amount': 0, 'Running Balance': round2(Math.abs(closingBalanceSigned)), 'Balance Type': closingBalanceSigned >= 0 ? (isCustomer ? 'Dr' : 'Cr') : (isCustomer ? 'Cr' : 'Dr'), 'Status': '-' },
         ];
-        rows = [...statementRows, ...billWiseRows, ...paymentRows, ...summaryRows];
+        rows = [...statementRows, ...monthlySummaryRows, ...billWiseRows, ...paymentRows, ...summaryRows];
         break;
       }
       default:
@@ -1285,7 +1306,7 @@ const Reports: React.FC<ReportsProps> = ({
 
   const onPickReport = (reportId: string) => {
     setPendingReportId(reportId);
-    if (reportId === 'customerPartyWiseFullStatement' || reportId === 'supplierPartyWiseFullStatement') {
+    if (reportId === 'customerPartyWiseFullStatement' || reportId === 'supplierPartyWiseFullStatement' || reportId === 'accountLedgerCustomer' || reportId === 'accountLedgerSupplier') {
       setPartyModalOpen(true);
       return;
     }
@@ -1497,7 +1518,7 @@ const Reports: React.FC<ReportsProps> = ({
             <label className="text-xs uppercase font-semibold text-gray-600">Party Name</label>
             <select value={selectedPartyId} onChange={(e) => setSelectedPartyId(e.target.value)} className="w-full border border-gray-300 p-2 mt-1">
               <option value="">Select Party</option>
-              {(pendingReportId === 'customerPartyWiseFullStatement' ? customers : distributors).map((party) => (
+              {(pendingReportId === 'customerPartyWiseFullStatement' || pendingReportId === 'accountLedgerCustomer' ? customers : distributors).map((party) => (
                 <option key={party.id} value={party.id}>{party.name}</option>
               ))}
             </select>

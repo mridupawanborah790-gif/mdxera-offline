@@ -29,6 +29,7 @@ type ManualLine = {
   lineTotal: number;
   itemCode?: string;
   inventoryItemId?: string;
+  mrp?: number;
 };
 
 const round2 = (n: number) => Number((n || 0).toFixed(2));
@@ -243,6 +244,7 @@ const ManualSalesEntry = React.forwardRef<any, ManualSalesEntryProps>(({ current
       qty: 1,
       rate: getRateByTier(item),
       taxPercent: Number(item.gstPercent || 0),
+      mrp: Number(item.mrp || 0),
     };
 
     if (targetLine) {
@@ -568,7 +570,7 @@ const ManualSalesEntry = React.forwardRef<any, ManualSalesEntryProps>(({ current
                       <input id={`qty-${line.id}`} className={`w-full text-center bg-transparent outline-none ${hoveredLineId === line.id || activeLineId === line.id ? 'text-white' : 'group-hover:text-white'}`} type="number" min={0} value={line.qty || ''} onChange={(e) => updateLine(line.id, { qty: Number(e.target.value) })} onFocus={() => setActiveLineId(line.id)} onKeyDown={(e) => handleRowNavigation(e, line.id)} />
                     </td>
                     <td className="p-2 border-r border-gray-200">
-                      <input id={`rate-${line.id}`} className={`w-full text-right bg-transparent outline-none ${hoveredLineId === line.id || activeLineId === line.id ? 'text-white' : 'group-hover:text-white'}`} type="number" min={0} value={line.rate || ''} onChange={(e) => updateLine(line.id, { rate: Number(e.target.value) })} onFocus={() => setActiveLineId(line.id)} onKeyDown={(e) => handleRowNavigation(e, line.id)} disabled={!canEditRate} />
+                      <input id={`rate-${line.id}`} className={`w-full text-right bg-transparent outline-none ${hoveredLineId === line.id || activeLineId === line.id ? 'text-white' : 'group-hover:text-white'}`} type="number" min={0} value={line.rate || ''} onChange={(e) => { const newRate = Number(e.target.value); if (line.mrp && line.mrp > 0 && newRate > line.mrp) { addNotification(`Rate cannot exceed MRP (₹${line.mrp.toFixed(2)})`, 'warning'); updateLine(line.id, { rate: line.mrp }); } else { updateLine(line.id, { rate: newRate }); } }} onFocus={() => setActiveLineId(line.id)} onKeyDown={(e) => handleRowNavigation(e, line.id)} disabled={!canEditRate} />
                     </td>
                     <td className={`p-2 border-r border-gray-200 text-right ${hoveredLineId === line.id || activeLineId === line.id ? 'text-white' : 'group-hover:text-white text-gray-700'}`}>{line.amount.toFixed(2)}</td>
                     <td className="p-2 border-r border-gray-200">

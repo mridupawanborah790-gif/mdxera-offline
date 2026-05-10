@@ -268,7 +268,14 @@ const App: React.FC = () => {
     }, [currentPage]);
 
     const addNotification = useCallback((message: string, type: 'success' | 'error' | 'warning' = 'success') => {
-        setNotifications(prev => [...prev, { id: Date.now(), message, type }]);
+        setNotifications(prev => {
+            // Ensure ID is unique even for rapid calls
+            let id = Date.now();
+            while (prev.some(n => n.id === id)) {
+                id++;
+            }
+            return [...prev, { id, message, type }];
+        });
     }, []);
 
     const removeNotification = useCallback((id: number) => {

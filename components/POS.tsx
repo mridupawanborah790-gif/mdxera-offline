@@ -816,6 +816,11 @@ const POS = forwardRef<any, POSProps>(({
         
         // If we don't have a number, or it's for a different type, fetch a preview
         if (!reservedVoucherNumber || lastReservedType.current !== docType) {
+            // Set a placeholder to prevent immediate re-triggering while the request is in flight
+            // or if it fails.
+            if (!reservedVoucherNumber) {
+                setReservedVoucherNumber('PENDING');
+            }
             reserveNextVoucherNumber(false, true);
         }
     }, [transactionToEdit, currentUser, isNonGst, reserveNextVoucherNumber, reservedVoucherNumber]);

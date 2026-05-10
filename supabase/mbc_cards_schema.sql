@@ -1,58 +1,62 @@
--- MBC Card Management module schema
+-- MBC Card Management module schema (FIXED for Medimart ERP)
 
-create table if not exists public.mbc_card_types (
-    id uuid primary key default gen_random_uuid(),
-    organization_id uuid not null references public.registered_pharmacies(organization_id) on delete cascade,
-    type_name text not null,
-    type_code text not null,
+-- 1. MBC CARD TYPES
+CREATE TABLE IF NOT EXISTS public.mbc_card_types (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    organization_id text NOT NULL, -- Standardized as text for multi-tenant isolation
+    type_name text NOT NULL,
+    type_code text NOT NULL,
     description text,
-    default_validity_value integer not null default 1,
-    default_validity_unit text not null default 'years' check (default_validity_unit in ('days','months','years')),
-    default_card_value numeric(12,2) not null default 0,
+    default_validity_value integer NOT NULL DEFAULT 1,
+    default_validity_unit text NOT NULL DEFAULT 'years' CHECK (default_validity_unit IN ('days','months','years')),
+    default_card_value numeric(12,2) NOT NULL DEFAULT 0,
     template_id uuid,
     color_theme text,
-    prefix text not null default 'MBC',
-    auto_numbering boolean not null default true,
-    allow_manual_value_edit boolean not null default false,
-    allow_renewal boolean not null default true,
-    allow_upgrade boolean not null default true,
+    prefix text NOT NULL DEFAULT 'MBC',
+    auto_numbering boolean NOT NULL DEFAULT true,
+    allow_manual_value_edit boolean NOT NULL DEFAULT false,
+    allow_renewal boolean NOT NULL DEFAULT true,
+    allow_upgrade boolean NOT NULL DEFAULT true,
     benefits text,
     terms_conditions text,
-    is_active boolean not null default true,
-    created_at timestamptz not null default now(),
-    updated_at timestamptz not null default now(),
-    unique (organization_id, type_name),
-    unique (organization_id, type_code)
+    is_active boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (organization_id, type_name),
+    UNIQUE (organization_id, type_code)
 );
 
-create table if not exists public.mbc_card_templates (
-    id uuid primary key default gen_random_uuid(),
-    organization_id uuid not null references public.registered_pharmacies(organization_id) on delete cascade,
-    template_name text not null,
-    template_code text not null,
-    card_type_id uuid references public.mbc_card_types(id) on delete set null,
-    width numeric(8,2) not null default 86,
-    height numeric(8,2) not null default 54,
-    orientation text not null default 'landscape',
+-- 2. MBC CARD TEMPLATES
+CREATE TABLE IF NOT EXISTS public.mbc_card_templates (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    organization_id text NOT NULL,
+    template_name text NOT NULL,
+    template_code text NOT NULL,
+    card_type_id uuid REFERENCES public.mbc_card_types(id) ON DELETE SET NULL,
+    width numeric(8,2) NOT NULL DEFAULT 86,
+    height numeric(8,2) NOT NULL DEFAULT 54,
+    orientation text NOT NULL DEFAULT 'landscape',
     background_image text,
     logo_image text,
-    template_json jsonb not null default '{}'::jsonb,
-    is_active boolean not null default true,
-    created_at timestamptz not null default now(),
-    updated_at timestamptz not null default now(),
-    unique (organization_id, template_name),
-    unique (organization_id, template_code)
+    template_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+    is_active boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (organization_id, template_name),
+    UNIQUE (organization_id, template_code)
 );
 
-alter table public.mbc_card_types
-    add constraint if not exists mbc_card_types_template_fk
-    foreign key (template_id) references public.mbc_card_templates(id) on delete set null;
+-- Circular reference link
+ALTER TABLE public.mbc_card_types
+    ADD CONSTRAINT mbc_card_types_template_fk
+    FOREIGN KEY (template_id) REFERENCES public.mbc_card_templates(id) ON DELETE SET NULL;
 
-create table if not exists public.mbc_cards (
-    id uuid primary key default gen_random_uuid(),
-    organization_id uuid not null references public.registered_pharmacies(organization_id) on delete cascade,
-    card_number text not null,
-    customer_name text not null,
+-- 3. MBC CARDS
+CREATE TABLE IF NOT EXISTS public.mbc_cards (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    organization_id text NOT NULL,
+    card_number text NOT NULL,
+    customer_name text NOT NULL,
     guardian_name text,
     date_of_birth date,
     gender text,
@@ -62,89 +66,85 @@ create table if not exists public.mbc_cards (
     district text,
     state text,
     pin_code text,
-    phone_number text not null,
+    phone_number text NOT NULL,
     alternate_phone text,
     email text,
-    card_type_id uuid not null references public.mbc_card_types(id) on delete restrict,
-    template_id uuid references public.mbc_card_templates(id) on delete set null,
-    issue_date date not null,
-    validity_from date not null,
-    validity_to date not null,
+    card_type_id uuid NOT NULL REFERENCES public.mbc_card_types(id) ON DELETE RESTRICT,
+    template_id uuid REFERENCES public.mbc_card_templates(id) ON DELETE SET NULL,
+    issue_date date NOT NULL,
+    validity_from date NOT NULL,
+    validity_to date NOT NULL,
     validity_period_text text,
-    card_value numeric(12,2) not null default 0,
+    card_value numeric(12,2) NOT NULL DEFAULT 0,
     qr_value text,
     barcode_value text,
     remarks text,
-    status text not null default 'active' check (status in ('active','inactive','expired','upcoming')),
+    status text NOT NULL DEFAULT 'active' CHECK (status IN ('active','inactive','expired','upcoming')),
     created_by text,
     photo_url text,
     whatsapp_number text,
     website_link text,
     office_location_text text,
-    created_at timestamptz not null default now(),
-    updated_at timestamptz not null default now(),
-    unique (organization_id, card_number)
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (organization_id, card_number)
 );
 
-create table if not exists public.mbc_card_history (
-    id uuid primary key default gen_random_uuid(),
-    organization_id uuid not null references public.registered_pharmacies(organization_id) on delete cascade,
-    mbc_card_id uuid not null references public.mbc_cards(id) on delete cascade,
-    action_type text not null check (action_type in ('create','update','renew','upgrade','deactivate')),
-    old_card_type_id uuid references public.mbc_card_types(id) on delete set null,
-    new_card_type_id uuid references public.mbc_card_types(id) on delete set null,
+-- 4. MBC CARD HISTORY
+CREATE TABLE IF NOT EXISTS public.mbc_card_history (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    organization_id text NOT NULL,
+    mbc_card_id uuid NOT NULL REFERENCES public.mbc_cards(id) ON DELETE CASCADE,
+    action_type text NOT NULL CHECK (action_type IN ('create','update','renew','upgrade','deactivate')),
+    old_card_type_id uuid REFERENCES public.mbc_card_types(id) ON DELETE SET NULL,
+    new_card_type_id uuid REFERENCES public.mbc_card_types(id) ON DELETE SET NULL,
     old_validity_to date,
     new_validity_to date,
     old_card_value numeric(12,2),
     new_card_value numeric(12,2),
     remarks text,
     action_by text,
-    action_date timestamptz not null default now()
+    action_date timestamptz NOT NULL DEFAULT now()
 );
 
-create index if not exists idx_mbc_cards_org_status on public.mbc_cards (organization_id, status);
-create index if not exists idx_mbc_cards_org_validity on public.mbc_cards (organization_id, validity_to);
-create index if not exists idx_mbc_history_org_card on public.mbc_card_history (organization_id, mbc_card_id, action_date desc);
+-- 5. INDEXES
+CREATE INDEX IF NOT EXISTS idx_mbc_cards_org_status ON public.mbc_cards (organization_id, status);
+CREATE INDEX IF NOT EXISTS idx_mbc_cards_org_validity ON public.mbc_cards (organization_id, validity_to);
+CREATE INDEX IF NOT EXISTS idx_mbc_history_org_card ON public.mbc_card_history (organization_id, mbc_card_id, action_date DESC);
 
-alter table public.mbc_card_types enable row level security;
-alter table public.mbc_card_templates enable row level security;
-alter table public.mbc_cards enable row level security;
-alter table public.mbc_card_history enable row level security;
+-- 6. ROW LEVEL SECURITY
+ALTER TABLE public.mbc_card_types ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.mbc_card_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.mbc_cards ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.mbc_card_history ENABLE ROW LEVEL SECURITY;
 
-create policy if not exists "mbc_card_types_org_policy" on public.mbc_card_types
-    for all using (organization_id in (select organization_id from public.registered_pharmacies where user_id = auth.uid()))
-    with check (organization_id in (select organization_id from public.registered_pharmacies where user_id = auth.uid()));
+-- Using project standard public.get_my_org_id()
+CREATE POLICY "mbc_card_types_org_policy" ON public.mbc_card_types
+    FOR ALL USING (organization_id = public.get_my_org_id())
+    WITH CHECK (organization_id = public.get_my_org_id());
 
-create policy if not exists "mbc_card_templates_org_policy" on public.mbc_card_templates
-    for all using (organization_id in (select organization_id from public.registered_pharmacies where user_id = auth.uid()))
-    with check (organization_id in (select organization_id from public.registered_pharmacies where user_id = auth.uid()));
+CREATE POLICY "mbc_card_templates_org_policy" ON public.mbc_card_templates
+    FOR ALL USING (organization_id = public.get_my_org_id())
+    WITH CHECK (organization_id = public.get_my_org_id());
 
-create policy if not exists "mbc_cards_org_policy" on public.mbc_cards
-    for all using (organization_id in (select organization_id from public.registered_pharmacies where user_id = auth.uid()))
-    with check (organization_id in (select organization_id from public.registered_pharmacies where user_id = auth.uid()));
+CREATE POLICY "mbc_cards_org_policy" ON public.mbc_cards
+    FOR ALL USING (organization_id = public.get_my_org_id())
+    WITH CHECK (organization_id = public.get_my_org_id());
 
-create policy if not exists "mbc_card_history_org_policy" on public.mbc_card_history
-    for all using (organization_id in (select organization_id from public.registered_pharmacies where user_id = auth.uid()))
-    with check (organization_id in (select organization_id from public.registered_pharmacies where user_id = auth.uid()));
+CREATE POLICY "mbc_card_history_org_policy" ON public.mbc_card_history
+    FOR ALL USING (organization_id = public.get_my_org_id())
+    WITH CHECK (organization_id = public.get_my_org_id());
 
-create or replace function public.mbc_touch_updated_at()
-returns trigger
-language plpgsql
-as $$
-begin
-    new.updated_at := now();
-    return new;
-end;
-$$;
+-- 7. TRIGGERS
+-- Using project standard update_updated_at_column()
+DROP TRIGGER IF EXISTS trg_mbc_card_types_updated_at ON public.mbc_card_types;
+CREATE TRIGGER trg_mbc_card_types_updated_at BEFORE UPDATE ON public.mbc_card_types
+FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
-drop trigger if exists trg_mbc_card_types_updated_at on public.mbc_card_types;
-create trigger trg_mbc_card_types_updated_at before update on public.mbc_card_types
-for each row execute function public.mbc_touch_updated_at();
+DROP TRIGGER IF EXISTS trg_mbc_card_templates_updated_at ON public.mbc_card_templates;
+CREATE TRIGGER trg_mbc_card_templates_updated_at BEFORE UPDATE ON public.mbc_card_templates
+FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
-drop trigger if exists trg_mbc_card_templates_updated_at on public.mbc_card_templates;
-create trigger trg_mbc_card_templates_updated_at before update on public.mbc_card_templates
-for each row execute function public.mbc_touch_updated_at();
-
-drop trigger if exists trg_mbc_cards_updated_at on public.mbc_cards;
-create trigger trg_mbc_cards_updated_at before update on public.mbc_cards
-for each row execute function public.mbc_touch_updated_at();
+DROP TRIGGER IF EXISTS trg_mbc_cards_updated_at ON public.mbc_cards;
+CREATE TRIGGER trg_mbc_cards_updated_at BEFORE UPDATE ON public.mbc_cards
+FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();

@@ -534,8 +534,14 @@ const normalizeMaterialMasterType = (value: unknown): string | undefined => {
                 'subscription_status', 'subscription_id', 'is_active', 'is_blocked'
             ];
             
-            const skipValueConversionKeys = ['master_shortcuts', 'masterShortcuts', 'master_shortcut_order', 'masterShortcutOrder'];
-            
+            // JSONB config columns whose contents are read by SQL using camelCase keys — never snake_case them.
+            const skipValueConversionKeys = [
+                'master_shortcuts', 'masterShortcuts', 'master_shortcut_order', 'masterShortcutOrder',
+                'invoiceConfig', 'nonGstInvoiceConfig', 'purchaseConfig', 'purchaseOrderConfig',
+                'salesChallanConfig', 'deliveryChallanConfig', 'physicalInventoryConfig',
+                'fiscalYearConfig',
+            ];
+
             let snakeKey = preservedKeys.includes(key) ? key : key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
             
             acc[snakeKey] = (preservedKeys.includes(key) || skipValueConversionKeys.includes(key))

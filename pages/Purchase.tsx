@@ -495,6 +495,14 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
 
     const handleUpdateItem = (id: string, field: keyof PurchaseItem, value: any) => {
         if (isReadOnly || !supplier.trim()) return;
+        if (field === 'purchasePrice' && value !== '') {
+            const parsed = parseFloat(String(value));
+            const currentItem = items.find(p => p.id === id);
+            if (currentItem && currentItem.mrp > 0 && !isNaN(parsed) && parsed > currentItem.mrp) {
+                addNotification(`Rate cannot exceed MRP (₹${currentItem.mrp.toFixed(2)})`, 'warning');
+                value = currentItem.mrp;
+            }
+        }
         setItems(prev => {
             const index = prev.findIndex(p => p.id === id); if (index === -1) return prev;
             let updatedItem = { ...prev[index], [field]: value };

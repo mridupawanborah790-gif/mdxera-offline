@@ -310,13 +310,16 @@ const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
                     'physicalInventoryConfig': 'physical-inventory'
                 };
 
+                const currentFyInUi = (localConfigs.fiscalYearConfig?.currentFiscalYear || '').trim();
+
                 const results: Record<string, any> = {};
                 for (const [configKey, docType] of Object.entries(voucherKeysMap)) {
                     try {
                         const { data } = await supabase.rpc('reserve_voucher_number', {
                             p_organization_id: currentUser.organization_id,
                             p_document_type: docType,
-                            p_is_preview: true
+                            p_is_preview: true,
+                            p_fy: currentFyInUi || undefined
                         });
                         const payload = Array.isArray(data) ? data[0] : data;
                         if (payload?.success) {
@@ -334,7 +337,18 @@ const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
             };
             fetchLiveSequences();
         }
-    }, [activeSection, currentUser]);
+    }, [
+        activeSection, 
+        currentUser, 
+        localConfigs.fiscalYearConfig?.currentFiscalYear,
+        localConfigs.invoiceConfig?.prefix, localConfigs.invoiceConfig?.startingNumber,
+        localConfigs.nonGstInvoiceConfig?.prefix, localConfigs.nonGstInvoiceConfig?.startingNumber,
+        localConfigs.purchaseConfig?.prefix, localConfigs.purchaseConfig?.startingNumber,
+        localConfigs.purchaseOrderConfig?.prefix, localConfigs.purchaseOrderConfig?.startingNumber,
+        localConfigs.salesChallanConfig?.prefix, localConfigs.salesChallanConfig?.startingNumber,
+        localConfigs.deliveryChallanConfig?.prefix, localConfigs.deliveryChallanConfig?.startingNumber,
+        localConfigs.physicalInventoryConfig?.prefix, localConfigs.physicalInventoryConfig?.startingNumber
+    ]);
 
     // Import State
     const [importType, setImportType] = useState<string | null>(null);
@@ -1548,16 +1562,27 @@ const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
                                     if (!validIds.has(id)) delete sanitizedOrder[id];
                                 });
 
-                                const configuredFiscalYear = resolveConfiguredFiscalYear(localConfigs);
+                                const fyConfig = localConfigs.fiscalYearConfig || {};
+                                const derivedFiscalYear = toFiscalYearFromDates(fyConfig.fiscalYearStartDate, fyConfig.fiscalYearEndDate);
+
                                 const voucherConfigKeys: Array<keyof AppConfigurations> = ['invoiceConfig', 'nonGstInvoiceConfig', 'purchaseConfig', 'purchaseOrderConfig', 'salesChallanConfig', 'deliveryChallanConfig', 'physicalInventoryConfig'];
                                 const normalizedConfigs = voucherConfigKeys.reduce((acc, configKey) => {
                                     const existing = ((localConfigs[configKey] as InvoiceNumberConfig) || getVoucherSchemeDefaults());
-                                    const safeCurrent = Math.max(Number(existing.currentNumber || existing.startingNumber || 1), Number(existing.startingNumber || 1));
+                                    
+                                    // Use live sequence number if available (it handles audit-based resumes and resets).
+                                    // This prevents the UI from saving a stale 'currentNumber' from a different FY.
+                                    const liveVal = liveSequences[configKey]?.currentNumber;
+                                    const safeCurrent = liveVal !== undefined 
+                                        ? Math.max(Number(liveVal), Number(existing.startingNumber || 1))
+                                        : Math.max(Number(existing.currentNumber || existing.startingNumber || 1), Number(existing.startingNumber || 1));
+
                                     return {
                                         ...acc,
                                         [configKey]: {
                                             ...existing,
-                                            fy: configuredFiscalYear,
+                                            // Do NOT write fy here — the SQL function owns that field.
+                                            // Overwriting it on save would hide the FY change from the
+                                            // resume/reset logic in reserve_voucher_number.
                                             currentNumber: safeCurrent,
                                             resetRule: 'financial-year'
                                         }
@@ -1568,8 +1593,6 @@ const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
                                     masterShortcutOrder: sanitizedOrder 
                                 } as AppConfigurations);
 
-                                const fyConfig = normalizedConfigs.fiscalYearConfig || {};
-                                const derivedFiscalYear = toFiscalYearFromDates(fyConfig.fiscalYearStartDate, fyConfig.fiscalYearEndDate);
                                 const isDatesValid = !!derivedFiscalYear;
                                 const isCurrentYearValid = !!toDatesFromFiscalYear(fyConfig.currentFiscalYear);
 

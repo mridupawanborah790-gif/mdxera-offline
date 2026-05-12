@@ -40,6 +40,9 @@ const initialState: Omit<Medicine, 'id' | 'created_at' | 'updated_at'> = {
     isPurchaseEnabled: true,
     isProductionEnabled: false,
     isInternalIssueEnabled: false,
+    valuationMethod: 'standard',
+    standardPriceRate: 0,
+    movingAverageRate: 0,
     // Renamed isActive to is_active
     is_active: true,
     organization_id: '',
@@ -81,6 +84,9 @@ const AddMedicineModal: React.FC<AddMedicineModalProps> = ({ isOpen, onClose, on
 
         if (!formState.name.trim()) {
             newErrors.name = "Product Name is required.";
+        }
+        if ((formState.valuationMethod || 'standard') === 'standard' && Number(formState.standardPriceRate || 0) < 0) {
+            newErrors.standardPriceRate = 'Standard Price Rate cannot be negative.';
         }
         const isElectronics = String(organizationType || '').toLowerCase() === 'electronics';
         if (isElectronics && !String(formState.imei || '').trim()) {
@@ -237,6 +243,26 @@ const AddMedicineModal: React.FC<AddMedicineModalProps> = ({ isOpen, onClose, on
                                     {renderInput('hsnCode', 'HSN Code')}
                                     {renderInput('imei', 'IMEI', 'text', String(organizationType || '').toLowerCase() !== 'electronics')}
                                     {renderInput('productDiscount', 'Product Discount (%)', 'number')}
+                                </div>
+                            </div>
+                            <div className="bg-gray-50 p-4 border border-gray-200">
+                                <p className="text-[11px] font-black text-primary uppercase tracking-widest mb-4">Inventory Valuation</p>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div>
+                                        <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Valuation Method</label>
+                                        <select name="valuationMethod" value={formState.valuationMethod || 'standard'} onChange={handleChange} className="w-full p-2 border border-gray-400 font-bold text-sm bg-white outline-none">
+                                            <option value="standard">Standard</option>
+                                            <option value="moving_average">Moving Average</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Standard Price Rate</label>
+                                        <input type="number" step="0.01" name="standardPriceRate" value={Number(formState.standardPriceRate || 0)} onChange={handleChange} disabled={(formState.valuationMethod || 'standard') !== 'standard'} className="w-full p-2 border border-gray-400 font-bold text-sm bg-input-bg disabled:bg-gray-100 disabled:text-gray-500 outline-none" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Moving Average Rate</label>
+                                        <input type="number" step="0.01" name="movingAverageRate" value={Number(formState.movingAverageRate || 0).toFixed(2)} readOnly className="w-full p-2 border border-gray-400 font-bold text-sm bg-gray-100 text-gray-500 cursor-not-allowed outline-none" />
+                                    </div>
                                 </div>
                             </div>
 

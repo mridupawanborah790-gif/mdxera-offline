@@ -171,6 +171,47 @@ const App: React.FC = () => {
     };
 
     const [authView, setAuthView] = useState<'auth' | 'forgot' | 'reset'>(resolveAuthViewFromLocation);
+    const syncMovingAverageRates = useCallback(async (basePurchases: Purchase[] = purchases, basePurchaseReturns: PurchaseReturn[] = purchaseReturns) => {
+        if (!currentUser || medicinesRef.current.length === 0) return;
+        const completedPurchases = basePurchases.filter(p => p.status !== 'cancelled');
+        const returnQtyByCode = new Map<string, number>();
+        basePurchaseReturns.forEach(pr => {
+            (pr.items || []).forEach((item: any) => {
+                const code = String(item.materialCode || '').trim().toLowerCase();
+                if (!code) return;
+                const qty = Number(item.quantity || 0) + Number(item.looseQuantity || 0);
+                returnQtyByCode.set(code, (returnQtyByCode.get(code) || 0) + qty);
+            });
+        });
+
+        const aggregates = new Map<string, { qty: number; value: number }>();
+        completedPurchases.forEach(p => {
+            p.items.forEach(item => {
+                const code = String(item.materialCode || '').trim().toLowerCase();
+                if (!code) return;
+                const qty = Number(item.quantity || 0) + Number(item.looseQuantity || 0);
+                const value = qty * Number(item.purchasePrice || 0);
+                const prev = aggregates.get(code) || { qty: 0, value: 0 };
+                aggregates.set(code, { qty: prev.qty + qty, value: prev.value + value });
+            });
+        });
+
+        const nextMedicines = medicinesRef.current.map(med => {
+            const code = String(med.materialCode || '').trim().toLowerCase();
+            const agg = aggregates.get(code);
+            if (!agg || agg.qty <= 0) return med;
+            const returnedQty = returnQtyByCode.get(code) || 0;
+            const effectiveQty = Math.max(agg.qty - returnedQty, 0);
+            const movingAverageRate = effectiveQty > 0 ? Number((agg.value / effectiveQty).toFixed(2)) : 0;
+            if (Number(med.movingAverageRate || 0) === movingAverageRate) return med;
+            return { ...med, movingAverageRate };
+        });
+
+        const changed = nextMedicines.filter((m, idx) => m !== medicinesRef.current[idx]);
+        if (changed.length === 0) return;
+        setMedicines(nextMedicines);
+        await Promise.all(changed.map(m => storage.saveData('material_master', m, currentUser, true)));
+    }, [currentUser, purchases, purchaseReturns]);
 
     const [activeDashboardMenu, setActiveDashboardMenu] = useState<'left' | 'right'>('right');
     const [mountedPages, setMountedPages] = useState<string[]>(['dashboard']);
@@ -1150,6 +1191,7 @@ const App: React.FC = () => {
             // Only refresh inventory (not purchases) to avoid overwriting the optimistic update above
             // with potentially stale server data. The background loadData will sync everything later.
             await refreshInventoryViews(currentUser);
+            await syncMovingAverageRates([savedPurchase, ...purchases], purchaseReturns);
             loadData(currentUser, 'background');
 
             addNotification("Purchase voucher updated.", "success");
@@ -2361,6 +2403,7 @@ const App: React.FC = () => {
                         onAddPurchaseReturn={async (pr) => {
                             await storage.addPurchaseReturn(pr, currentUser!);
                             await refreshInventoryViews(currentUser!, ['purchase_returns']);
+                            await syncMovingAverageRates(purchases, [pr, ...purchaseReturns]);
                             await loadData(currentUser!, 'background');
                             addNotification('Purchase return recorded.', 'success');
                         }}

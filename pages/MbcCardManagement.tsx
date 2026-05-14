@@ -544,7 +544,12 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
             <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-xs">
               <input className="border p-2" placeholder="Customer Name" value={cardForm.customer_name || ''} onChange={e => setCardForm(prev => ({ ...prev, customer_name: e.target.value }))} />
               <input className="border p-2" placeholder="Guardian Name" value={cardForm.guardian_name || ''} onChange={e => setCardForm(prev => ({ ...prev, guardian_name: e.target.value }))} />
-              <input className="border p-2" placeholder="Gender" value={cardForm.gender || ''} onChange={e => setCardForm(prev => ({ ...prev, gender: e.target.value }))} />
+              <select className="border p-2" value={cardForm.gender || ''} onChange={e => setCardForm(prev => ({ ...prev, gender: e.target.value }))}>
+                <option value="">Gender</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Other">Other</option>
+              </select>
               <input className="border p-2" placeholder="Address Line 1" value={cardForm.address_line_1 || ''} onChange={e => setCardForm(prev => ({ ...prev, address_line_1: e.target.value }))} />
               <input className="border p-2" placeholder="Address Line 2" value={cardForm.address_line_2 || ''} onChange={e => setCardForm(prev => ({ ...prev, address_line_2: e.target.value }))} />
               <input className="border p-2" placeholder="City / Town / Village" value={cardForm.city || ''} onChange={e => setCardForm(prev => ({ ...prev, city: e.target.value }))} />
@@ -565,9 +570,6 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
                 {templates.filter(t => !cardForm.card_type_id || t.card_type_id === cardForm.card_type_id).map(t => <option key={t.id} value={t.id}>{t.template_name}</option>)}
               </select>
               <input className="border p-2" placeholder="QR / Barcode value" value={cardForm.qr_value || ''} onChange={e => setCardForm(prev => ({ ...prev, qr_value: e.target.value }))} />
-              <input className="border p-2" placeholder="WhatsApp Number" value={cardForm.whatsapp_number || ''} onChange={e => setCardForm(prev => ({ ...prev, whatsapp_number: e.target.value }))} />
-              <input className="border p-2" placeholder="Website link" value={cardForm.website_link || ''} onChange={e => setCardForm(prev => ({ ...prev, website_link: e.target.value }))} />
-              <input className="border p-2" placeholder="Office Location Text" value={cardForm.office_location_text || ''} onChange={e => setCardForm(prev => ({ ...prev, office_location_text: e.target.value }))} />
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
               <label className="flex flex-col gap-1">

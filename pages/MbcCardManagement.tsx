@@ -105,6 +105,50 @@ const getCardStatus = (card: MbcCard) => {
   return 'active';
 };
 
+type TemplateFieldStyle = {
+  x?: number;
+  y?: number;
+  fontSize?: number;
+  fontWeight?: React.CSSProperties['fontWeight'];
+  color?: string;
+  maxWidth?: number;
+  align?: React.CSSProperties['textAlign'];
+};
+
+const DEFAULT_FIELD_STYLES: Record<string, TemplateFieldStyle> = {
+  card_type: { x: 4, y: 4, fontSize: 10, fontWeight: 800, color: '#111827', maxWidth: 52 },
+  customer_name: { x: 4, y: 14, fontSize: 13, fontWeight: 800, color: '#1d4ed8', maxWidth: 56 },
+  card_number: { x: 4, y: 25, fontSize: 8, fontWeight: 600, color: '#111827', maxWidth: 56 },
+  phone: { x: 4, y: 30, fontSize: 8, fontWeight: 500, color: '#111827', maxWidth: 56 },
+  dob: { x: 4, y: 35, fontSize: 8, fontWeight: 500, color: '#111827', maxWidth: 56 },
+  validity: { x: 4, y: 40, fontSize: 8, fontWeight: 500, color: '#111827', maxWidth: 78 },
+  address: { x: 4, y: 46, fontSize: 7, fontWeight: 500, color: '#111827', maxWidth: 78 },
+  footer: { x: 4, y: 51, fontSize: 7, fontWeight: 500, color: '#111827', maxWidth: 78 },
+  qr: { x: 63, y: 8, maxWidth: 18 },
+};
+
+const getFieldStyle = (field: string, template: MbcCardTemplate | undefined): React.CSSProperties => {
+  const defaults = DEFAULT_FIELD_STYLES[field] || {};
+  const templateJson = (template?.template_json || {}) as Record<string, any>;
+  const config = (templateJson.fields?.[field] || templateJson[field] || {}) as TemplateFieldStyle;
+  const style = { ...defaults, ...config };
+  const width = Number(template?.width || 86);
+  const height = Number(template?.height || 54);
+  return {
+    position: 'absolute',
+    left: `${Math.max(0, Math.min(100, ((style.x || 0) / width) * 100))}%`,
+    top: `${Math.max(0, Math.min(100, ((style.y || 0) / height) * 100))}%`,
+    fontSize: `${style.fontSize || 8}px`,
+    fontWeight: style.fontWeight || 500,
+    color: style.color || '#111827',
+    maxWidth: `${Math.max(0, Math.min(100, ((style.maxWidth || width) / width) * 100))}%`,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    textAlign: style.align || 'left',
+  };
+};
+
 const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavigate }) => {
   const [loading, setLoading] = useState(false);
   const [cardTypes, setCardTypes] = useState<MbcCardType[]>([]);
@@ -586,7 +630,7 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
               <input className="border p-2" placeholder="Background Image URL" value={templateForm.background_image || ''} onChange={e => setTemplateForm(prev => ({ ...prev, background_image: e.target.value }))} />
               <input className="border p-2" placeholder="Logo URL" value={templateForm.logo_image || ''} onChange={e => setTemplateForm(prev => ({ ...prev, logo_image: e.target.value }))} />
             </div>
-            <textarea className="border p-2 w-full text-xs" placeholder="Template JSON (positions for name/phone/dob/address/validity/qr/footer)" value={typeof templateForm.template_json === 'string' ? templateForm.template_json : JSON.stringify(templateForm.template_json || {})} onChange={e => {
+            <textarea className="border p-2 w-full text-xs" placeholder='Template JSON (example: {"fields":{"customer_name":{"x":4,"y":14,"fontSize":13,"fontWeight":800,"color":"#1d4ed8"},"qr":{"x":63,"y":8,"maxWidth":18}}})' value={typeof templateForm.template_json === 'string' ? templateForm.template_json : JSON.stringify(templateForm.template_json || {})} onChange={e => {
               try {
                 setTemplateForm(prev => ({ ...prev, template_json: JSON.parse(e.target.value || '{}') }));
               } catch {
@@ -753,20 +797,20 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
 
             {printPreviewCard ? (
               <>
-                <div className="border p-4 bg-white max-w-[500px]" style={{ aspectRatio: `${Number(printTemplate?.width || 86)} / ${Number(printTemplate?.height || 54)}`, backgroundImage: printTemplate?.background_image ? `url(${printTemplate.background_image})` : undefined, backgroundSize: 'cover' }}>
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <div className="text-sm font-black uppercase">{printType?.type_name || 'Membership Card'}</div>
-                      <div className="text-lg font-black uppercase text-primary mt-2">{printPreviewCard.customer_name}</div>
-                      <div className="text-xs mt-1">Card No: {printPreviewCard.card_number}</div>
-                      <div className="text-xs">Phone: {printPreviewCard.phone_number}</div>
-                      <div className="text-xs">DOB: {formatDateForDisplay(printPreviewCard.date_of_birth)}</div>
-                      <div className="text-xs">Validity: {formatDateForDisplay(printPreviewCard.validity_from)} to {formatDateForDisplay(printPreviewCard.validity_to)}</div>
-                    </div>
-                    <div className="w-20 h-20 border border-dashed flex items-center justify-center text-[9px] text-center p-1">QR / Barcode\n{printPreviewCard.qr_value || ''}</div>
-                  </div>
-                  <div className="text-[10px] mt-3">Address: {[printPreviewCard.address_line_1, printPreviewCard.address_line_2, printPreviewCard.city].filter(Boolean).join(', ')}</div>
-                  <div className="text-[10px] mt-2">{printPreviewCard.website_link || 'www.mdxera.com'} | {printPreviewCard.office_location_text || 'Office'}</div>
+                <div className="border bg-white max-w-[500px] relative overflow-hidden" style={{ aspectRatio: `${Number(printTemplate?.width || 86)} / ${Number(printTemplate?.height || 54)}`, backgroundImage: printTemplate?.background_image ? `url(${printTemplate.background_image})` : undefined, backgroundSize: 'cover', backgroundPosition: 'center' }}>
+                  <div style={getFieldStyle('card_type', printTemplate)}>{printType?.type_name || 'Membership Card'}</div>
+                  <div style={getFieldStyle('customer_name', printTemplate)}>{printPreviewCard.customer_name}</div>
+                  <div style={getFieldStyle('card_number', printTemplate)}>Card No: {printPreviewCard.card_number}</div>
+                  <div style={getFieldStyle('phone', printTemplate)}>Phone: {printPreviewCard.phone_number}</div>
+                  <div style={getFieldStyle('dob', printTemplate)}>DOB: {formatDateForDisplay(printPreviewCard.date_of_birth)}</div>
+                  <div style={getFieldStyle('validity', printTemplate)}>Validity: {formatDateForDisplay(printPreviewCard.validity_from)} to {formatDateForDisplay(printPreviewCard.validity_to)}</div>
+                  <div style={getFieldStyle('address', printTemplate)}>Address: {[printPreviewCard.address_line_1, printPreviewCard.address_line_2, printPreviewCard.city].filter(Boolean).join(', ')}</div>
+                  <div style={getFieldStyle('footer', printTemplate)}>{printPreviewCard.website_link || 'www.mdxera.com'} | {printPreviewCard.office_location_text || 'Office'}</div>
+                  <img
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(printPreviewCard.qr_value || `${window.location.origin}/mbc/${printPreviewCard.card_number}`)}`}
+                    alt="Card QR"
+                    style={{ ...getFieldStyle('qr', printTemplate), width: '20%', aspectRatio: '1 / 1', objectFit: 'contain' }}
+                  />
                 </div>
                 <div className="flex gap-2">
                   <button className="px-3 py-2 bg-primary text-white text-xs font-black uppercase" onClick={() => window.print()}>Print</button>

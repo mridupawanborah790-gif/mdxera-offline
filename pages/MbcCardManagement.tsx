@@ -80,6 +80,10 @@ const addByUnit = (date: Date, value: number, unit: ValidityUnit) => {
 };
 
 const toDateInput = (date: Date) => date.toISOString().slice(0, 10);
+const formatDateForInput = (value?: string | null) => {
+  if (!value) return '';
+  return value.slice(0, 10);
+};
 const formatDateForDisplay = (value?: string | null) => {
   if (!value) return '-';
   const [year, month, day] = value.slice(0, 10).split('-');
@@ -114,6 +118,7 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
   const [typeForm, setTypeForm] = useState<Partial<MbcCardType>>(EMPTY_TYPE);
   const [templateForm, setTemplateForm] = useState<Partial<MbcCardTemplate>>(EMPTY_TEMPLATE);
   const [cardForm, setCardForm] = useState<Partial<MbcCard>>(EMPTY_CARD);
+  const [formMode, setFormMode] = useState<'create' | 'edit'>('create');
 
   const [selectedCardId, setSelectedCardId] = useState<string>('');
   const [renewMonths, setRenewMonths] = useState(12);
@@ -227,24 +232,38 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
   };
 
 
-  const loadCardForEdit = async (card: MbcCard) => {
-    setLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('mbc_cards')
-        .select('*')
-        .eq('id', card.id)
-        .eq('card_number', card.card_number)
-        .eq('organization_id', currentUser.organization_id)
-        .single();
-      if (error) throw error;
-      setCardForm(data);
-      onNavigate('mbcGenerateCard');
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Unable to load selected card for edit');
-    } finally {
-      setLoading(false);
-    }
+  const loadCardForEdit = (card: MbcCard) => {
+    console.log('EDIT CARD DATA:', card);
+    setFormMode('edit');
+    const editFormData: Partial<MbcCard> = {
+      id: card.id,
+      card_number: card.card_number,
+      customer_name: card.customer_name || (card as any).customerName || '',
+      guardian_name: card.guardian_name || (card as any).guardianName || '',
+      gender: card.gender || '',
+      date_of_birth: formatDateForInput(card.date_of_birth || (card as any).dob || (card as any).dateOfBirth),
+      address_line_1: card.address_line_1 || (card as any).address_line1 || '',
+      address_line_2: card.address_line_2 || (card as any).address_line2 || '',
+      city: card.city || '',
+      district: card.district || '',
+      state: card.state || '',
+      pin_code: card.pin_code || '',
+      phone_number: card.phone_number || (card as any).phoneNumber || '',
+      alternate_phone: card.alternate_phone || (card as any).alternatePhone || '',
+      email: card.email || '',
+      card_type_id: card.card_type_id || (card as any).card_type || (card as any).cardType || '',
+      card_value: card.card_value || 0,
+      template_id: card.template_id || '',
+      qr_value: card.qr_value || (card as any).qr_barcode_value || '',
+      validity_from: formatDateForInput(card.validity_from || (card as any).validityFrom),
+      validity_to: formatDateForInput(card.validity_to || (card as any).validityTo),
+      remarks: card.remarks || '',
+      status: card.status || 'active',
+      created_at: card.created_at,
+    };
+    console.log('FORM DATA:', editFormData);
+    setCardForm(editFormData);
+    onNavigate('mbcGenerateCard');
   };
 
   const saveCard = async () => {
@@ -302,7 +321,6 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
         .from('mbc_cards')
         .update(payload)
         .eq('id', cardForm.id)
-        .eq('card_number', cardNumber)
         .eq('organization_id', currentUser.organization_id)
         .select('id')
         .single();
@@ -333,6 +351,7 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
     });
 
     setCardForm(EMPTY_CARD);
+    setFormMode('create');
     refreshAll();
     onNavigate('mbcCardList');
   };
@@ -425,7 +444,7 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
 
   const actionButtons = (
     <div className="flex gap-2 flex-wrap">
-      <button className="px-2 py-1 bg-primary text-white text-[10px] font-black uppercase" onClick={() => onNavigate('mbcGenerateCard')}>New Card</button>
+      <button className="px-2 py-1 bg-primary text-white text-[10px] font-black uppercase" onClick={() => { setFormMode('create'); setCardForm(EMPTY_CARD); onNavigate('mbcGenerateCard'); }}>New Card</button>
       <button className="px-2 py-1 bg-primary text-white text-[10px] font-black uppercase" onClick={() => onNavigate('mbcCardList')}>Card List</button>
       <button className="px-2 py-1 bg-primary text-white text-[10px] font-black uppercase" onClick={() => onNavigate('mbcCardTypeMaster')}>Card Type Master</button>
       <button className="px-2 py-1 bg-primary text-white text-[10px] font-black uppercase" onClick={() => onNavigate('mbcCardTemplateMaster')}>Template Master</button>
@@ -585,7 +604,7 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
 
         {activeScreen === 'mbcGenerateCard' && (
           <Card className="p-3 border border-gray-300 space-y-3">
-            <div className="text-xs font-black uppercase">Generate New MBC Card</div>
+            <div className="text-xs font-black uppercase">{formMode === 'edit' ? 'Edit MBC Card' : 'Generate New MBC Card'}</div>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-xs">
               <input className="border p-2" placeholder="Customer Name" value={cardForm.customer_name || ''} onChange={e => setCardForm(prev => ({ ...prev, customer_name: e.target.value }))} />
               <input className="border p-2" placeholder="Guardian Name" value={cardForm.guardian_name || ''} onChange={e => setCardForm(prev => ({ ...prev, guardian_name: e.target.value }))} />
@@ -649,7 +668,7 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
             <textarea className="border p-2 w-full text-xs" placeholder="Remarks / Notes" value={cardForm.remarks || ''} onChange={e => setCardForm(prev => ({ ...prev, remarks: e.target.value }))} />
 
             <div className="flex gap-2">
-              <button className="px-3 py-2 bg-primary text-white text-xs font-black uppercase" onClick={saveCard}>Save / Generate Card</button>
+              <button className="px-3 py-2 bg-primary text-white text-xs font-black uppercase" onClick={saveCard}>{formMode === 'edit' ? 'Update Card' : 'Save / Generate Card'}</button>
               <button className="px-3 py-2 border border-gray-400 text-xs font-black uppercase" onClick={() => setSelectedCardId(cardForm.id || '')}>Preview Current</button>
             </div>
           </Card>

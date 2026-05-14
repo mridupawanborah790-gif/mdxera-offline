@@ -174,30 +174,44 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
   const [statusFilter, setStatusFilter] = useState('');
   const [cardTypeFilter, setCardTypeFilter] = useState('');
 
-  const refreshAll = async () => {
-    setLoading(true);
-    try {
-      const [typeRes, templateRes, cardsRes, historyRes] = await Promise.all([
-        supabase.from('mbc_card_types').select('*').eq('organization_id', currentUser.organization_id).order('created_at', { ascending: false }),
-        supabase.from('mbc_card_templates').select('*').eq('organization_id', currentUser.organization_id).order('created_at', { ascending: false }),
-        supabase.from('mbc_cards').select('*').eq('organization_id', currentUser.organization_id).order('created_at', { ascending: false }),
-        supabase.from('mbc_card_history').select('*').eq('organization_id', currentUser.organization_id).order('action_date', { ascending: false }),
-      ]);
-      if (typeRes.error) throw typeRes.error;
-      if (templateRes.error) throw templateRes.error;
-      if (cardsRes.error) throw cardsRes.error;
-      if (historyRes.error) throw historyRes.error;
-      setCardTypes(typeRes.data || []);
-      setTemplates(templateRes.data || []);
-      setCards(cardsRes.data || []);
-      setHistory(historyRes.data || []);
-    } finally {
-      setLoading(false);
-    }
+  const fetchCardTypes = async () => {
+    const { data, error } = await supabase.from('mbc_card_types').select('*').eq('organization_id', currentUser.organization_id).order('created_at', { ascending: false });
+    if (error) throw error;
+    const updatedTypes = data || [];
+    setCardTypes(updatedTypes);
+    return updatedTypes;
+  };
+
+  const fetchTemplates = async () => {
+    const { data, error } = await supabase.from('mbc_card_templates').select('*').eq('organization_id', currentUser.organization_id).order('created_at', { ascending: false });
+    if (error) throw error;
+    const updatedTemplates = data || [];
+    setTemplates(updatedTemplates);
+    return updatedTemplates;
+  };
+
+  const fetchCards = async () => {
+    const { data, error } = await supabase.from('mbc_cards').select('*').eq('organization_id', currentUser.organization_id).order('created_at', { ascending: false });
+    if (error) throw error;
+    const updatedCards = data || [];
+    setCards(updatedCards);
+    return updatedCards;
+  };
+
+  const fetchRenewalHistory = async () => {
+    const { data, error } = await supabase.from('mbc_card_history').select('*').eq('organization_id', currentUser.organization_id).order('action_date', { ascending: false });
+    if (error) throw error;
+    const updatedHistory = data || [];
+    setHistory(updatedHistory);
+    return updatedHistory;
+  };
+
+  const refreshMbcMasterData = async () => {
+    await Promise.all([fetchCardTypes(), fetchTemplates(), fetchCards(), fetchRenewalHistory()]);
   };
 
   useEffect(() => {
-    refreshAll();
+    void refreshMbcMasterData();
   }, [currentUser.organization_id]);
 
   useEffect(() => {
@@ -253,13 +267,19 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
       organization_id: currentUser.organization_id,
       updated_at: new Date().toISOString(),
     };
-    const { error } = await supabase.from('mbc_card_types').upsert(payload);
-    if (error) {
-      alert(error.message);
-      return;
+    setLoading(true);
+    try {
+      const { error } = await supabase.from('mbc_card_types').upsert(payload);
+      if (error) {
+        alert(error.message);
+        return;
+      }
+      setTypeForm(EMPTY_TYPE);
+      await fetchCardTypes();
+      await fetchCards();
+    } finally {
+      setLoading(false);
     }
-    setTypeForm(EMPTY_TYPE);
-    refreshAll();
   };
 
   const saveTemplate = async () => {
@@ -267,17 +287,23 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
       alert('Template name and code are required');
       return;
     }
-    const { error } = await supabase.from('mbc_card_templates').upsert({
-      ...templateForm,
-      organization_id: currentUser.organization_id,
-      updated_at: new Date().toISOString(),
-    });
-    if (error) {
-      alert(error.message);
-      return;
+    setLoading(true);
+    try {
+      const { error } = await supabase.from('mbc_card_templates').upsert({
+        ...templateForm,
+        organization_id: currentUser.organization_id,
+        updated_at: new Date().toISOString(),
+      });
+      if (error) {
+        alert(error.message);
+        return;
+      }
+      setTemplateForm(EMPTY_TEMPLATE);
+      await fetchTemplates();
+      await fetchCards();
+    } finally {
+      setLoading(false);
     }
-    setTemplateForm(EMPTY_TEMPLATE);
-    refreshAll();
   };
 
 
@@ -384,46 +410,51 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
       card_value: Number(cardForm.card_value),
     };
 
-    let savedId = String(cardForm.id || '');
-    if (cardForm.id) {
-      const { data, error } = await supabase
-        .from('mbc_cards')
-        .update(payload)
-        .eq('id', cardForm.id)
-        .eq('organization_id', currentUser.organization_id)
-        .select('id')
-        .single();
-      if (error) {
-        alert(error.message);
-        return;
+    setLoading(true);
+    try {
+      let savedId = String(cardForm.id || '');
+      if (cardForm.id) {
+        const { data, error } = await supabase
+          .from('mbc_cards')
+          .update(payload)
+          .eq('id', cardForm.id)
+          .eq('organization_id', currentUser.organization_id)
+          .select('id')
+          .single();
+        if (error) {
+          alert(error.message);
+          return;
+        }
+        savedId = data.id;
+      } else {
+        const { data, error } = await supabase.from('mbc_cards').insert(payload).select('id').single();
+        if (error) {
+          alert(error.message);
+          return;
+        }
+        savedId = data.id;
       }
-      savedId = data.id;
-    } else {
-      const { data, error } = await supabase.from('mbc_cards').insert(payload).select('id').single();
-      if (error) {
-        alert(error.message);
-        return;
-      }
-      savedId = data.id;
+
+      await supabase.from('mbc_card_history').insert({
+        organization_id: currentUser.organization_id,
+        mbc_card_id: savedId,
+        action_type: cardForm.id ? 'update' : 'create',
+        new_card_type_id: payload.card_type_id,
+        new_validity_to: payload.validity_to,
+        new_card_value: payload.card_value,
+        remarks: payload.remarks || '',
+        action_by: currentUser.full_name,
+        action_date: now,
+      });
+
+      window.sessionStorage.removeItem(EDIT_CARD_STORAGE_KEY);
+      setCardForm(EMPTY_CARD);
+      setFormMode('create');
+      await refreshMbcMasterData();
+      onNavigate('mbcCardList');
+    } finally {
+      setLoading(false);
     }
-
-    await supabase.from('mbc_card_history').insert({
-      organization_id: currentUser.organization_id,
-      mbc_card_id: savedId,
-      action_type: cardForm.id ? 'update' : 'create',
-      new_card_type_id: payload.card_type_id,
-      new_validity_to: payload.validity_to,
-      new_card_value: payload.card_value,
-      remarks: payload.remarks || '',
-      action_by: currentUser.full_name,
-      action_date: now,
-    });
-
-    window.sessionStorage.removeItem(EDIT_CARD_STORAGE_KEY);
-    setCardForm(EMPTY_CARD);
-    setFormMode('create');
-    refreshAll();
-    onNavigate('mbcCardList');
   };
 
   const doRenewUpgrade = async (mode: 'renew' | 'upgrade') => {
@@ -449,29 +480,35 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
       updated_at: new Date().toISOString(),
     };
 
-    const { error } = await supabase.from('mbc_cards').update(patch).eq('id', card.id);
-    if (error) {
-      alert(error.message);
-      return;
+    setLoading(true);
+    try {
+      const { error } = await supabase.from('mbc_cards').update(patch).eq('id', card.id);
+      if (error) {
+        alert(error.message);
+        return;
+      }
+
+      await supabase.from('mbc_card_history').insert({
+        organization_id: currentUser.organization_id,
+        mbc_card_id: card.id,
+        action_type: mode,
+        old_card_type_id: oldType,
+        new_card_type_id: patch.card_type_id,
+        old_validity_to: oldTo,
+        new_validity_to: patch.validity_to,
+        old_card_value: oldValue,
+        new_card_value: patch.card_value,
+        remarks: historyRemarks,
+        action_by: currentUser.full_name,
+        action_date: new Date().toISOString(),
+      });
+
+      setHistoryRemarks('');
+      await fetchCards();
+      await fetchRenewalHistory();
+    } finally {
+      setLoading(false);
     }
-
-    await supabase.from('mbc_card_history').insert({
-      organization_id: currentUser.organization_id,
-      mbc_card_id: card.id,
-      action_type: mode,
-      old_card_type_id: oldType,
-      new_card_type_id: patch.card_type_id,
-      old_validity_to: oldTo,
-      new_validity_to: patch.validity_to,
-      old_card_value: oldValue,
-      new_card_value: patch.card_value,
-      remarks: historyRemarks,
-      action_by: currentUser.full_name,
-      action_date: new Date().toISOString(),
-    });
-
-    setHistoryRemarks('');
-    refreshAll();
   };
 
   const printPreviewCard = cards.find(c => c.id === selectedCardId) || cards[0];
@@ -809,7 +846,16 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
                           <button className="px-2 py-1 border mr-1" onClick={() => loadCardForEdit(card)}>Edit</button>
                           <button className="px-2 py-1 border mr-1" onClick={() => { setSelectedCardId(card.id); onNavigate('mbcCardPrintPreview'); }}>Print</button>
                           <button className="px-2 py-1 border mr-1" onClick={() => { setSelectedCardId(card.id); onNavigate('mbcCardRenewalHistory'); }}>Renew/Upgrade</button>
-                          <button className="px-2 py-1 border" onClick={async () => { await supabase.from('mbc_cards').update({ status: 'inactive' }).eq('id', card.id); refreshAll(); }}>Deactivate</button>
+                          <button className="px-2 py-1 border" onClick={async () => {
+                            setLoading(true);
+                            try {
+                              await supabase.from('mbc_cards').update({ status: 'inactive' }).eq('id', card.id);
+                              await fetchCards();
+                              await fetchRenewalHistory();
+                            } finally {
+                              setLoading(false);
+                            }
+                          }}>Deactivate</button>
                         </td>
                       </tr>
                     );
@@ -832,7 +878,14 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
                 const found = cards.find(c => [c.card_number, c.customer_name, c.phone_number].join(' ').toLowerCase().includes(q));
                 if (found) setSelectedCardId(found.id);
               }} />
-              <button className="px-3 py-2 border border-gray-300 font-black uppercase" onClick={refreshAll}>Re-generate Preview</button>
+              <button className="px-3 py-2 border border-gray-300 font-black uppercase" onClick={async () => {
+                setLoading(true);
+                try {
+                  await refreshMbcMasterData();
+                } finally {
+                  setLoading(false);
+                }
+              }}>Re-generate Preview</button>
             </div>
 
             {printPreviewCard ? (

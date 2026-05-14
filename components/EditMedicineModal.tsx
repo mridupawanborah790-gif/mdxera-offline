@@ -43,7 +43,7 @@ const EditMedicineModal: React.FC<EditMedicineModalProps> = ({ isOpen, onClose, 
             setFormState({ ...medicine, movingAverageRate });
             setErrors({});
         }
-    }, [isOpen, medicine, inventoryItems]);
+    }, [isOpen, medicine]); // inventoryItems omitted: default [] creates a new ref each render, which would reset formState on every keystroke
 
     const validate = useCallback(() => {
         if (!formState) return false;
@@ -97,15 +97,16 @@ const EditMedicineModal: React.FC<EditMedicineModalProps> = ({ isOpen, onClose, 
 
     const materialPolicy = getResolvedMedicinePolicy(formState);
 
-    const renderInput = (name: keyof Medicine, label: string, type = 'text', isOptional = true) => (
+    const renderInput = (name: keyof Medicine, label: string, type = 'text', isOptional = true, readOnly = false) => (
         <div>
             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">{label} {!isOptional && '*'}</label>
-            <input 
-                type={type} 
-                name={name} 
-                value={(formState[name] as string | number) ?? ''} 
-                onChange={handleChange} 
-                className={`mt-1 block w-full p-2 border border-gray-400 font-bold text-sm bg-input-bg text-app-text-primary ${errors[name] ? 'border-red-500' : 'focus:bg-yellow-50 outline-none'}`} 
+            <input
+                type={type}
+                name={name}
+                value={(formState[name] as string | number) ?? ''}
+                onChange={readOnly ? undefined : handleChange}
+                readOnly={readOnly}
+                className={`mt-1 block w-full p-2 border font-bold text-sm text-app-text-primary ${readOnly ? 'bg-gray-100 border-gray-300 text-gray-500 cursor-not-allowed select-none' : `bg-input-bg border-gray-400 ${errors[name] ? 'border-red-500' : 'focus:bg-yellow-50 outline-none'}`}`}
             />
             {errors[name] && <p className="text-[10px] text-red-500 mt-1 uppercase font-bold">{errors[name]}</p>}
         </div>
@@ -116,8 +117,8 @@ const EditMedicineModal: React.FC<EditMedicineModalProps> = ({ isOpen, onClose, 
             <form onSubmit={handleSubmit} className="flex flex-col h-full overflow-hidden">
                 <div className="p-6 overflow-y-auto space-y-6 flex-1 bg-[var(--modal-bg-light)] dark:bg-[var(--modal-bg-dark)]">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        {renderInput('name', 'Product Name', 'text', false)}
-                        {renderInput('materialCode', 'Material Code', 'text', false)}
+                        {renderInput('name', 'Product Name', 'text', false, true)}
+                        {renderInput('materialCode', 'Material Code', 'text', false, true)}
                         {renderInput('barcode', 'Barcode')}
                         {renderInput('brand', 'Brand Name')}
                         {renderInput('manufacturer', 'Manufacturer')}

@@ -1158,7 +1158,7 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
     }, [isSearchModalOpen, deduplicatedSearchInventory, selectedSearchIndex, activeRowId, items, inventory]);
 
     const handleGlobalKeyDown = useCallback((e: KeyboardEvent) => {
-        if (isSearchModalOpen || isWebcamModalOpen || isAddSupplierModalOpen || isAddMedicineMasterModalOpen || isLinkModalOpen || isRateTierModalOpen || isSupplierSearchModalOpen) return;
+        if (isSearchModalOpen || isWebcamModalOpen || isAddSupplierModalOpen || isAddMedicineMasterModalOpen || isLinkModalOpen || isRateTierModalOpen || isSupplierSearchModalOpen || isEditMaterialModalOpen) return;
 
         if (e.key === 'F8') {
             e.preventDefault();
@@ -1200,7 +1200,7 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
                 (nameInput as HTMLInputElement)?.select();
             }
         }
-    }, [activeRowId, items, isSearchModalOpen, isWebcamModalOpen, isAddSupplierModalOpen, isAddMedicineMasterModalOpen, isLinkModalOpen, isRateTierModalOpen, isSupplierSearchModalOpen, triggerSaveAction]);
+    }, [activeRowId, items, isSearchModalOpen, isWebcamModalOpen, isAddSupplierModalOpen, isAddMedicineMasterModalOpen, isLinkModalOpen, isRateTierModalOpen, isSupplierSearchModalOpen, isEditMaterialModalOpen, triggerSaveAction]);
 
     useEffect(() => {
         window.addEventListener('keydown', handleGlobalKeyDown);

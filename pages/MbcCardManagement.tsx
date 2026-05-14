@@ -20,6 +20,7 @@ interface Props {
 
 type ValidityUnit = 'days' | 'months' | 'years';
 
+const toDateInput = (date: Date) => date.toISOString().slice(0, 10);
 
 type AddCardValueForm = {
   cardId: string;
@@ -102,7 +103,6 @@ const addByUnit = (date: Date, value: number, unit: ValidityUnit) => {
   return next;
 };
 
-const toDateInput = (date: Date) => date.toISOString().slice(0, 10);
 const formatDateForInput = (value?: string | null) => {
   if (!value) return '';
   return value.slice(0, 10);

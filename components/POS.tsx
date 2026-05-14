@@ -1224,7 +1224,7 @@ const POS = forwardRef<any, POSProps>(({
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            if (isCustomerSearchModalOpen || schemeItem || pendingBatchSelection || isSearchModalOpen || isSchemeCalcOpen || isAddCustomerModalOpen) return;
+            if (isCustomerSearchModalOpen || schemeItem || pendingBatchSelection || isSearchModalOpen || isSchemeCalcOpen || isAddCustomerModalOpen || isEditMaterialModalOpen) return;
             
             if (!shouldHandleScreenShortcut(e, ['pos', 'nonGstPos'], { allowWhenInputFocused: true })) return;
             if (e.ctrlKey && e.key.toLowerCase() === 's') {
@@ -1313,7 +1313,7 @@ const POS = forwardRef<any, POSProps>(({
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [handleSave, cartItems, inventory, customerSearch, customerPhone, billMode, billCategory, invoiceDate, referredBy, addNotification, isCustomerSearchModalOpen, schemeItem, pendingBatchSelection, isSearchModalOpen]);
+    }, [handleSave, cartItems, inventory, customerSearch, customerPhone, billMode, billCategory, invoiceDate, referredBy, addNotification, isCustomerSearchModalOpen, schemeItem, pendingBatchSelection, isSearchModalOpen, isEditMaterialModalOpen]);
 
     useImperativeHandle(ref, () => ({
         handleSave,

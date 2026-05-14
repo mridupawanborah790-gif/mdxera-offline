@@ -46,6 +46,9 @@ const EMPTY_TEMPLATE: Partial<MbcCardTemplate> = {
   is_active: true,
 };
 
+
+const EDIT_CARD_STORAGE_KEY = 'mbc_edit_card_id';
+
 const EMPTY_CARD: Partial<MbcCard> = {
   customer_name: '',
   guardian_name: '',
@@ -321,6 +324,9 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
       created_at: sourceCard.created_at,
     };
     setCardForm(editFormData);
+    if (sourceCard.id) {
+      window.sessionStorage.setItem(EDIT_CARD_STORAGE_KEY, sourceCard.id);
+    }
     onNavigate('mbcGenerateCard');
   };
 
@@ -413,6 +419,7 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
       action_date: now,
     });
 
+    window.sessionStorage.removeItem(EDIT_CARD_STORAGE_KEY);
     setCardForm(EMPTY_CARD);
     setFormMode('create');
     refreshAll();
@@ -492,6 +499,22 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
     };
   }, [cards, cardTypeMap]);
 
+
+  useEffect(() => {
+    if (activeScreen !== 'mbcGenerateCard') return;
+    const editCardId = window.sessionStorage.getItem(EDIT_CARD_STORAGE_KEY);
+    if (!editCardId) return;
+    const selected = cards.find(c => c.id === editCardId);
+    if (!selected) return;
+    setFormMode('edit');
+    setCardForm({
+      ...selected,
+      date_of_birth: formatDateForInput(selected.date_of_birth),
+      validity_from: formatDateForInput(selected.validity_from),
+      validity_to: formatDateForInput(selected.validity_to),
+    });
+  }, [activeScreen, cards]);
+
   const renderTitle = () => {
     const map: Record<MbcScreen, string> = {
       mbcCardDashboard: 'MBC Card Dashboard',
@@ -507,7 +530,7 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
 
   const actionButtons = (
     <div className="flex gap-2 flex-wrap">
-      <button className="px-2 py-1 bg-primary text-white text-[10px] font-black uppercase" onClick={() => { setFormMode('create'); setCardForm(EMPTY_CARD); onNavigate('mbcGenerateCard'); }}>New Card</button>
+      <button className="px-2 py-1 bg-primary text-white text-[10px] font-black uppercase" onClick={() => { setFormMode('create'); setCardForm(EMPTY_CARD); window.sessionStorage.removeItem(EDIT_CARD_STORAGE_KEY); onNavigate('mbcGenerateCard'); }}>New Card</button>
       <button className="px-2 py-1 bg-primary text-white text-[10px] font-black uppercase" onClick={() => onNavigate('mbcCardList')}>Card List</button>
       <button className="px-2 py-1 bg-primary text-white text-[10px] font-black uppercase" onClick={() => onNavigate('mbcCardTypeMaster')}>Card Type Master</button>
       <button className="px-2 py-1 bg-primary text-white text-[10px] font-black uppercase" onClick={() => onNavigate('mbcCardTemplateMaster')}>Template Master</button>
@@ -689,7 +712,7 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
                 <option value="">Card Type</option>
                 {cardTypes.filter(t => t.is_active !== false).map(t => <option key={t.id} value={t.id}>{t.type_name}</option>)}
               </select>
-              <input className="border p-2" placeholder="Card Number" value={cardForm.card_number || ''} onChange={e => setCardForm(prev => ({ ...prev, card_number: e.target.value }))} />
+              <input className="border p-2" placeholder="Card Number" value={cardForm.card_number || ''} readOnly={formMode === 'edit'} onChange={e => setCardForm(prev => ({ ...prev, card_number: e.target.value }))} />
               <input type="number" step="any" className="border p-2" placeholder="Card Value" value={cardForm.card_value ?? 0} onChange={e => setCardForm(prev => ({ ...prev, card_value: Number(e.target.value) }))} />
               <select className="border p-2" value={cardForm.template_id || ''} onChange={e => setCardForm(prev => ({ ...prev, template_id: e.target.value }))}>
                 <option value="">Card Template</option>

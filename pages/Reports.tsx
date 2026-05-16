@@ -1233,6 +1233,19 @@ const Reports: React.FC<ReportsProps> = ({
     return { recordCount: filteredData.length, sums };
   }, [headers, filteredData]);
 
+  const stockSummaryTotals = useMemo(() => {
+    if (activeReportId !== 'stockSummary') return { packQty: 0, looseQty: 0, totalQty: 0 };
+
+    return filteredData.reduce((acc, row) => {
+      const stockText = String(row['Stock (Pack / Loose / Total)'] || '');
+      const [packQty = '0', looseQty = '0', totalQty = '0'] = stockText.split('/').map(part => part.trim());
+      acc.packQty += Number(packQty) || 0;
+      acc.looseQty += Number(looseQty) || 0;
+      acc.totalQty += Number(totalQty) || 0;
+      return acc;
+    }, { packQty: 0, looseQty: 0, totalQty: 0 });
+  }, [activeReportId, filteredData]);
+
   const formatInrAmount = (amount: number) => `₹${Number(amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const selectedRow = selectedRowIndex >= 0 ? filteredData[selectedRowIndex] : null;
@@ -1513,7 +1526,7 @@ const Reports: React.FC<ReportsProps> = ({
             {activeReportId === 'stockSummary' ? (
               <>
                 <span><strong>Total Records:</strong> {totals.recordCount}</span>
-                <span><strong>Total Stock Qty:</strong> {Math.round(totals.sums['Quantity'] || 0).toLocaleString('en-IN')}</span>
+                <span><strong>Total Stock:</strong> {`${Math.round(stockSummaryTotals.packQty).toLocaleString('en-IN')} / ${Math.round(stockSummaryTotals.looseQty).toLocaleString('en-IN')} / ${Math.round(stockSummaryTotals.totalQty).toLocaleString('en-IN')}`}</span>
                 <span><strong>MRP Amount:</strong> {formatInrAmount(totals.sums['MRP Amount'] || 0)}</span>
                 <span><strong>PTR Amount:</strong> {formatInrAmount(totals.sums['PTR Amount'] || 0)}</span>
               </>

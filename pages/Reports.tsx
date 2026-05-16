@@ -1233,6 +1233,8 @@ const Reports: React.FC<ReportsProps> = ({
     return { recordCount: filteredData.length, sums };
   }, [headers, filteredData]);
 
+  const formatInrAmount = (amount: number) => `₹${Number(amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
   const selectedRow = selectedRowIndex >= 0 ? filteredData[selectedRowIndex] : null;
 
   const doctorDetailSummary = useMemo(() => {
@@ -1508,11 +1510,22 @@ const Reports: React.FC<ReportsProps> = ({
           </div>
 
           <div className="border-t px-2 py-1 text-[10px] bg-gray-100 flex flex-wrap gap-x-4 gap-y-1">
-            <span><strong>Total Records:</strong> {totals.recordCount}</span>
-            {Object.entries(totals.sums).slice(0, activeReportId === 'doctorWiseSalesSummaryReport' ? 8 : 6).map(([key, value]) => (
-              <span key={key}><strong>{key}:</strong> {value}</span>
-            ))}
-            {activeReportId === 'doctorWiseSalesSummaryReport' && <span><strong>Grand Total:</strong> {round2((totals.sums['Net Sales Value'] || 0) + (totals.sums['Total GST Amount'] || 0) - (totals.sums['Total Discount'] || 0))}</span>}
+            {activeReportId === 'stockSummary' ? (
+              <>
+                <span><strong>Total Records:</strong> {totals.recordCount}</span>
+                <span><strong>Total Stock Qty:</strong> {Math.round(totals.sums['Quantity'] || 0).toLocaleString('en-IN')}</span>
+                <span><strong>MRP Amount:</strong> {formatInrAmount(totals.sums['MRP Amount'] || 0)}</span>
+                <span><strong>PTR Amount:</strong> {formatInrAmount(totals.sums['PTR Amount'] || 0)}</span>
+              </>
+            ) : (
+              <>
+                <span><strong>Total Records:</strong> {totals.recordCount}</span>
+                {Object.entries(totals.sums).slice(0, activeReportId === 'doctorWiseSalesSummaryReport' ? 8 : 6).map(([key, value]) => (
+                  <span key={key}><strong>{key}:</strong> {value}</span>
+                ))}
+                {activeReportId === 'doctorWiseSalesSummaryReport' && <span><strong>Grand Total:</strong> {round2((totals.sums['Net Sales Value'] || 0) + (totals.sums['Total GST Amount'] || 0) - (totals.sums['Total Discount'] || 0))}</span>}
+              </>
+            )}
           </div>
         </section>
 

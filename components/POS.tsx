@@ -21,7 +21,7 @@ import { handleEnterToNextField } from '../utils/navigation';
 import { fuzzyMatch } from '../utils/search';
 import { calculateCustomerReceivableBreakdown, formatExpiryToMMYY, getOutstandingBalance, parseNumber, checkIsExpired } from '../utils/helpers';
 import { calculateBillingTotals, resolveBillingSettings, calculateLineNetAmount, isRateFieldAvailable } from '../utils/billing';
-import { isLiquidOrWeightPack, resolveUnitsPerStrip } from '../utils/pack';
+import { extractPackMultiplier, isLiquidOrWeightPack, resolveUnitsPerStrip } from '../utils/pack';
 import { shouldHandleScreenShortcut } from '../utils/screenShortcuts';
 import { evaluateCustomerCredit } from '../utils/creditControl';
 
@@ -367,6 +367,7 @@ const POS = forwardRef<any, POSProps>(({
     }, [currentUser?.organization_type, configurations?.displayOptions?.pricingMode, transactionToEdit?.pricingMode, rateFieldAvailable]);
 
     const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+    const [isAddMedicineMasterModalOpen, setIsAddMedicineMasterModalOpen] = useState(false);
     const [isInsightsOpen, setIsInsightsOpen] = useState(false);
     const [isKeywordFocused, setIsKeywordFocused] = useState(false);
     const [salesHistory, setSalesHistory] = useState<Transaction[]>([]);
@@ -1588,6 +1589,17 @@ const POS = forwardRef<any, POSProps>(({
             return;
         }
 
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+            e.preventDefault();
+            const typedName = modalSearchTerm.trim();
+            if (!typedName) {
+                addNotification('Please type product name first to create new material.', 'warning');
+                return;
+            }
+            setIsAddMedicineMasterModalOpen(true);
+            return;
+        }
+
         if (deduplicatedSearchInventory.length === 0) return;
 
         if (e.key === 'ArrowDown') {
@@ -1603,6 +1615,18 @@ const POS = forwardRef<any, POSProps>(({
             }
             const selectedWrapper = deduplicatedSearchInventory[selectedSearchIndex];
             if (selectedWrapper) triggerBatchSelection(selectedWrapper);
+        }
+    };
+
+    const handleCreateMaterialFromMatrixKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+            e.preventDefault();
+            const typedName = modalSearchTerm.trim();
+            if (!typedName) {
+                addNotification('Please type product name first to create new material.', 'warning');
+                return;
+            }
+            setIsAddMedicineMasterModalOpen(true);
         }
     };
 
@@ -1802,6 +1826,40 @@ const POS = forwardRef<any, POSProps>(({
             }
         }, 50);
     };
+
+    const handleMedicineSavedFromSales = useCallback((savedMedicine: Medicine) => {
+        if (!savedMedicine?.name) return;
+
+        const itemLikeMedicine: InventoryItem = {
+            id: savedMedicine.id,
+            organization_id: savedMedicine.organization_id || '',
+            name: savedMedicine.name,
+            code: savedMedicine.materialCode,
+            brand: savedMedicine.brand || '',
+            category: 'Medicine',
+            manufacturer: savedMedicine.manufacturer || '',
+            stock: 0,
+            unitsPerPack: resolveUnitsPerStrip(extractPackMultiplier(savedMedicine.pack) ?? 1, savedMedicine.pack),
+            packType: savedMedicine.pack || '',
+            minStockLimit: 0,
+            batch: 'NEW-STOCK',
+            expiry: 'N/A',
+            purchasePrice: Number(savedMedicine.rateA || 0),
+            mrp: parseFloat(savedMedicine.mrp || '0'),
+            rateA: Number(savedMedicine.rateA || 0),
+            rateB: Number(savedMedicine.rateB || 0),
+            rateC: Number(savedMedicine.rateC || 0),
+            gstPercent: savedMedicine.gstRate || 0,
+            hsnCode: savedMedicine.hsnCode || '',
+            composition: savedMedicine.composition || '',
+            barcode: savedMedicine.barcode || '',
+            is_active: true,
+        };
+
+        setIsAddMedicineMasterModalOpen(false);
+        setIsSearchModalOpen(false);
+        addSelectedBatchToGrid(itemLikeMedicine);
+    }, [addSelectedBatchToGrid]);
 
     const handleUpdateCartItem = useCallback((id: string, field: keyof BillItem, value: any) => {
         setCartItems(prev => prev.map(item => {
@@ -3023,13 +3081,14 @@ const POS = forwardRef<any, POSProps>(({
                                         setModalSearchTerm(e.target.value);
                                         setSelectedSearchIndex(0);
                                     }}
+                                    onKeyDown={handleCreateMaterialFromMatrixKeyDown}
                                     onFocus={() => setIsKeywordFocused(true)}
                                     onBlur={() => setIsKeywordFocused(false)}
                                     placeholder="Type medicine name or code..."
                                     className={`w-full p-2 border-2 border-primary/20 bg-white text-base font-black focus:border-primary outline-none shadow-inner uppercase tracking-tighter`}
                                 />
                                 {isKeywordFocused && (
-                                    <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-primary/80">F4: Product Details</p>
+                                    <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-primary/80">F4: Product Details | Ctrl+Enter: Register Material</p>
                                 )}
                             </div>
 
@@ -3199,6 +3258,17 @@ const POS = forwardRef<any, POSProps>(({
                 currentUser={currentUser}
                 isPosted={isPostedVoucher}
             />
+
+            {isAddMedicineMasterModalOpen && (
+                <AddMedicineModal
+                    isOpen={isAddMedicineMasterModalOpen}
+                    onClose={() => setIsAddMedicineMasterModalOpen(false)}
+                    onAddMedicine={onAddMedicineMaster}
+                    onMedicineSaved={handleMedicineSavedFromSales}
+                    initialName={modalSearchTerm.trim() || undefined}
+                    organizationId={currentUser?.organization_id || ''}
+                />
+            )}
 
             {isEditMaterialModalOpen && materialToEdit && (
                 <EditMedicineModal

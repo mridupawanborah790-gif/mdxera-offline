@@ -1699,10 +1699,25 @@ const POS = forwardRef<any, POSProps>(({
         }, 100);
     };
 
+    const sortBatchesForSelection = (batches: InventoryItem[]) => {
+        return [...batches].sort((a, b) => {
+            const qtyA = Number((a as any).availableQty ?? (a as any).available_qty ?? a.stock ?? 0);
+            const qtyB = Number((b as any).availableQty ?? (b as any).available_qty ?? b.stock ?? 0);
+
+            const aHasStock = qtyA > 0;
+            const bHasStock = qtyB > 0;
+
+            if (aHasStock && !bHasStock) return -1;
+            if (!aHasStock && bHasStock) return 1;
+
+            const expA = parseExpiryForSort(a.expiry ? String(a.expiry) : '');
+            const expB = parseExpiryForSort(b.expiry ? String(b.expiry) : '');
+            return expA - expB;
+        });
+    };
     const triggerBatchSelection = (productWrapper: { item: InventoryItem; batches: InventoryItem[] }) => {
         const candidateBatches = productWrapper.batches
-            .filter(b => isRealBatch(b.batch))
-            .sort((a, b) => parseExpiryForSort(a.expiry ? String(a.expiry) : '') - parseExpiryForSort(b.expiry ? String(b.expiry) : ''));
+            .filter(b => isRealBatch(b.batch));
 
         if (candidateBatches.length === 1) {
             addSelectedBatchToGrid(candidateBatches[0]);
@@ -1710,7 +1725,8 @@ const POS = forwardRef<any, POSProps>(({
         }
 
         if (candidateBatches.length > 1) {
-            setPendingBatchSelection({ item: candidateBatches[0], batches: candidateBatches });
+            const sortedBatches = sortBatchesForSelection(candidateBatches);
+            setPendingBatchSelection({ item: sortedBatches[0], batches: sortedBatches });
             setIsSearchModalOpen(false);
             return;
         }
@@ -1730,7 +1746,7 @@ const POS = forwardRef<any, POSProps>(({
             const nameBrandMatch = invName === itemName && invBrand === itemBrand;
 
             return codeMatch || nameBrandMatch;
-        }).sort((a, b) => parseExpiryForSort(a.expiry ? String(a.expiry) : '') - parseExpiryForSort(b.expiry ? String(b.expiry) : ''));
+        });
 
         if (fallbackBatches.length === 1) {
             addSelectedBatchToGrid(fallbackBatches[0]);
@@ -1738,7 +1754,8 @@ const POS = forwardRef<any, POSProps>(({
         }
 
         if (fallbackBatches.length > 1) {
-            setPendingBatchSelection({ item: fallbackBatches[0], batches: fallbackBatches });
+            const sortedBatches = sortBatchesForSelection(fallbackBatches);
+            setPendingBatchSelection({ item: sortedBatches[0], batches: sortedBatches });
             setIsSearchModalOpen(false);
             return;
         }

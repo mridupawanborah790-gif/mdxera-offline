@@ -1,6 +1,6 @@
 [package]
 name = "mdxera-erp"
-version = "1.0.4"
+version = "1.0.5"
 description = "MDXera ERP - Pharmacy Management System"
 authors = []
 edition = "2021"

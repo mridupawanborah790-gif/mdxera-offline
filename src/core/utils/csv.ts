@@ -16,18 +16,83 @@ export function arrayToCsvRow(arr: any[]): string {
     return arr.map(formatCsvField).join(',');
 }
 
-export const downloadCsv = (csvContent: string, fileName: string) => {
+/**
+ * Save text content as a file.
+ *
+ * Tauri's WebView2 does NOT install a download handler by default, so the
+ * traditional `URL.createObjectURL(blob)` + `<a download>` click pattern
+ * silently fails inside the desktop app — that's why CSV exports and migration
+ * templates appeared to "do nothing" in the installed Windows build.
+ *
+ * Strategy (in order):
+ *   1. `window.showSaveFilePicker` (File System Access API) — supported by
+ *      Edge WebView2 / Chromium. Gives a proper "Save As" dialog and writes
+ *      reliably both in Tauri and in regular browsers.
+ *   2. Blob URL + hidden anchor click — the legacy browser fallback.
+ *   3. Data URL navigation — last-ditch fallback for older webviews.
+ */
+export const downloadCsv = async (csvContent: string, fileName: string): Promise<void> => {
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    if (link.download !== undefined) {
-        const url = URL.createObjectURL(blob);
-        link.setAttribute('href', url);
-        link.setAttribute('download', fileName);
-        link.style.visibility = 'hidden';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+
+    type SaveFilePicker = (opts: {
+        suggestedName?: string;
+        types?: Array<{ description: string; accept: Record<string, string[]> }>;
+    }) => Promise<{
+        createWritable: () => Promise<{
+            write: (data: Blob | string) => Promise<void>;
+            close: () => Promise<void>;
+        }>;
+    }>;
+    const picker = (window as unknown as { showSaveFilePicker?: SaveFilePicker }).showSaveFilePicker;
+
+    if (typeof picker === 'function') {
+        try {
+            const handle = await picker({
+                suggestedName: fileName,
+                types: [{
+                    description: 'CSV File',
+                    accept: { 'text/csv': ['.csv'] },
+                }],
+            });
+            const writable = await handle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+            return;
+        } catch (err) {
+            // AbortError = user cancelled — don't fall through to a duplicate save.
+            const name = (err as { name?: string })?.name;
+            if (name === 'AbortError') return;
+            console.warn('[downloadCsv] showSaveFilePicker failed, falling back to blob anchor', err);
+        }
     }
+
+    // Fallback 1: blob URL + anchor (works in regular browsers).
+    try {
+        const link = document.createElement('a');
+        if (link.download !== undefined) {
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', fileName);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            return;
+        }
+    } catch (err) {
+        console.warn('[downloadCsv] blob anchor fallback failed', err);
+    }
+
+    // Fallback 2: data URL navigation. Crude but works when nothing else does.
+    const dataUrl = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', dataUrl);
+    link.setAttribute('download', fileName);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 };
 
 export function parseCsvLine(line: string): string[] {

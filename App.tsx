@@ -48,6 +48,8 @@ import MobileCaptureView from '@core/components/ui/MobileCaptureView';
 import TallyPrompt from '@core/components/ui/TallyPrompt';
 import * as storage from './services/storageService';
 import { supabase } from '@core/db/supabaseClient';
+import { db as sqliteDb } from '@core/db/client';
+import { TABLE as SQLITE_TABLE } from '@core/db/schema';
 import { parseNetworkAndApiError } from '@core/utils/error';
 import { evaluateCustomerCredit, getCustomerOpenChallanExposure } from '@core/utils/creditControl';
 import {
@@ -1660,7 +1662,34 @@ const App: React.FC = () => {
         }
     }, [createMrpChangeLog, currentUser, inventory, loadData, medicines, normalizeCode, parseMrpNumber]);
 
+    // Offline-first: read from the local SQLite mirror (set_of_books / gl_master /
+    // gl_assignments are all in SYNCABLE_TABLES so they're populated by InitialSync).
+    // Falls back to Supabase only if local has no data and we happen to be online.
     const resolveControlGlByCode = useCallback(async (organizationId: string, glCode: string): Promise<string | undefined> => {
+        try {
+            const localBook = await sqliteDb.select<{ id: string }>(
+                `SELECT id FROM ${SQLITE_TABLE.SET_OF_BOOKS}
+                 WHERE organization_id = ? AND active_status = 'Active'
+                 ORDER BY created_at ASC LIMIT 1`,
+                [organizationId]
+            );
+            const activeBookId = localBook?.[0]?.id;
+            if (activeBookId) {
+                const localGl = await sqliteDb.select<{ id: string }>(
+                    `SELECT id FROM ${SQLITE_TABLE.GL_MASTER}
+                     WHERE organization_id = ? AND set_of_books_id = ?
+                       AND gl_code = ? AND active_status = 'Active'
+                     LIMIT 1`,
+                    [organizationId, activeBookId, glCode]
+                );
+                if (localGl?.[0]?.id) return localGl[0].id;
+            }
+        } catch (e) {
+            console.warn('[resolveControlGlByCode] local lookup failed, falling back to Supabase', e);
+        }
+
+        if (!navigator.onLine) return undefined;
+
         const { data: bookRows, error: bookErr } = await supabase
             .from('set_of_books')
             .select('id')
@@ -1695,6 +1724,42 @@ const App: React.FC = () => {
         const trimmedGroup = (partyGroup || '').trim();
         if (!trimmedGroup) {
             throw new Error('Default GL not assigned for this Customer/Supplier Group. Please configure GL Assignment.');
+        }
+
+        // Local-first path (works fully offline once InitialSync has completed).
+        try {
+            const localBook = await sqliteDb.select<{ id: string }>(
+                `SELECT id FROM ${SQLITE_TABLE.SET_OF_BOOKS}
+                 WHERE organization_id = ? AND active_status = 'Active'
+                 ORDER BY created_at ASC LIMIT 1`,
+                [organizationId]
+            );
+            const activeBookId = localBook?.[0]?.id;
+            if (activeBookId) {
+                const localAssign = await sqliteDb.select<{ control_gl_id: string }>(
+                    `SELECT control_gl_id FROM ${SQLITE_TABLE.GL_ASSIGNMENTS}
+                     WHERE organization_id = ? AND set_of_books_id = ?
+                       AND assignment_scope = 'PARTY_GROUP'
+                       AND party_type = ?
+                       AND party_group = ?
+                       AND active_status = 'Active'
+                     LIMIT 1`,
+                    [organizationId, activeBookId, partyType === 'customer' ? 'Customer' : 'Supplier', trimmedGroup]
+                );
+                const mappedLocal = localAssign?.[0]?.control_gl_id;
+                if (mappedLocal) return mappedLocal;
+            } else {
+                // No active set of books locally — fall back to GL code lookup (also local).
+                const codeMatch = await resolveControlGlByCode(organizationId, fallbackGlCode);
+                if (codeMatch) return codeMatch;
+            }
+        } catch (e) {
+            console.warn('[resolvePartyControlGlByGroup] local lookup failed, falling back to Supabase', e);
+        }
+
+        // If we're offline and got nothing locally, we cannot reach Supabase.
+        if (!navigator.onLine) {
+            throw new Error('Default GL not assigned for this Customer/Supplier Group. Please configure GL Assignment (or connect to the internet so it can be fetched).');
         }
 
         const { data: bookRows, error: bookErr } = await supabase

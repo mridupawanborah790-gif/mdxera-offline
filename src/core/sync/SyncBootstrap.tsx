@@ -197,7 +197,6 @@ export const SyncBootstrap: React.FC<Props> = ({ currentUser }) => {
       <InitialSyncModal
         onRetry={() => {
           if (!currentUser) return;
-          startedFor.current = null;
           setPhase('unchecked');
         }}
         onSkip={() => setPhase('skipped')}

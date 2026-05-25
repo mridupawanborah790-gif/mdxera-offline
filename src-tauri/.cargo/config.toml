@@ -1,6 +1,16 @@
 [build]
-# Move the target directory out of Downloads/ to avoid Windows Search indexer
-# and Defender locking .o files mid-compilation (causes "file in use" errors)
-target-dir = "C:\\cargo-target\\mdxera-erp"
-# Limit parallel jobs to reduce file-lock races on Windows
-jobs = 4
+# --- CROSS-PLATFORM CONFIGURATION ---
+
+# WINDOWS OPTIMIZATION:
+# Moving the target directory out of synced folders (like OneDrive/Downloads)
+# prevents the Windows Search indexer and Defender from locking files mid-compilation.
+# To enable this on Windows, uncomment the lines below:
+# target-dir = "C:\\cargo-target\\mdxera-erp"
+# jobs = 4
+
+# MAC/LINUX:
+# It is recommended to use the default target directory. 
+# Do not uncomment the Windows-specific paths above as they will cause errors.
+
+# NOTE: For machine-specific paths, you can also set the CARGO_TARGET_DIR 
+# environment variable in your system instead of editing this file.

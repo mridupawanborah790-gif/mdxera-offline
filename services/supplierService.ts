@@ -5,6 +5,10 @@ import { generateUUID, toSnake, toCamel } from './storageService';
 import { db as sqliteDb } from '../src/core/db/client';
 import { TABLE as SQLITE_TABLE } from '../src/core/db/schema';
 import { SyncQueue } from '../src/core/sync/SyncQueue';
+import {
+  pushWithDriftLearning,
+  stripDriftedColumns,
+} from '../src/core/sync/schemaDriftCache';
 
 export type SupplierSaveStatus = 'created' | 'updated' | 'duplicate';
 
@@ -89,11 +93,16 @@ export const createSupplierQuick = async (
         } catch (e) {
             console.warn('[createSupplierQuick offline] sqlite upsert failed', e);
         }
+        // Pre-strip the queued payload of columns we already know are missing
+        // on this org's Supabase. SyncWorker would catch it anyway via its
+        // own retry-on-PGRST204 loop, but stripping at enqueue-time skips a
+        // server round-trip (and the resulting warning in the StatusBar).
+        const queuedPayload = stripDriftedColumns(SQLITE_TABLE.SUPPLIERS, snake as Record<string, unknown>);
         await SyncQueue.enqueue(
             supplierPayload.id ? 'UPDATE' : 'INSERT',
             SQLITE_TABLE.SUPPLIERS,
             payload.id,
-            snake as Record<string, unknown>,
+            queuedPayload,
             organizationId
         );
         const saved = toCamel(snake) as Supplier;
@@ -105,11 +114,33 @@ export const createSupplierQuick = async (
         };
     }
 
-    const { data, error } = await supabase
-        .from('suppliers')
-        .upsert(toSnake(payload))
-        .select('*')
-        .single();
+    // Strip control_gl_id before pushing — the auto_map_party_control_gl
+    // trigger on public.suppliers resolves it from supplier_group and rejects
+    // any client-supplied value that doesn't match (raises P0001
+    // "Control GL is auto-mapped from group and cannot be manually edited").
+    // The local row keeps its control_gl_id; SyncPuller refreshes it with the
+    // server's value on the next delta cycle.
+    const remotePayload = toSnake(payload) as Record<string, unknown>;
+    delete remotePayload.control_gl_id;
+    delete remotePayload.controlGlId;
+
+    // Wrap in pushWithDriftLearning so PGRST204 from a column the deployed
+    // Supabase doesn't have (e.g. brand_agencies on an older schema) is
+    // auto-learned and the row is retried instantly. Same mechanism the
+    // SyncWorker uses for queued pushes — keeps online and offline flows
+    // converging on the same set of accepted columns.
+    const { data, error } = await pushWithDriftLearning<Record<string, unknown>>(
+        'suppliers',
+        remotePayload,
+        async (filtered) => {
+            const result = await supabase
+                .from('suppliers')
+                .upsert(filtered as Record<string, unknown>)
+                .select('*')
+                .single();
+            return { data: result.data as Record<string, unknown> | null, error: result.error };
+        },
+    );
 
     if (error) throw new Error(formatSupplierApiError(error));
 

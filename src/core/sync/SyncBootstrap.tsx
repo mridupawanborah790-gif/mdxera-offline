@@ -27,6 +27,10 @@ import InitialSyncModal from '@core/components/feedback/InitialSyncModal';
 import { hydrateMemoryCacheFromSqlite } from '@core/services/storageService';
 import { db } from '@core/db/client';
 import { TABLE } from '@core/db/schema';
+import {
+  resetSchemaDriftCache,
+  snapshotSchemaDrift,
+} from '@core/sync/schemaDriftCache';
 import type { RegisteredPharmacy } from '@core/types';
 
 /**
@@ -82,6 +86,13 @@ export const SyncBootstrap: React.FC<Props> = ({ currentUser }) => {
       triggerFullResync,
       isOnline,
       resetFailedQueueItems,
+      // Schema-drift cache controls. Call these from DevTools after an org
+      // upgrades its Supabase schema so the client re-discovers what columns
+      // are now accepted (instead of permanently skipping them).
+      //   await window.__mdxera.resetSchemaDriftCache()
+      //   console.table(window.__mdxera.snapshotSchemaDrift())
+      resetSchemaDriftCache,
+      snapshotSchemaDrift,
     };
   }, []);
 
@@ -97,6 +108,17 @@ export const SyncBootstrap: React.FC<Props> = ({ currentUser }) => {
         await db.execute(`DELETE FROM ${TABLE.SYNC_META}`);
       } catch (err) {
         console.warn('[SyncBootstrap] Failed to clear sync state:', err);
+      }
+      // Also drop everything the client has *learned* about server schema
+      // drift. The user's mental model for "Sync All" is "start fresh" —
+      // that should include re-discovering which columns the server now
+      // accepts, in case they ran a Supabase migration since the last sync.
+      // The next push attempt will include every column; PGRST204s will
+      // re-populate the cache for whatever is still genuinely missing.
+      try {
+        resetSchemaDriftCache();
+      } catch (err) {
+        console.warn('[SyncBootstrap] Failed to reset schema drift cache:', err);
       }
       // Force the boot effect to run again from scratch.
       setPhase('unchecked');

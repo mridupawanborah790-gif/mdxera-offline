@@ -2,6 +2,11 @@ import { supabase } from '@core/db/supabaseClient';
 import { SyncQueue, QueuedRecord } from './SyncQueue';
 import { db } from '@core/db/client';
 import { TABLE } from '@core/db/schema';
+import {
+  getMissingColumns,
+  recordMissingColumns,
+  parseMissingColumnError,
+} from './schemaDriftCache';
 
 const BATCH_SIZE = 50;
 
@@ -289,14 +294,25 @@ const LOCAL_ONLY_COLUMNS: Record<string, Set<string>> = {
   customers: new Set([
     // ✗ Runtime-computed display field
     'currentBalance',           'current_balance',
-    // ✗ Only in newer Supabase versions — safe to strip if PGRST204 appears
-    // (but many are valid — leave out of strip list unless confirmed missing)
+    // ✗ Server-managed: the auto_map_party_control_gl trigger on
+    // public.customers fills control_gl_id from the party-group mapping
+    // and raises P0001 ("Control GL is auto-mapped from group and cannot
+    // be manually edited") if the client sends a value that doesn't match
+    // its own resolution. Offline we can't always replicate that lookup
+    // exactly (no local mirror of gl_assignments PARTY_GROUP rows on older
+    // installs), so we drop the field entirely and let the trigger set it.
+    // SyncPuller will populate the local copy with the server's value on
+    // the next delta-pull.
+    'controlGlId',              'control_gl_id',
   ]),
 
   // ─── suppliers ─────────────────────────────────────────────────────────────
   suppliers: new Set([
     // ✗ Runtime-computed display field
     'currentBalance',           'current_balance',
+    // ✗ Same trigger as customers — auto_map_party_control_gl is attached
+    // to suppliers too. Let the server fill it.
+    'controlGlId',              'control_gl_id',
   ]),
 
   // ─── configurations ────────────────────────────────────────────────────────
@@ -319,11 +335,19 @@ function camelToSnake(s: string): string {
 function normalizeForSupabase(row: Record<string, unknown>, tableName: string): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   const localOnly = LOCAL_ONLY_COLUMNS[tableName] ?? new Set<string>();
+  // Runtime-learned drift: columns the server has previously rejected with
+  // PGRST204. See schemaDriftCache.ts — the set covers both camelCase and
+  // snake_case variants so it fires whether we drop the key before or after
+  // the camelToSnake conversion below.
+  const driftMissing = getMissingColumns(tableName);
   for (const [key, value] of Object.entries(row)) {
     if (BOOKKEEPING_KEYS.has(key)) continue;
     if (key.startsWith('_')) continue; // any other SQLite bookkeeping
     if (localOnly.has(key)) continue;  // table-specific local-only fields
-    out[camelToSnake(key)] = value;
+    if (driftMissing.has(key)) continue; // server rejected this column before
+    const snakeKey = camelToSnake(key);
+    if (driftMissing.has(snakeKey)) continue;
+    out[snakeKey] = value;
   }
   return out;
 }
@@ -365,32 +389,59 @@ async function pushBatch(tableName: string, records: QueuedRecord[]): Promise<vo
   const idCol = tableName === 'profiles' ? 'user_id' : 'id';
 
   if (upserts.length > 0) {
-    const payloads = upserts
-      .map((r) => JSON.parse(r.payload) as Record<string, unknown>)
-      .map((r) => normalizeForSupabase(r, tableName));
+    // Decode payloads once; we may renormalise them several times if the
+    // server keeps reporting different unknown columns.
+    const rawPayloads = upserts.map((r) => JSON.parse(r.payload) as Record<string, unknown>);
 
-    // Deduplicate payloads by primary key. Keep only the latest update for each record.
-    // PostgreSQL `ON CONFLICT DO UPDATE` fails if the same key appears multiple times in one batch.
-    const uniquePayloadsMap = new Map<string, Record<string, unknown>>();
-    const realIds: string[] = [];
-    for (const payload of payloads) {
-      const idVal = payload[idCol] as string;
-      if (idVal) {
-        if (!uniquePayloadsMap.has(idVal)) realIds.push(idVal);
-        uniquePayloadsMap.set(idVal, payload);
-      } else {
-        // Fallback for records missing ID — random key keeps the dedup map
-        // unique but excludes the row from local _sync_status flipping.
-        uniquePayloadsMap.set(`__missing_${Math.random()}`, payload);
+    // PGRST204 only ever names one missing column at a time, so a row that
+    // carries N drifted columns needs up to N retries before it succeeds. We
+    // cap at MAX_DRIFT_RETRIES to avoid an infinite loop if the parser ever
+    // mis-extracts (defence in depth — the cache itself is monotonic, so a
+    // genuine bug would just keep adding the same column).
+    const MAX_DRIFT_RETRIES = 20;
+    let realIds: string[] = [];
+
+    for (let attempt = 0; attempt <= MAX_DRIFT_RETRIES; attempt++) {
+      const payloads = rawPayloads.map((r) => normalizeForSupabase(r, tableName));
+
+      // Deduplicate payloads by primary key. Keep only the latest update for each record.
+      // PostgreSQL `ON CONFLICT DO UPDATE` fails if the same key appears multiple times in one batch.
+      const uniquePayloadsMap = new Map<string, Record<string, unknown>>();
+      realIds = [];
+      for (const payload of payloads) {
+        const idVal = payload[idCol] as string;
+        if (idVal) {
+          if (!uniquePayloadsMap.has(idVal)) realIds.push(idVal);
+          uniquePayloadsMap.set(idVal, payload);
+        } else {
+          // Fallback for records missing ID — random key keeps the dedup map
+          // unique but excludes the row from local _sync_status flipping.
+          uniquePayloadsMap.set(`__missing_${Math.random()}`, payload);
+        }
       }
-    }
-    const uniquePayloads = Array.from(uniquePayloadsMap.values());
+      const uniquePayloads = Array.from(uniquePayloadsMap.values());
 
-    const { error } = await supabase.from(tableName).upsert(uniquePayloads, {
-      onConflict: idCol,
-      ignoreDuplicates: false,
-    });
-    if (error) throw error;
+      const { error } = await supabase.from(tableName).upsert(uniquePayloads, {
+        onConflict: idCol,
+        ignoreDuplicates: false,
+      });
+
+      if (!error) break;
+
+      // Schema drift: the server is missing a column this client thinks
+      // exists. Learn it, persist for future sessions, and retry without it.
+      const drift = parseMissingColumnError(error);
+      if (drift && drift.column) {
+        recordMissingColumns(tableName, [drift.column]);
+        console.info(
+          `[sync] ${tableName}: server has no column '${drift.column}' — stripped and retrying ` +
+          `(learned: ${attempt + 1})`,
+        );
+        continue;
+      }
+
+      throw error; // genuine failure — let the outer handler defer/fail
+    }
 
     // Local mirror is now confirmed — flip _sync_status so SyncPuller will
     // accept the next remote update for these rows.

@@ -1748,18 +1748,22 @@ const App: React.FC = () => {
                 );
                 const mappedLocal = localAssign?.[0]?.control_gl_id;
                 if (mappedLocal) return mappedLocal;
-            } else {
-                // No active set of books locally — fall back to GL code lookup (also local).
-                const codeMatch = await resolveControlGlByCode(organizationId, fallbackGlCode);
-                if (codeMatch) return codeMatch;
             }
+            // Whether or not we had an active book locally, fall back to the
+            // GL-code lookup (also local-first). This is critical for offline
+            // mode: if no party-group mapping exists locally for this group,
+            // we can still resolve the default control GL by its well-known
+            // code (120000 customer / 210000 supplier) from the local
+            // gl_master mirror — so customer/supplier creation works offline.
+            const codeMatch = await resolveControlGlByCode(organizationId, fallbackGlCode);
+            if (codeMatch) return codeMatch;
         } catch (e) {
             console.warn('[resolvePartyControlGlByGroup] local lookup failed, falling back to Supabase', e);
         }
 
         // If we're offline and got nothing locally, we cannot reach Supabase.
         if (!navigator.onLine) {
-            throw new Error('Default GL not assigned for this Customer/Supplier Group. Please configure GL Assignment (or connect to the internet so it can be fetched).');
+            throw new Error('Default GL not assigned for this Customer/Supplier Group, and no fallback GL is configured locally. Please configure GL Assignment or sync once while online so the defaults are cached.');
         }
 
         const { data: bookRows, error: bookErr } = await supabase

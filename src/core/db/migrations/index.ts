@@ -6,6 +6,9 @@ import { SQL_005_PINCODE_CACHE } from './005_pincode_cache';
 import { SQL_006_VOUCHER_RESERVATIONS } from './006_voucher_reservations';
 import { SQL_007_INITIAL_SYNC_STATE } from './007_initial_sync_state';
 import { SQL_008_SALES_BILL_COLUMNS } from './008_sales_bill_columns';
+import { SQL_009_CONFIG_SCHEMA_FIX } from './009_config_schema_fix';
+import { SQL_010_PARTY_MASTER_COLUMNS } from './010_party_master_columns';
+import { SQL_011_MASTER_SCHEMA_COMPLETENESS } from './011_master_schema_completeness';
 
 export interface Migration {
   version: number;
@@ -22,4 +25,7 @@ export const MIGRATIONS: Migration[] = [
   { version: 6, name: '006_voucher_reservations', sql: SQL_006_VOUCHER_RESERVATIONS },
   { version: 7, name: '007_initial_sync_state', sql: SQL_007_INITIAL_SYNC_STATE },
   { version: 8, name: '008_sales_bill_columns', sql: SQL_008_SALES_BILL_COLUMNS },
+  { version: 9, name: '009_config_schema_fix', sql: SQL_009_CONFIG_SCHEMA_FIX },
+  { version: 10, name: '010_party_master_columns', sql: SQL_010_PARTY_MASTER_COLUMNS },
+  { version: 11, name: '011_master_schema_completeness', sql: SQL_011_MASTER_SCHEMA_COMPLETENESS },
 ];

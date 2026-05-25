@@ -29,6 +29,7 @@ import {
     updatePassword as _updatePasswordImpl,
 } from '../src/core/auth/authService';
 import { SyncQueue } from '../src/core/sync/SyncQueue';
+import { pushWithDriftLearning } from '../src/core/sync/schemaDriftCache';
 
 // Tables the new SyncEngine knows how to push. Writes to these tables get
 // enqueued when offline (or after a network failure) so the engine can flush
@@ -448,25 +449,35 @@ const normalizeMaterialMasterType = (value: unknown): string | undefined => {
         'createdAt', 'updatedAt'
     ];
 
+    // NOTE: `controlGlId` / `control_gl_id` is intentionally NOT listed here.
+    // public.customers has a BEFORE INSERT/UPDATE trigger (see
+    // supabase/company_auto_gl_defaults.sql -> auto_map_party_control_gl)
+    // that resolves control_gl_id from the party-group mapping and raises
+    // P0001 ("Control GL is auto-mapped from group and cannot be manually
+    // edited") if the client sends a different value. Whatever we resolved
+    // locally (especially via the offline GL-code fallback) often doesn't
+    // match — so we let the server fill it. SyncPuller pulls the trigger's
+    // result back into the local mirror.
     const CUSTOMERS_ALLOWED_FIELDS = [
         'id', 'organization_id', 'user_id', 'created_by_id',
         'name', 'customerType', 'phone', 'mobile', 'email',
         'address', 'address_line1', 'address_line2', 'area', 'city', 'pincode', 'district', 'state', 'country',
         'gstNumber', 'gst_number', 'drugLicense', 'drug_license', 'panNumber', 'pan_number',
         'ledger', 'defaultDiscount', 'default_discount', 'defaultRateTier', 'default_rate_tier', 'is_active', 'is_blocked',
-        'assignedStaffId', 'assigned_staff_id', 'assignedStaffName', 'assigned_staff_name', 'opening_balance', 'customerGroup', 'customer_group', 'controlGlId', 'control_gl_id',
-        'creditLimit', 'credit_limit', 'creditDays', 'credit_days', 'creditStatus', 'credit_status', 'creditControlMode', 'credit_control_mode', 
+        'assignedStaffId', 'assigned_staff_id', 'assignedStaffName', 'assigned_staff_name', 'opening_balance', 'customerGroup', 'customer_group',
+        'creditLimit', 'credit_limit', 'creditDays', 'credit_days', 'creditStatus', 'credit_status', 'creditControlMode', 'credit_control_mode',
         'allowOverride', 'allow_override', 'overrideApprovalRequired', 'override_approval_required', 'enableCreditLimit', 'enable_credit_limit',
         'remarks', 'referredBy', 'referred_by', 'currentBalance', 'current_balance', 'paymentTerms', 'payment_terms', 'createdAt', 'updatedAt'
     ];
 
+    // Same trigger applies to suppliers — `controlGlId` is intentionally omitted.
     const SUPPLIERS_ALLOWED_FIELDS = [
         'id', 'organization_id', 'user_id', 'created_by_id',
         'name', 'brandAgencies', 'category', 'contactPerson',
         'phone', 'mobile', 'email', 'website',
         'address', 'address_line1', 'address_line2', 'area', 'city', 'pincode', 'district', 'state', 'country',
         'gstNumber', 'panNumber', 'drugLicense', 'foodLicense', 'tanNumber', 'paymentDetails',
-        'opening_balance', 'supplierGroup', 'controlGlId', 'currentBalance', 'ledger',
+        'opening_balance', 'supplierGroup', 'currentBalance', 'ledger',
         'is_active', 'is_blocked', 'remarks', 'createdAt', 'updatedAt'
     ];
 
@@ -1012,7 +1023,25 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
                                 code: tableName === 'material_master' ? snakeData.material_code : snakeData.doctor_code
                             });
                         }
-                        const { data: saved, error } = await supabase.from(tableName).insert(snakeData).select().single();
+                        // pushWithDriftLearning auto-learns + strips any
+                        // column the deployed Supabase doesn't have
+                        // (PGRST204) and retries — so a one-off schema-drift
+                        // doesn't fail the whole insert. Genuine errors
+                        // (duplicate key 23505, etc.) propagate unchanged
+                        // for the surrounding retry loop to handle.
+                        const insertResult = await pushWithDriftLearning<Record<string, any>>(
+                            tableName,
+                            snakeData,
+                            async (filtered) => {
+                                const r = await supabase
+                                    .from(tableName)
+                                    .insert(filtered as Record<string, unknown>)
+                                    .select()
+                                    .single();
+                                return { data: r.data as Record<string, any> | null, error: r.error };
+                            },
+                        );
+                        const { data: saved, error } = insertResult;
                         if (!error) {
                             result = saved;
                             break;
@@ -1056,7 +1085,21 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
                     }
                 } else {
                     const onConflictColumn = tableName === 'physical_inventory' ? 'voucher_no' : 'id';
-                    const { data: saved, error } = await supabase.from(tableName).upsert(snakeData, { onConflict: onConflictColumn }).select().single();
+                    // Drift-aware upsert: any PGRST204 from a missing column
+                    // is auto-learned and the upsert is retried without it.
+                    const upsertResult = await pushWithDriftLearning<Record<string, any>>(
+                        tableName,
+                        snakeData,
+                        async (filtered) => {
+                            const r = await supabase
+                                .from(tableName)
+                                .upsert(filtered as Record<string, unknown>, { onConflict: onConflictColumn })
+                                .select()
+                                .single();
+                            return { data: r.data as Record<string, any> | null, error: r.error };
+                        },
+                    );
+                    const { data: saved, error } = upsertResult;
                     if (error) throw error;
                     result = saved;
                 }

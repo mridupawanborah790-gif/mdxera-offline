@@ -50,6 +50,78 @@ async function withBusyRetry<T>(fn: () => Promise<T>, attempts = 4): Promise<T> 
   throw lastErr;
 }
 
+/**
+ * Split a multi-statement SQL string on `;`, but ONLY on semicolons that
+ * appear in actual statement positions — not inside `-- line comments`,
+ * `/* block comments *\/`, or single-quoted string literals.
+ *
+ * The previous implementation did a naive `sql.split(';')` which broke
+ * migration 011: a `;` inside an English `-- comment` ("Supabase doesn't
+ * have those; they're effectively...") cut the chunk in half. The second
+ * chunk started with `they're` and SQLite threw `near "they": syntax error`,
+ * which then cascaded — every subsequent migration attempted to run that
+ * malformed chunk and every later DB call hit the same error.
+ *
+ * Behaviour:
+ *   - `--` extends to end of line.
+ *   - `/* … *\/` extends until the matching close.
+ *   - `'…'` honours `''` as an escaped quote (SQLite convention).
+ *   - Outside any of those, a `;` ends the current statement.
+ */
+function splitSqlStatements(sql: string): string[] {
+  const out: string[] = [];
+  let buf = '';
+  let i = 0;
+  const n = sql.length;
+  let inLineComment = false;
+  let inBlockComment = false;
+  let inSingleQuote = false;
+
+  while (i < n) {
+    const c = sql[i];
+    const next = i + 1 < n ? sql[i + 1] : '';
+
+    if (inLineComment) {
+      buf += c;
+      if (c === '\n') inLineComment = false;
+      i += 1;
+      continue;
+    }
+    if (inBlockComment) {
+      buf += c;
+      if (c === '*' && next === '/') { buf += next; i += 2; inBlockComment = false; continue; }
+      i += 1;
+      continue;
+    }
+    if (inSingleQuote) {
+      buf += c;
+      if (c === '\'' && next === '\'') { buf += next; i += 2; continue; } // SQL escaped quote
+      if (c === '\'') inSingleQuote = false;
+      i += 1;
+      continue;
+    }
+
+    if (c === '-' && next === '-') { inLineComment = true; buf += c; i += 1; continue; }
+    if (c === '/' && next === '*') { inBlockComment = true; buf += c; i += 1; continue; }
+    if (c === '\'') { inSingleQuote = true; buf += c; i += 1; continue; }
+
+    if (c === ';') {
+      const trimmed = buf.trim();
+      if (trimmed) out.push(trimmed);
+      buf = '';
+      i += 1;
+      continue;
+    }
+
+    buf += c;
+    i += 1;
+  }
+
+  const tail = buf.trim();
+  if (tail) out.push(tail);
+  return out;
+}
+
 async function applyMigrations(database: Database): Promise<void> {
   await database.execute(`
     CREATE TABLE IF NOT EXISTS _migrations (
@@ -68,10 +140,7 @@ async function applyMigrations(database: Database): Promise<void> {
   for (const migration of MIGRATIONS) {
     if (appliedVersions.has(migration.version)) continue;
 
-    const statements = migration.sql
-      .split(';')
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const statements = splitSqlStatements(migration.sql);
 
     for (const stmt of statements) {
       await database.execute(stmt);

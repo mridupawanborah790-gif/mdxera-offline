@@ -14,16 +14,26 @@
     <meta name="apple-mobile-web-app-title" content="MDXERA ERP">
     
     <title>MDXERA ERP – Enterprise Pharmacy Billing & ERP</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!--
+      Vendor scripts are bundled under /vendor/ so the app's core UI works
+      fully offline. Previously these were loaded from CDNs (cdn.tailwindcss.com,
+      jsdelivr, unpkg, cdnjs) — when the network was unreachable Tailwind never
+      ran, so every screen rendered as unstyled HTML. Razorpay is intentionally
+      kept on the CDN: payments themselves require a live network anyway, and
+      it auto-updates from Razorpay's side.
+      To refresh these vendor files run: scripts/refresh-vendor.sh (or curl them
+      manually) — they're plain copies of the CDN URLs noted next to each tag.
+    -->
+    <script src="/vendor/tailwindcss.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-    
-    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
-    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
-    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+    <script src="/vendor/jsbarcode.min.js"></script><!-- cdn.jsdelivr.net/npm/jsbarcode@3.11.5 -->
+    <script src="/vendor/html5-qrcode.js" type="text/javascript"></script><!-- unpkg.com/html5-qrcode -->
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script><!-- online-only by nature -->
+    <script src="/vendor/html2pdf.bundle.min.js"></script><!-- cdnjs html2pdf 0.10.1 -->
+    <script src="/vendor/xlsx.full.min.js"></script><!-- cdnjs xlsx 0.18.5 -->
     
     <style>
       :root {

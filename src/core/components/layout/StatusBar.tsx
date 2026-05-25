@@ -64,7 +64,7 @@ const StatusBar: React.FC<StatusBarProps> = ({ userName, isOnline, pharmacyName,
       <div className="ml-auto flex items-center gap-6">
           <div className="flex items-center gap-2">
             <span className="opacity-60 uppercase text-[10px]">Company:</span>
-            <span className="text-accent uppercase tracking-tighter">{pharmacyName} — {appEdition}</span>
+            <span className="text-accent uppercase tracking-tighter">{pharmacyName} — {appEdition} (v1.0.12)</span>
           </div>
           <div className="flex items-center gap-2 border-l border-white/10 pl-6 h-full">
             <span className="opacity-60 uppercase text-[10px]">Operator:</span>

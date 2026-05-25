@@ -38,6 +38,10 @@ opened") on first launch. Auto-update still works. Add when you're ready:
 | `APPLE_PASSWORD`           | App-specific password from appleid.apple.com |
 | `APPLE_TEAM_ID`            | Apple Developer Team ID                  |
 
+> **Tip:** To get the base64 string for `APPLE_CERTIFICATE`, run this on your
+> exported `.p12` file: `base64 -i my-cert.p12 | pbcopy` (macOS) or
+> `[Convert]::ToBase64String([IO.File]::ReadAllBytes("my-cert.p12"))` (Windows).
+
 ## Cutting a release
 
 ```bash

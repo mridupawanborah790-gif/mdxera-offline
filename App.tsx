@@ -2077,7 +2077,7 @@ const App: React.FC = () => {
                 message: 'Cannot delete customer because transactions already exist. You may block this record instead.',
             };
         }
-        await storage.deleteData('customers', customer.id);
+        await storage.deleteData('customers', customer.id, currentUser);
         await loadData(currentUser, 'background');
         console.info(`[AUDIT] ${new Date().toISOString()} user=${currentUser.id} action=delete_success customer=${customer.id}`);
         return { success: true, message: `Customer ${customer.name} deleted successfully.` };
@@ -2093,7 +2093,7 @@ const App: React.FC = () => {
                 message: 'Cannot delete supplier because transactions already exist. You may block this record instead.',
             };
         }
-        await storage.deleteData('suppliers', supplier.id);
+        await storage.deleteData('suppliers', supplier.id, currentUser);
         await loadData(currentUser, 'background');
         console.info(`[AUDIT] ${new Date().toISOString()} user=${currentUser.id} action=delete_success supplier=${supplier.id}`);
         return { success: true, message: `Supplier ${supplier.name} deleted successfully.` };
@@ -2828,7 +2828,7 @@ const App: React.FC = () => {
 
                             if (isNewEmptySession) {
                                 // 1. Remove from local IndexedDB if it was ever saved there
-                                await storage.deleteData('physical_inventory', session.id);
+                                await storage.deleteData('physical_inventory', session.id, currentUser);
                                 // 2. Attempt to revert the counter in Supabase
                                 await storage.markVoucherCancelled('physical-inventory', currentUser, session.voucher_no || session.id, session.id);
                                 // 3. Refresh local state
@@ -2924,7 +2924,7 @@ const App: React.FC = () => {
                         suppliers={suppliers} onAddPurchase={handleAddPurchase as any}
                         onBulkAddMedicines={(list) => storage.saveBulkData('material_master', list, currentUser)}
                         onSearchMedicines={() => { }} onMassUpdateClick={() => { }}
-                        onSaveMapping={(map) => storage.saveData('supplier_product_map', map, currentUser).then(() => loadData(currentUser!, 'background'))} onDeleteMapping={(id) => storage.deleteData('supplier_product_map', id).then(() => loadData(currentUser!, 'background'))}
+                        onSaveMapping={(map) => storage.saveData('supplier_product_map', map, currentUser).then(() => loadData(currentUser!, 'background'))} onDeleteMapping={(id) => storage.deleteData('supplier_product_map', id, currentUser).then(() => loadData(currentUser!, 'background'))}
                         mappings={mappings}
                         initialSubModule={pageId === 'vendorNomenclature' ? 'sync' : pageId === 'bulkUtility' ? 'bulk' : pageId === 'masterPriceMaintain' ? 'pricing' : 'master'}
                         addNotification={addNotification}
@@ -3045,10 +3045,10 @@ const App: React.FC = () => {
                         categories={categories} subCategories={subCategories}
                         onAddCategory={(d) => storage.saveData('categories', d, currentUser).then(() => loadData(currentUser!, 'background'))}
                         onUpdateCategory={(d) => storage.saveData('categories', d, currentUser).then(() => loadData(currentUser!, 'background'))}
-                        onDeleteCategory={(id) => storage.deleteData('categories', id).then(() => loadData(currentUser!, 'background'))}
+                        onDeleteCategory={(id) => storage.deleteData('categories', id, currentUser).then(() => loadData(currentUser!, 'background'))}
                         onAddSubCategory={(d) => storage.saveData('sub_categories', d, currentUser).then(() => loadData(currentUser!, 'background'))}
                         onUpdateSubCategory={(d) => storage.saveData('sub_categories', d, currentUser).then(() => loadData(currentUser!, 'background'))}
-                        onDeleteSubCategory={(id) => storage.deleteData('sub_categories', id).then(() => loadData(currentUser!, 'background'))}
+                        onDeleteSubCategory={(id) => storage.deleteData('sub_categories', id, currentUser).then(() => loadData(currentUser!, 'background'))}
                     />;
                 case 'accountReceivable':
                     return <AccountReceivable

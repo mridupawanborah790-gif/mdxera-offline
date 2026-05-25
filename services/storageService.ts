@@ -247,6 +247,29 @@ export const hydrateMemoryCacheFromSqlite = async (organizationId: string): Prom
         }
     };
 
+    /**
+     * Single-row variant of updateMemoryCacheBulk, exported so save paths that
+     * bypass `saveData` (notably supplierService.createSupplierQuick) can keep
+     * the legacy memoryCache in lockstep with their direct SQLite write.
+     *
+     * Without this, the flow looked like:
+     *   1. User edits supplier, clicks Save
+     *   2. createSupplierQuick writes to SQLite + sync queue and returns
+     *   3. App.tsx setSuppliers(...) updates React state — visible briefly
+     *   4. App.tsx then runs loadData('background') which re-reads memoryCache
+     *   5. memoryCache still has the OLD row (createSupplierQuick never
+     *      touched it) → setSuppliers gets called again with stale data
+     *   6. UI reverts to pre-edit values. Restarting the app fixed it
+     *      because hydration on next boot reads from SQLite (which DID
+     *      have the new data).
+     *
+     * Calling this after any direct-SQLite write closes the loop.
+     */
+    export const updateMemoryCacheEntry = (tableName: string, entry: any, organizationId: string): void => {
+        if (!entry || !entry.id) return;
+        updateMemoryCacheBulk(tableName, [entry], organizationId);
+    };
+
     const clearTableMemoryCache = (tableName: keyof typeof STORES) => {
         const storeKey = tableName.toUpperCase() as keyof typeof STORES;
         if (memoryCache[storeKey]) {
@@ -489,10 +512,15 @@ const normalizeMaterialMasterType = (value: unknown): string | undefined => {
     const UUID_PK_TABLES: string[] = [];
     const TEXT_PK_TABLES = ['sales_returns', 'purchase_returns'];
     
-    // Tables that track ownership via created_by_id (Auth UUID)
+    // Tables that track ownership via created_by_id (Auth UUID).
+    // Exported (via the re-export at the bottom of this file) so SyncWorker
+    // can apply the same user_id -> created_by_id mapping its offline-queue
+    // push path, otherwise rows that flushed through SyncWorker land with
+    // created_by_id = NULL on Supabase while rows pushed directly via the
+    // online path (getSupabasePayload below) have it populated.
     const OWNER_TRACKING_TABLES = [
-        'inventory', 'purchases', 'suppliers', 'customers', 'sales_bill', 
-        'sales_returns', 'purchase_returns', 'material_master', 'purchase_orders', 
+        'inventory', 'purchases', 'suppliers', 'customers', 'sales_bill',
+        'sales_returns', 'purchase_returns', 'material_master', 'purchase_orders',
         'sales_challans', 'delivery_challans', 'physical_inventory', 'doctor_master'
     ];
 
@@ -1213,11 +1241,55 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
         }
     };
 
-    export const deleteData = async (tableName: string, id: string): Promise<void> => {
+    export const deleteData = async (tableName: string, id: string, user?: RegisteredPharmacy | null): Promise<void> => {
         const storeKey = tableName.toUpperCase() as keyof typeof STORES;
         await idb.delete(STORES[storeKey], id);
-        if (navigator.onLine) {
-            await supabase.from(tableName).delete().eq('id', id);
+
+        // Mirror the delete into local SQLite so a restart before the queue
+        // flushes doesn't bring the row back via hydration. Best-effort —
+        // a missing local row is fine.
+        if (SYNC_QUEUE_TABLES.has(tableName)) {
+            try {
+                const idCol = tableName === 'profiles' ? 'user_id' : 'id';
+                const { db: sqliteDb } = await import('../src/core/db/client');
+                await sqliteDb.execute(`DELETE FROM ${tableName} WHERE ${idCol} = ?`, [id]);
+            } catch (err) {
+                console.warn(`[storage] deleteData(${tableName}) local mirror failed:`, err);
+            }
+        }
+
+        // OFFLINE PATH: previous behaviour was to silently skip the Supabase
+        // delete when offline — which meant the row stayed alive on the
+        // server forever and would be pulled back on the next sync,
+        // appearing to "undelete" itself. Enqueue the DELETE so SyncWorker
+        // can flush it when connectivity returns.
+        const orgId = user?.organization_id;
+        if (!navigator.onLine) {
+            if (orgId && SYNC_QUEUE_TABLES.has(tableName)) {
+                try {
+                    await SyncQueue.enqueue('DELETE', tableName, id, { id }, orgId);
+                } catch (err) {
+                    console.warn(`[storage] deleteData(${tableName}) enqueue failed:`, err);
+                }
+            }
+            return;
+        }
+
+        // ONLINE PATH: try Supabase directly. On network error, fall back to
+        // the queue so the user's intent is preserved.
+        try {
+            const { error } = await supabase.from(tableName).delete().eq('id', id);
+            if (error) throw error;
+        } catch (err) {
+            if (isNetworkError(err) && orgId && SYNC_QUEUE_TABLES.has(tableName)) {
+                try {
+                    await SyncQueue.enqueue('DELETE', tableName, id, { id }, orgId);
+                } catch (queueErr) {
+                    console.warn(`[storage] deleteData(${tableName}) fallback enqueue failed:`, queueErr);
+                }
+                return;
+            }
+            throw err;
         }
     };
 

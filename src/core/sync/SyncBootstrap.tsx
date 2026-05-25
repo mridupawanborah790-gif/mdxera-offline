@@ -31,6 +31,7 @@ import {
   resetSchemaDriftCache,
   snapshotSchemaDrift,
 } from '@core/sync/schemaDriftCache';
+import { auditSchemas, snapshotSchemaAudit } from '@core/sync/schemaAudit';
 import type { RegisteredPharmacy } from '@core/types';
 
 /**
@@ -93,6 +94,12 @@ export const SyncBootstrap: React.FC<Props> = ({ currentUser }) => {
       //   console.table(window.__mdxera.snapshotSchemaDrift())
       resetSchemaDriftCache,
       snapshotSchemaDrift,
+      // Definitive schema diff against live Supabase. Requires the RPC in
+      // supabase/functions/_shared/inspect_columns.sql to be deployed.
+      //   console.table(await window.__mdxera.snapshotSchemaAudit())
+      //   const full = await window.__mdxera.auditSchemas()
+      auditSchemas,
+      snapshotSchemaAudit,
     };
   }, []);
 

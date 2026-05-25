@@ -151,13 +151,60 @@ async function pullTable(
   }
 }
 
+/**
+ * Tables that track ownership via Supabase's `created_by_id` column.
+ * Mirrors OWNER_TRACKING_TABLES in SyncWorker.ts (and in
+ * storageService.ts:OWNER_TRACKING_TABLES). Kept duplicated here so this
+ * file stays free of cyclic imports.
+ *
+ * For rows from these tables we ensure that whichever of `created_by_id`
+ * and `user_id` is populated server-side gets mirrored into BOTH local
+ * columns. Why both:
+ *   - The legacy app (services/storageService.ts, App.tsx) reads `user_id`.
+ *   - The new push path (SyncWorker.normalizeForSupabase) reads `user_id`
+ *     too — it's the input we map onto `created_by_id` before pushing.
+ *   - Newly-created rows post-fix have user_id=NULL on Supabase (we
+ *     stripped it during push). Without this mirror, those rows arrive
+ *     locally with user_id=NULL and the legacy "who created this" reads
+ *     come back empty.
+ *
+ * physical_inventory is intentionally excluded — it uses user_id as a
+ * real FK and never had created_by_id.
+ */
+const OWNER_TRACKING_TABLES = new Set([
+  'inventory', 'purchases', 'suppliers', 'customers', 'sales_bill',
+  'material_master', 'purchase_orders', 'sales_challans', 'delivery_challans',
+  'doctor_master', 'distributors',
+]);
+
+function mirrorOwnerIdColumns(tableName: string, row: Record<string, unknown>): Record<string, unknown> {
+  if (!OWNER_TRACKING_TABLES.has(tableName)) return row;
+  const out = { ...row };
+  const userId = out.user_id;
+  const createdBy = out.created_by_id;
+  // Whichever is set, populate the other if it's currently empty. This keeps
+  // both legacy reads (user_id) and new reads (created_by_id) working off
+  // the same value, regardless of which column the server populated.
+  if (typeof userId === 'string' && userId.length > 0) {
+    if (typeof createdBy !== 'string' || createdBy.length === 0) {
+      out.created_by_id = userId;
+    }
+  } else if (typeof createdBy === 'string' && createdBy.length > 0) {
+    out.user_id = createdBy;
+  }
+  return out;
+}
+
 async function upsertLocalRow(
   tableName: string,
   remote: Record<string, unknown>
 ): Promise<void> {
+  // Reconcile the user_id / created_by_id pair before adapting. See
+  // mirrorOwnerIdColumns above for why this matters.
+  const reconciled = mirrorOwnerIdColumns(tableName, remote);
   // Use the schema-aware adapter: drops unknown columns, handles JSONB/booleans,
   // and sets _sync_status/_local_only automatically.
-  const adapted = await adaptRowForSqlite(tableName, remote, { syncStatus: 'synced' });
+  const adapted = await adaptRowForSqlite(tableName, reconciled, { syncStatus: 'synced' });
   if (!adapted) return; // table doesn't exist locally — skip
   await db.upsert(tableName, adapted);
 }

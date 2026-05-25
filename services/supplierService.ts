@@ -1,7 +1,7 @@
 import { supabase } from './supabaseClient';
 import { idb, STORES } from './indexedDbService';
 import type { Supplier, RegisteredPharmacy } from '../types';
-import { generateUUID, toSnake, toCamel } from './storageService';
+import { generateUUID, toSnake, toCamel, updateMemoryCacheEntry } from './storageService';
 import { db as sqliteDb } from '../src/core/db/client';
 import { TABLE as SQLITE_TABLE } from '../src/core/db/schema';
 import { SyncQueue } from '../src/core/sync/SyncQueue';
@@ -107,6 +107,11 @@ export const createSupplierQuick = async (
         );
         const saved = toCamel(snake) as Supplier;
         await idb.put(STORES.SUPPLIERS, saved);
+        // Mirror into the legacy memoryCache so the next loadData('background')
+        // sees the updated row instead of reverting React state to the
+        // pre-edit value. Without this, an offline edit "disappears" from
+        // the UI as soon as App.tsx re-runs loadData.
+        updateMemoryCacheEntry('suppliers', saved, organizationId);
         return {
             status: supplierPayload.id ? 'updated' : 'created',
             supplier: saved,
@@ -154,6 +159,10 @@ export const createSupplierQuick = async (
     } catch (e) {
         console.warn('[createSupplierQuick online] sqlite mirror failed', e);
     }
+    // Mirror into the legacy memoryCache so the App.tsx setSuppliers update
+    // isn't overwritten by the loadData('background') re-read that follows.
+    // See storageService.updateMemoryCacheEntry for the full explanation.
+    updateMemoryCacheEntry('suppliers', saved, organizationId);
 
     return {
         status: supplierPayload.id ? 'updated' : 'created',

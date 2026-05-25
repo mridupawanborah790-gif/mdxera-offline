@@ -6,6 +6,7 @@ import {
   getMissingColumns,
   recordMissingColumns,
   parseMissingColumnError,
+  pushWithDriftLearning,
 } from './schemaDriftCache';
 
 const BATCH_SIZE = 50;
@@ -214,10 +215,13 @@ const LOCAL_ONLY_COLUMNS: Record<string, Set<string>> = {
     'setOfBooksId',            'set_of_books_id',
     // ✗ Receive-flow UI state — local only
     'sourceReceiveMode',       'source_receive_mode',
-    // ✗ Cancellation audit fields — may not exist in all Supabase versions
-    'cancelledAt',             'cancelled_at',
-    'cancelledBy',             'cancelled_by',
-    'cancellationReason',      'cancellation_reason',
+    // NOTE: cancellation audit columns (cancelled_at, cancelled_by,
+    // cancellation_reason) WERE stripped here as "may not exist in all
+    // Supabase versions". The live audit confirmed they DO exist on this
+    // deployment (and presumably most others, since fix_legacy_mismatches.sql
+    // ships them). Strip removed so cancellation reasons flow through to
+    // Supabase. Any deployment that genuinely lacks them gets handled by
+    // schemaDriftCache the first time PGRST204 fires.
   ]),
 
   // ─── sales_returns ─────────────────────────────────────────────────────────
@@ -332,7 +336,38 @@ function camelToSnake(s: string): string {
   return s.replace(/([A-Z])/g, (_, c, i) => (i === 0 ? c.toLowerCase() : `_${c.toLowerCase()}`));
 }
 
-function normalizeForSupabase(row: Record<string, unknown>, tableName: string): Record<string, unknown> {
+/**
+ * Tables that track ownership via `created_by_id` (a uuid FK to auth.users).
+ * Mirrors OWNER_TRACKING_TABLES in services/storageService.ts — kept here as
+ * a local set so this file doesn't have to import from storageService (which
+ * pulls in a huge dependency graph and would create a cycle through
+ * SyncQueue → SyncWorker → storageService → SyncQueue).
+ *
+ * If a table is in this set, the row that lands on Supabase must have its
+ * user_id mapped to created_by_id and the user_id field dropped — that's
+ * what getSupabasePayload() does for the direct online insert path. Without
+ * the same mapping here, every row that flushes through the offline queue
+ * arrives with created_by_id = NULL while the direct-online rows have it
+ * populated, breaking ownership-based filters / reports / audit trails.
+ *
+ * Exceptions handled below:
+ *   - physical_inventory uses user_id directly as a real FK column.
+ *   - sales_returns / purchase_returns strip BOTH columns via
+ *     LOCAL_ONLY_COLUMNS (older schema variant lacks them entirely), so the
+ *     mapping below becomes a no-op.
+ */
+const OWNER_TRACKING_TABLES = new Set([
+  'inventory', 'purchases', 'suppliers', 'customers', 'sales_bill',
+  'material_master', 'purchase_orders', 'sales_challans', 'delivery_challans',
+  'doctor_master',
+]);
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Exported for unit tests in src/core/sync/__tests__/normalizeForSupabase.test.ts.
+// Runtime callers should keep using this via the local closure — the export is
+// purely so the test can pin the transformation rules.
+export function normalizeForSupabase(row: Record<string, unknown>, tableName: string): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   const localOnly = LOCAL_ONLY_COLUMNS[tableName] ?? new Set<string>();
   // Runtime-learned drift: columns the server has previously rejected with
@@ -349,6 +384,105 @@ function normalizeForSupabase(row: Record<string, unknown>, tableName: string): 
     if (driftMissing.has(snakeKey)) continue;
     out[snakeKey] = value;
   }
+
+  // Ownership audit: map user_id -> created_by_id. Mirrors the same logic in
+  // storageService.getSupabasePayload(). Without this, every offline-queued
+  // row for these tables loses created_by_id when SyncWorker pushes it.
+  if (OWNER_TRACKING_TABLES.has(tableName)) {
+    const uid = out.user_id;
+    if (typeof uid === 'string' && UUID_RE.test(uid)) {
+      // Don't clobber an explicitly-set created_by_id (e.g. someone reassigns
+      // a bill to a different staff member). Only fill it in if missing.
+      if (typeof out.created_by_id !== 'string' || !UUID_RE.test(out.created_by_id as string)) {
+        out.created_by_id = uid;
+      }
+      // Drop user_id for these tables — the canonical column on Supabase is
+      // created_by_id; user_id was the legacy name and is left NULL by the
+      // online path too. (physical_inventory is intentionally NOT in
+      // OWNER_TRACKING_TABLES above because it keeps user_id as a real FK.)
+      delete out.user_id;
+    }
+  }
+
+  // purchases.sourcePurchaseOrderId is the app's field name; the Supabase
+  // column is reference_doc_number. The direct online path remaps it in
+  // getSupabasePayload(); the offline-queue path was sending the camelToSnake
+  // form (source_purchase_order_id) which doesn't exist on Supabase, so the
+  // PO linkage was being dropped on every offline-pushed purchase.
+  if (tableName === 'purchases') {
+    const srcPo = out.source_purchase_order_id ?? out.sourcePurchaseOrderId;
+    if (typeof srcPo === 'string' && srcPo.length > 0) {
+      if (!out.reference_doc_number) out.reference_doc_number = srcPo;
+      delete out.source_purchase_order_id;
+      delete out.sourcePurchaseOrderId;
+    }
+  }
+
+  // purchase_orders: the app's data model calls the counterparty
+  // "supplier" / "supplier_id" (matching the local SQLite migration 001
+  // schema). Supabase's purchase_orders schema (purchase_orders_schema.sql)
+  // uses "distributor_name" / "distributor_id" — every offline-pushed PO
+  // was landing with NULL distributor fields and the supplier columns
+  // getting silently dropped server-side (which is why migration 011's
+  // localOnly audit flagged supplier/supplier_id as drift).
+  if (tableName === 'purchase_orders') {
+    const supplierName = out.supplier;
+    const supplierId = out.supplier_id;
+    if (typeof supplierName === 'string' && supplierName.length > 0 && !out.distributor_name) {
+      out.distributor_name = supplierName;
+    }
+    if (typeof supplierId === 'string' && supplierId.length > 0 && !out.distributor_id) {
+      out.distributor_id = supplierId;
+    }
+    delete out.supplier;
+    delete out.supplier_id;
+    // po_serial_id is the local legacy alias for the canonical serial_id.
+    // Migration 011 added serial_id locally so both should normally be
+    // present; map if only the legacy form survived this far.
+    if (!out.serial_id && typeof out.po_serial_id === 'string') {
+      out.serial_id = out.po_serial_id;
+    }
+    delete out.po_serial_id;
+  }
+
+  // journal_entry_lines: server columns are debit_amount / credit_amount
+  // (note the _amount suffix). Local schema 003 used the bare names.
+  // Mirror in the push direction; the inverse (pull) is handled by
+  // adaptRowForSqlite now that migration 013 added the suffixed columns
+  // to the local table.
+  if (tableName === 'journal_entry_lines') {
+    if (typeof out.debit === 'number' && out.debit_amount === undefined) {
+      out.debit_amount = out.debit;
+    }
+    if (typeof out.credit === 'number' && out.credit_amount === undefined) {
+      out.credit_amount = out.credit;
+    }
+    // Keep debit/credit in the payload only if they aren't already mirrored —
+    // some deployments may have the legacy bare names; the drift cache will
+    // strip whichever the server doesn't have.
+  }
+
+  // Generic UUID guard: any *_id field that's neither a valid UUID nor a
+  // recognised text-PK gets nulled out so Supabase doesn't reject the whole
+  // row with "invalid input syntax for type uuid". Mirrors the loop in
+  // getSupabasePayload(). The id column on sales_bill / physical_inventory
+  // is intentionally text (e.g. invoice number), so skip it there.
+  const idFields = Object.keys(out).filter((f) =>
+    f === 'created_by_id' || f === 'performed_by_id' || f === 'assigned_staff_id' ||
+    f === 'customer_id' || f === 'supplier_id' || f === 'doctor_id' ||
+    f === 'master_medicine_id' || f === 'inventory_id' || f === 'material_id' ||
+    f === 'distributor_id' || f === 'control_gl_id' || f === 'set_of_books_id' ||
+    f === 'company_code_id' || f === 'card_type_id' || f === 'template_id' ||
+    f === 'mbc_card_id' || f === 'journal_entry_id' || f === 'reference_id' ||
+    f === 'reference_document_id'
+  );
+  for (const f of idFields) {
+    const v = out[f];
+    if (v !== null && v !== undefined && (typeof v !== 'string' || !UUID_RE.test(v))) {
+      out[f] = null;
+    }
+  }
+
   return out;
 }
 
@@ -381,6 +515,142 @@ async function markEntityRowsSynced(
   }
 }
 
+/**
+ * Tables where every row carries a user-visible sequential code that has a
+ * (organization_id, <code>) UNIQUE constraint server-side. If two devices
+ * (or a device + the web app) generate the same code while offline, the
+ * push hits 23505 forever — see material_master_code_org_unique and the
+ * matching constraint on doctor_master.
+ *
+ * For these tables we leave the batch path entirely and push one row at a
+ * time. On a code-collision 23505 we query Supabase for the live MAX(code),
+ * assign the row max+1, update the LOCAL mirror so the user sees the same
+ * value as what landed on the server, and retry. Mirrors the existing
+ * online-direct logic in storageService.saveData (lines ~1013-1066) which
+ * already had this behaviour for ONLINE creates — the offline-queued path
+ * was just missing it.
+ */
+const TABLES_WITH_AUTO_CODE: Record<string, { codeCol: string; prefix: string; padLength: number; startNum: number }> = {
+  material_master: { codeCol: 'material_code', prefix: '',     padLength: 8, startNum: 10000000 },
+  doctor_master:   { codeCol: 'doctor_code',   prefix: 'DOC-', padLength: 6, startNum: 1 },
+};
+
+function isCodeUniqueViolation(error: { code?: string; message?: string }, tableName: string): boolean {
+  if (error?.code !== '23505') return false;
+  const meta = TABLES_WITH_AUTO_CODE[tableName];
+  if (!meta) return false;
+  const msg = (error.message ?? '').toLowerCase();
+  // Match the constraint name (material_master_code_org_unique) OR the
+  // column name appearing in the message — Postgres includes one or both
+  // depending on how the constraint was defined.
+  return msg.includes(meta.codeCol) || msg.includes('code_org_unique');
+}
+
+/**
+ * Query Supabase for the highest numeric code in the given table for this
+ * org, return max+1 padded to the configured length. Paginates because
+ * Postgres can't sort numerically by a text column reliably when codes have
+ * mixed lengths.
+ */
+async function claimNextCodeFromServer(tableName: string, organizationId: string): Promise<string> {
+  const meta = TABLES_WITH_AUTO_CODE[tableName];
+  if (!meta) throw new Error(`No auto-code config for ${tableName}`);
+
+  const PAGE = 1000;
+  let maxNum = meta.startNum - 1;
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from(tableName)
+      .select(meta.codeCol)
+      .eq('organization_id', organizationId)
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    for (const row of data) {
+      const raw = (row as unknown as Record<string, unknown>)[meta.codeCol];
+      if (typeof raw !== 'string') continue;
+      const stripped = meta.prefix ? raw.replace(new RegExp(`^${meta.prefix}`), '') : raw;
+      const n = parseInt(stripped, 10);
+      if (Number.isFinite(n) && n > maxNum) maxNum = n;
+    }
+    if (data.length < PAGE) break;
+    from += PAGE;
+  }
+  const next = maxNum + 1;
+  return meta.prefix + String(next).padStart(meta.padLength, '0');
+}
+
+/**
+ * Push records for material_master / doctor_master one at a time. On a
+ * code-collision 23505, reclaim a new code from the server, update the
+ * local mirror, and retry up to MAX_CODE_RETRIES times. Other 23505s (e.g.
+ * primary-key duplicate) bubble up unchanged so the queue marks them
+ * failed and the user can investigate.
+ */
+async function pushCodedRecordsIndividually(tableName: string, records: QueuedRecord[]): Promise<void> {
+  const meta = TABLES_WITH_AUTO_CODE[tableName];
+  const MAX_CODE_RETRIES = 5;
+
+  for (const record of records) {
+    const rawPayload = JSON.parse(record.payload) as Record<string, unknown>;
+    const recordId = String(rawPayload.id ?? '');
+    let attempt = 0;
+
+    // Local retry loop on code collision. Drift-learning still applies and
+    // is handled inside pushWithDriftLearning, separately from the code
+    // reassignment loop below.
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const { error } = await pushWithDriftLearning(
+        tableName,
+        normalizeForSupabase(rawPayload, tableName),
+        async (filtered) => {
+          const r = await supabase
+            .from(tableName)
+            .upsert(filtered as Record<string, unknown>, { onConflict: 'id', ignoreDuplicates: false });
+          return { data: null, error: r.error };
+        },
+      );
+      if (!error) break;
+
+      if (isCodeUniqueViolation(error as { code?: string; message?: string }, tableName) && attempt < MAX_CODE_RETRIES) {
+        attempt += 1;
+        const orgId = rawPayload.organization_id as string;
+        const newCode = await claimNextCodeFromServer(tableName, orgId);
+        const oldCode = rawPayload[meta.codeCol] ?? rawPayload[snakeToCamel(meta.codeCol)];
+        console.info(
+          `[sync] ${tableName} code collision: ${oldCode} already exists for org ${orgId}, ` +
+          `retrying with ${newCode} (attempt ${attempt}/${MAX_CODE_RETRIES})`,
+        );
+
+        // Update the in-flight payload AND the local SQLite row so the
+        // user sees the new code immediately. Both snake and camel keys
+        // are set so whichever the legacy app reads from picks it up.
+        rawPayload[meta.codeCol] = newCode;
+        rawPayload[snakeToCamel(meta.codeCol)] = newCode;
+        try {
+          await db.execute(
+            `UPDATE ${tableName} SET ${meta.codeCol} = ? WHERE id = ?`,
+            [newCode, recordId],
+          );
+        } catch (localErr) {
+          console.warn(`[sync] failed to update local ${tableName}.${meta.codeCol} after reclaim:`, localErr);
+        }
+        continue;
+      }
+
+      throw error; // not a code collision, or exhausted retries
+    }
+
+    if (recordId) await markEntityRowsSynced(tableName, [recordId]);
+  }
+}
+
+function snakeToCamel(s: string): string {
+  return s.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase());
+}
+
 /** Push a batch of records for one table to Supabase. */
 async function pushBatch(tableName: string, records: QueuedRecord[]): Promise<void> {
   const upserts: QueuedRecord[] = records.filter((r) => r.operation !== 'DELETE');
@@ -388,7 +658,14 @@ async function pushBatch(tableName: string, records: QueuedRecord[]): Promise<vo
 
   const idCol = tableName === 'profiles' ? 'user_id' : 'id';
 
-  if (upserts.length > 0) {
+  // Tables with auto-generated user-visible codes get the per-row loop so a
+  // single colliding row doesn't poison the rest of the batch.
+  if (TABLES_WITH_AUTO_CODE[tableName] && upserts.length > 0) {
+    await pushCodedRecordsIndividually(tableName, upserts);
+
+    // Still handle deletes via the bulk path below.
+    if (deletes.length === 0) return;
+  } else if (upserts.length > 0) {
     // Decode payloads once; we may renormalise them several times if the
     // server keeps reporting different unknown columns.
     const rawPayloads = upserts.map((r) => JSON.parse(r.payload) as Record<string, unknown>);

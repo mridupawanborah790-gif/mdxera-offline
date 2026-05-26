@@ -54,9 +54,14 @@ const _permanentlyMissingTables = new Set<string>();
 
 /** Pull changes from Supabase for all syncable tables and apply them to SQLite. */
 export async function pullDeltaFromSupabase(organizationId: string): Promise<void> {
-  // Load all pull timestamps in one query
+  // Load all pull timestamps scoped to the current org. Cross-org isolation
+  // matters because the local DB now stores progress for every org the user
+  // has signed in as (migration 015) — and Account A's `last_pulled_at` must
+  // never be used to filter Account B's pull.
   const metaRows = await db.select<SyncMeta>(
-    `SELECT table_name, last_pulled_at FROM ${TABLE.SYNC_META}`
+    `SELECT table_name, last_pulled_at FROM ${TABLE.SYNC_META}
+      WHERE organization_id = ?`,
+    [organizationId]
   );
   const metaMap = new Map(metaRows.map((r) => [r.table_name, r.last_pulled_at]));
 
@@ -93,13 +98,13 @@ async function pullTable(
       if (isSchemaMissingError(error.message)) {
         console.warn(`[SyncPuller] ${tableName}: schema mismatch on server, will skip for this session (${error.message})`);
         _permanentlyMissingTables.add(tableName);
-        await updatePullTimestamp(tableName);
+        await updatePullTimestamp(tableName, organizationId);
         return;
       }
       throw new Error(error.message);
     }
     if (!remoteRows || remoteRows.length === 0) {
-      await updatePullTimestamp(tableName);
+      await updatePullTimestamp(tableName, organizationId);
       return;
     }
 
@@ -144,7 +149,7 @@ async function pullTable(
       }
     }
 
-    await updatePullTimestamp(tableName);
+    await updatePullTimestamp(tableName, organizationId);
   } catch (err) {
     // Log but don't crash — partial sync is acceptable
     console.warn(`[SyncPuller] Failed to pull table ${tableName}:`, err);
@@ -209,9 +214,10 @@ async function upsertLocalRow(
   await db.upsert(tableName, adapted);
 }
 
-async function updatePullTimestamp(tableName: string): Promise<void> {
+async function updatePullTimestamp(tableName: string, organizationId: string): Promise<void> {
   await db.execute(
-    `INSERT OR REPLACE INTO ${TABLE.SYNC_META} (table_name, last_pulled_at) VALUES (?, ?)`,
-    [tableName, Date.now()]
+    `INSERT OR REPLACE INTO ${TABLE.SYNC_META}
+       (organization_id, table_name, last_pulled_at) VALUES (?, ?, ?)`,
+    [organizationId, tableName, Date.now()]
   );
 }

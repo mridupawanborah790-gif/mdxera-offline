@@ -116,6 +116,21 @@ let _currentState: InitialSyncProgress = {
 let _running = false;
 let _cancelled = false;
 
+// Currently-active organization for state reads/writes. Set by the public
+// entry points (runForegroundSync, startBackgroundSync, isForegroundComplete,
+// isFullyInitialized, getBackgroundProgress) so internal helpers can scope
+// SQL to this org without having to thread it through every call.
+let _activeOrgId: string | null = null;
+function requireActiveOrg(): string {
+  if (!_activeOrgId) {
+    throw new Error(
+      '[InitialSync] _activeOrgId not set — call isForegroundComplete(orgId), ' +
+      'runForegroundSync(user), or startBackgroundSync(user) first.'
+    );
+  }
+  return _activeOrgId;
+}
+
 function emit() {
   listeners.forEach((fn) => fn(_currentState));
 }
@@ -133,11 +148,12 @@ interface StateRowRaw {
 }
 
 async function ensureStateRow(tableName: string, phase: SyncPhase): Promise<TableProgress> {
+  const orgId = requireActiveOrg();
   const rows = await db.select<StateRowRaw>(
     `SELECT table_name, phase, total_rows, synced_rows, is_complete, last_error, retry_count
      FROM ${TABLE.INITIAL_SYNC_STATE}
-     WHERE table_name = ? LIMIT 1`,
-    [tableName]
+     WHERE organization_id = ? AND table_name = ? LIMIT 1`,
+    [orgId, tableName]
   );
   if (rows.length > 0) {
     const r = rows[0];
@@ -152,8 +168,9 @@ async function ensureStateRow(tableName: string, phase: SyncPhase): Promise<Tabl
     };
   }
   await db.execute(
-    `INSERT INTO _initial_sync_state (table_name, phase, started_at) VALUES (?, ?, ?)`,
-    [tableName, phase, Date.now()]
+    `INSERT INTO _initial_sync_state (organization_id, table_name, phase, started_at)
+     VALUES (?, ?, ?, ?)`,
+    [orgId, tableName, phase, Date.now()]
   );
   return {
     table_name: tableName, phase, total_rows: null, synced_rows: 0,
@@ -170,6 +187,7 @@ async function updateState(tableName: string, patch: Partial<{
   retry_count: number;
   next_retry_at: number | null;
 }>): Promise<void> {
+  const orgId = requireActiveOrg();
   const sets: string[] = [];
   const vals: unknown[] = [];
   for (const [k, v] of Object.entries(patch)) {
@@ -178,18 +196,23 @@ async function updateState(tableName: string, patch: Partial<{
     else vals.push(v ?? null);
   }
   if (sets.length === 0) return;
-  vals.push(tableName);
+  vals.push(orgId, tableName);
   await db.execute(
-    `UPDATE _initial_sync_state SET ${sets.join(', ')} WHERE table_name = ?`,
+    `UPDATE _initial_sync_state SET ${sets.join(', ')}
+      WHERE organization_id = ? AND table_name = ?`,
     vals
   );
 }
 
 async function loadAllStates(): Promise<TableProgress[]> {
+  const orgId = requireActiveOrg();
   const rows = await db.select<{ table_name: string; phase: string; total_rows: number | null;
     synced_rows: number; is_complete: number; last_error: string | null; retry_count: number }>(
     `SELECT table_name, phase, total_rows, synced_rows, is_complete, last_error, retry_count
-     FROM _initial_sync_state ORDER BY table_name ASC`
+     FROM _initial_sync_state
+      WHERE organization_id = ?
+      ORDER BY table_name ASC`,
+    [orgId]
   );
   return rows.map((r) => ({
     table_name: r.table_name,
@@ -363,8 +386,9 @@ async function syncOneTable(
 
     // Update the sync_meta so future delta-pulls work
     await db.execute(
-      `INSERT OR REPLACE INTO ${TABLE.SYNC_META} (table_name, last_pulled_at) VALUES (?, ?)`,
-      [tableName, Date.now()]
+      `INSERT OR REPLACE INTO ${TABLE.SYNC_META}
+         (organization_id, table_name, last_pulled_at) VALUES (?, ?, ?)`,
+      [orgId, tableName, Date.now()]
     );
 
     await refreshSnapshot(phase, tableName);
@@ -430,12 +454,14 @@ export function getInitialSyncSnapshot(): InitialSyncProgress {
   return _currentState;
 }
 
-/** Has the foreground phase been completed at least once on this device? */
-export async function isForegroundComplete(): Promise<boolean> {
+/** Has the foreground phase been completed at least once on this device for this org? */
+export async function isForegroundComplete(orgId: string): Promise<boolean> {
+  _activeOrgId = orgId;
   try {
     const rows = await db.select<{ n: number }>(
       `SELECT COUNT(*) as n FROM _initial_sync_state
-       WHERE phase = 'foreground' AND is_complete = 1`
+       WHERE organization_id = ? AND phase = 'foreground' AND is_complete = 1`,
+      [orgId]
     );
     return (rows[0]?.n ?? 0) >= FOREGROUND_TABLES.length;
   } catch {
@@ -443,11 +469,14 @@ export async function isForegroundComplete(): Promise<boolean> {
   }
 }
 
-/** Has the full initial sync (both phases) been completed? */
-export async function isFullyInitialized(): Promise<boolean> {
+/** Has the full initial sync (both phases) been completed for this org? */
+export async function isFullyInitialized(orgId: string): Promise<boolean> {
+  _activeOrgId = orgId;
   try {
     const rows = await db.select<{ n: number }>(
-      `SELECT COUNT(*) as n FROM _initial_sync_state WHERE is_complete = 1`
+      `SELECT COUNT(*) as n FROM _initial_sync_state
+        WHERE organization_id = ? AND is_complete = 1`,
+      [orgId]
     );
     return (rows[0]?.n ?? 0) >= (FOREGROUND_TABLES.length + BACKGROUND_TABLES.length);
   } catch {
@@ -463,6 +492,7 @@ export async function runForegroundSync(user: RegisteredPharmacy): Promise<void>
   if (_running) return;
   _running = true;
   _cancelled = false;
+  _activeOrgId = user.organization_id;
   _currentState = { ..._currentState, fatalError: null, phase: 'foreground' };
 
   try {
@@ -493,6 +523,7 @@ export function startBackgroundSync(user: RegisteredPharmacy): void {
   if (_running) return;
   _running = true;
   _cancelled = false;
+  _activeOrgId = user.organization_id;
   _currentState = { ..._currentState, phase: 'background', fatalError: null };
 
   // Fire and forget
@@ -521,17 +552,20 @@ export function cancelInitialSync(): void {
 }
 
 /** For the StatusBar background badge — count of background-phase rows pending. */
-export async function getBackgroundProgress(): Promise<{
+export async function getBackgroundProgress(orgId: string): Promise<{
   totalPending: number;
   currentTable: string | null;
   overallPercent: number;
 }> {
+  _activeOrgId = orgId;
   try {
     const rows = await db.select<{
       table_name: string; total_rows: number | null; synced_rows: number; is_complete: number
     }>(
       `SELECT table_name, total_rows, synced_rows, is_complete
-       FROM _initial_sync_state WHERE phase = 'background'`
+       FROM _initial_sync_state
+        WHERE organization_id = ? AND phase = 'background'`,
+      [orgId]
     );
     let pending = 0;
     let totalAll = 0;

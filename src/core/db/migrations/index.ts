@@ -11,6 +11,8 @@ import { SQL_010_PARTY_MASTER_COLUMNS } from './010_party_master_columns';
 import { SQL_011_MASTER_SCHEMA_COMPLETENESS } from './011_master_schema_completeness';
 import { SQL_012_CREATED_BY_ID_REMAINING } from './012_created_by_id_remaining';
 import { SQL_013_CLOSE_AUDIT_GAPS } from './013_close_audit_gaps';
+import { SQL_014_VOUCHER_SERIES_STATE } from './014_voucher_series_state';
+import { SQL_015_SYNC_META_PER_ORG } from './015_sync_meta_per_org';
 
 export interface Migration {
   version: number;
@@ -32,4 +34,6 @@ export const MIGRATIONS: Migration[] = [
   { version: 11, name: '011_master_schema_completeness', sql: SQL_011_MASTER_SCHEMA_COMPLETENESS },
   { version: 12, name: '012_created_by_id_remaining', sql: SQL_012_CREATED_BY_ID_REMAINING },
   { version: 13, name: '013_close_audit_gaps', sql: SQL_013_CLOSE_AUDIT_GAPS },
+  { version: 14, name: '014_voucher_series_state', sql: SQL_014_VOUCHER_SERIES_STATE },
+  { version: 15, name: '015_sync_meta_per_org', sql: SQL_015_SYNC_META_PER_ORG },
 ];

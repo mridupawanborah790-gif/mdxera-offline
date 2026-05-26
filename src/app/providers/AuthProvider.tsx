@@ -1,4 +1,4 @@
-import React, { useEffect, createContext, useContext, useState, useCallback } from 'react';
+import React, { useEffect, createContext, useContext, useRef, useState, useCallback } from 'react';
 import { useAuthStore } from '@core/auth/authStore';
 import { restoreSession } from '@core/auth/authService';
 import { initDatabase } from '@core/db/client';
@@ -43,13 +43,14 @@ export function AuthProvider({ children, loadingFallback, loginFallback }: Props
   } = useAuthStore();
 
   const [initialSyncPhase, setInitialSyncPhase] = useState<InitialSyncPhase>('unchecked');
+  const lastSyncedOrgRef = useRef<string | null>(null);
 
   // Trigger initial sync once we have an authenticated user.
   // The function below decides whether sync is needed at all and handles retries.
   const startInitialSync = useCallback(async (user: RegisteredPharmacy) => {
     // If we already have all foreground tables → skip directly to background phase
     try {
-      const fgDone = await isForegroundComplete();
+      const fgDone = await isForegroundComplete(user.organization_id);
       if (fgDone) {
         // Continue/restart background phase (resumable; no-op if everything done)
         setInitialSyncPhase('done');
@@ -78,6 +79,26 @@ export function AuthProvider({ children, loadingFallback, loginFallback }: Props
   }, []);
 
   // Re-run sync after a successful login (when login happens mid-app-session).
+  // Also: if the active organization actually changes (user logged out of A
+  // and back in as B), reset the phase so initial sync runs again. Without
+  // this, the React state would stay at 'done' from the previous account and
+  // the new account would never trigger a foreground/background pull. The
+  // per-org migration (015) already isolates _sync_meta / _initial_sync_state,
+  // but this hook is what tells the UI machine to actually kick off the
+  // re-pull.
+  useEffect(() => {
+    if (!currentUser || isRestoringSession) return;
+    const orgId = currentUser.organization_id;
+    if (lastSyncedOrgRef.current && lastSyncedOrgRef.current !== orgId) {
+      console.info(
+        '[AuthProvider] active org changed',
+        lastSyncedOrgRef.current, '→', orgId, '— resetting initial sync phase.'
+      );
+      setInitialSyncPhase('unchecked');
+    }
+    lastSyncedOrgRef.current = orgId;
+  }, [currentUser, isRestoringSession]);
+
   useEffect(() => {
     if (currentUser && !isRestoringSession && initialSyncPhase === 'unchecked') {
       startInitialSync(currentUser);

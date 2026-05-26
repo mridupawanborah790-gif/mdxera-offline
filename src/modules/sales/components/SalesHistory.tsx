@@ -8,7 +8,12 @@ import ConfirmModal from '@core/components/ui/ConfirmModal';
 import JournalEntryViewerModal from '@modules/accounting/components/JournalEntryViewerModal';
 import { shouldHandleScreenShortcut } from '@core/utils/screenShortcuts';
 
-type SortableKeys = 'date' | 'total' | 'createdAt' | 'profit';
+type SortableKeys = 'invoiceNumber' | 'date' | 'customerName' | 'total' | 'status' | 'itemCount';
+
+const SortIcon = ({ sortKey, sortConfig }: { sortKey: SortableKeys; sortConfig: { key: SortableKeys; direction: 'ascending' | 'descending' } }) => {
+    if (sortConfig.key !== sortKey) return <span className="text-gray-400 opacity-30 ml-1">↕</span>;
+    return <span className="text-primary ml-1">{sortConfig.direction === 'ascending' ? '▲' : '▼'}</span>;
+};
 
 interface SalesHistoryProps {
     transactions: Transaction[];
@@ -78,7 +83,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
     const [rmpFilter, setRmpFilter] = useState('all');
     const [paymentModeFilter, setPaymentModeFilter] = useState('all');
     const [statusFilter, setStatusFilter] = useState<'all' | 'completed' | 'cancelled'>('all');
-    const [sortConfig, setSortConfig] = useState<{ key: SortableKeys; direction: 'ascending' | 'descending' }>({ key: 'date', direction: 'descending' });
+    const [sortConfig, setSortConfig] = useState<{ key: SortableKeys; direction: 'ascending' | 'descending' }>({ key: 'invoiceNumber', direction: 'descending' });
     const [currentPage, setCurrentPage] = useState(1);
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
     const [transactionToCancel, setTransactionToCancel] = useState<string | null>(null);
@@ -87,6 +92,14 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
     const [selectedTransactionId, setSelectedTransactionId] = useState<string | null>(null);
     const [actionWarning, setActionWarning] = useState<string>('');
     const [viewingTransaction, setViewingTransaction] = useState<Transaction | null>(null);
+
+    const requestSort = (key: SortableKeys) => {
+        let direction: 'ascending' | 'descending' = 'ascending';
+        if (sortConfig.key === key && sortConfig.direction === 'ascending') {
+            direction = 'descending';
+        }
+        setSortConfig({ key, direction });
+    };
 
     const filteredAndSortedTransactions = useMemo(() => {
         let filtered = (transactions || []).filter(Boolean);
@@ -101,7 +114,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
         }
         if (rmpFilter !== 'all') filtered = filtered.filter(t => t.referredBy === rmpFilter);
         if (paymentModeFilter !== 'all') filtered = filtered.filter(t => (t.paymentMode || 'Cash') === paymentModeFilter);
-        if (statusFilter !== 'all') filtered = filtered.filter(t => (t.status || 'completed') === statusFilter);
+        if (statusFilter !== 'all') filtered = filtered.filter(t => (statusFilter === 'cancelled' ? t.status === 'cancelled' : t.status !== 'cancelled'));
         
         if (searchTerm) {
             const lowercasedFilter = searchTerm.toLowerCase();
@@ -113,17 +126,44 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
         }
 
         return filtered.sort((a, b) => {
-            // Always keep latest/highest bill number first for Sales Register / Sales History.
-            const sequenceDelta = getInvoiceSequenceNumber(b) - getInvoiceSequenceNumber(a);
-            if (sequenceDelta !== 0) return sequenceDelta;
+            let comparison = 0;
+            switch (sortConfig.key) {
+                case 'invoiceNumber':
+                    comparison = getInvoiceSequenceNumber(a) - getInvoiceSequenceNumber(b);
+                    if (comparison === 0) {
+                        comparison = String(a.invoiceNumber || a.id || '').localeCompare(String(b.invoiceNumber || b.id || ''));
+                    }
+                    break;
+                case 'date':
+                    comparison = new Date(a.date).getTime() - new Date(b.date).getTime();
+                    break;
+                case 'customerName':
+                    comparison = (a.customerName || '').localeCompare(b.customerName || '');
+                    break;
+                case 'total':
+                    comparison = (a.total || 0) - (b.total || 0);
+                    break;
+                case 'status':
+                    comparison = (a.status || 'completed').localeCompare(b.status || 'completed');
+                    break;
+                case 'itemCount':
+                    comparison = (a.items?.length || 0) - (b.items?.length || 0);
+                    break;
+                default:
+                    comparison = 0;
+            }
 
-            // Fallbacks for invoices where sequence can't be derived reliably.
-            const dateDelta = new Date(b.date).getTime() - new Date(a.date).getTime();
-            if (dateDelta !== 0) return dateDelta;
+            if (comparison !== 0) {
+                return sortConfig.direction === 'ascending' ? comparison : -comparison;
+            }
 
-            return String(b.invoiceNumber || b.id || '').localeCompare(String(a.invoiceNumber || a.id || ''));
+            // Fallback for stable sort: Invoice number descending, then Date descending
+            const fallbackSeq = getInvoiceSequenceNumber(b) - getInvoiceSequenceNumber(a);
+            if (fallbackSeq !== 0) return fallbackSeq;
+            
+            return new Date(b.date).getTime() - new Date(a.date).getTime();
         });
-    }, [transactions, searchTerm, startDate, endDate, rmpFilter, paymentModeFilter, statusFilter]);
+    }, [transactions, searchTerm, startDate, endDate, rmpFilter, paymentModeFilter, statusFilter, sortConfig]);
 
     const totalPages = Math.ceil(filteredAndSortedTransactions.length / ITEMS_PER_PAGE);
 
@@ -495,14 +535,26 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                     <div className="flex-1 overflow-auto">
                         <table className="min-w-full border-collapse text-sm">
                             <thead className="sticky top-0 bg-gray-100 border-b border-gray-400">
-                                <tr className="text-[10px] font-black uppercase text-gray-600">
+                                <tr className="text-[10px] font-black uppercase text-gray-600 select-none">
                                     <th className="p-2 border-r border-gray-400 text-left w-10">Sl.</th>
-                                    <th className="p-2 border-r border-gray-400 text-left">Invoice ID</th>
-                                    <th className="p-2 border-r border-gray-400 text-left">Date</th>
-                                    <th className="p-2 border-r border-gray-400 text-left">Customer Name</th>
-                                    <th className="p-2 border-r border-gray-400 text-center w-24">Items</th>
-                                    <th className="p-2 border-r border-gray-400 text-right w-32">Amount</th>
-                                    <th className="p-2 border-r border-gray-400 text-center w-28">Status</th>
+                                    <th className="p-2 border-r border-gray-400 text-left cursor-pointer hover:bg-gray-200 transition-colors" onClick={() => requestSort('invoiceNumber')}>
+                                        <div className="flex items-center">Invoice ID <SortIcon sortKey="invoiceNumber" sortConfig={sortConfig} /></div>
+                                    </th>
+                                    <th className="p-2 border-r border-gray-400 text-left cursor-pointer hover:bg-gray-200 transition-colors" onClick={() => requestSort('date')}>
+                                        <div className="flex items-center">Date <SortIcon sortKey="date" sortConfig={sortConfig} /></div>
+                                    </th>
+                                    <th className="p-2 border-r border-gray-400 text-left cursor-pointer hover:bg-gray-200 transition-colors" onClick={() => requestSort('customerName')}>
+                                        <div className="flex items-center">Customer Name <SortIcon sortKey="customerName" sortConfig={sortConfig} /></div>
+                                    </th>
+                                    <th className="p-2 border-r border-gray-400 text-center w-24 cursor-pointer hover:bg-gray-200 transition-colors" onClick={() => requestSort('itemCount')}>
+                                        <div className="flex items-center justify-center">Items <SortIcon sortKey="itemCount" sortConfig={sortConfig} /></div>
+                                    </th>
+                                    <th className="p-2 border-r border-gray-400 text-right w-32 cursor-pointer hover:bg-gray-200 transition-colors" onClick={() => requestSort('total')}>
+                                        <div className="flex items-center justify-end">Amount <SortIcon sortKey="total" sortConfig={sortConfig} /></div>
+                                    </th>
+                                    <th className="p-2 border-r border-gray-400 text-center w-28 cursor-pointer hover:bg-gray-200 transition-colors" onClick={() => requestSort('status')}>
+                                        <div className="flex items-center justify-center">Status <SortIcon sortKey="status" sortConfig={sortConfig} /></div>
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-200">

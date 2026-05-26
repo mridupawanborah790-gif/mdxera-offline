@@ -9,6 +9,7 @@ import StatusBar from '@core/components/layout/StatusBar';
 import Auth from '@core/auth/components/Auth';
 import { useAuthStore } from '@core/auth/authStore';
 import { login } from '@core/auth/authService';
+import { triggerFullResync } from '@core/sync/SyncBootstrap';
 import type { RegisteredPharmacy } from '@core/types';
 
 function AppShell() {
@@ -29,7 +30,7 @@ function AppShell() {
         <div className="flex h-screen overflow-hidden bg-gray-50">
           <Sidebar />
           <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-            <Header />
+            <Header onResyncAll={triggerFullResync} />
             <main className="flex-1 overflow-auto">
               <AppRouter />
             </main>

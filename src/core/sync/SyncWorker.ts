@@ -8,6 +8,12 @@ import {
   parseMissingColumnError,
   pushWithDriftLearning,
 } from './schemaDriftCache';
+import { getDeviceId } from '@core/utils/deviceId';
+import {
+  applyRenumberMappingLocally,
+  type RenumberMappingRow,
+  type VoucherDocumentType,
+} from '@core/voucher/voucherService';
 
 const BATCH_SIZE = 50;
 
@@ -651,12 +657,195 @@ function snakeToCamel(s: string): string {
   return s.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase());
 }
 
+// ─── Voucher batch commit ───────────────────────────────────────────────────
+// For the 6 voucher-numbered tables, before pushing the row payloads we call
+// the server RPC `commit_voucher_batch`. The RPC atomically assigns final
+// voucher numbers (renumbering the whole batch to the tail if proposed numbers
+// overlap the server counter — see supabase/functions/_shared/commit_voucher_batch.sql).
+// We then rewrite the queued payloads + local mirror rows + soft-copy
+// reference columns so the regular upsert path pushes the FINAL numbers.
+
+interface VoucherTableMeta {
+  numberCol: string;
+  dateCol: string;
+  docType: VoucherDocumentType;
+}
+
+const VOUCHER_TABLE_META: Record<string, VoucherTableMeta> = {
+  sales_bill:         { numberCol: 'invoice_number',     dateCol: 'date',       docType: 'sales-gst' },
+  purchases:          { numberCol: 'purchase_serial_id', dateCol: 'date',       docType: 'purchase-entry' },
+  purchase_orders:    { numberCol: 'po_serial_id',       dateCol: 'date',       docType: 'purchase-order' },
+  sales_challans:     { numberCol: 'challan_serial_id',  dateCol: 'date',       docType: 'sales-challan' },
+  delivery_challans:  { numberCol: 'challan_serial_id',  dateCol: 'date',       docType: 'delivery-challan' },
+  physical_inventory: { numberCol: 'voucher_no',         dateCol: 'start_date', docType: 'physical-inventory' },
+};
+
+function fyFromDateString(dateStr: string | undefined): string {
+  const fallback = (): string => {
+    const now = new Date();
+    const m = now.getMonth() + 1;
+    const y = now.getFullYear();
+    const start = m >= 4 ? y : y - 1;
+    return `${start}-${((start + 1) % 100).toString().padStart(2, '0')}`;
+  };
+  if (!dateStr) return fallback();
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return fallback();
+  const m = d.getMonth() + 1;
+  const y = d.getFullYear();
+  const start = m >= 4 ? y : y - 1;
+  return `${start}-${((start + 1) % 100).toString().padStart(2, '0')}`;
+}
+
+/**
+ * Extract the integer voucher number from a formatted document number string
+ * (e.g. "INV000101-25-26" → 101). Returns 0 if no digit run is found, in
+ * which case the bill is pushed via the normal path without going through
+ * the assignment RPC (used for legacy rows whose number column was never
+ * populated).
+ */
+function extractProposedNumber(formatted: string | undefined | null): number {
+  if (!formatted) return 0;
+  // Strip the trailing fiscal-year suffix (`-25-26`) before looking for the
+  // sequence digits, so "INV000101-25-26" doesn't pick up 25 or 26.
+  const stripped = formatted.replace(/-\d{2}-\d{2}$/, '');
+  const match = stripped.match(/(\d+)\s*$/);
+  if (!match) return 0;
+  const n = parseInt(match[1], 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+// Optional UI listener — fires whenever the server renumbered any bills in a
+// just-completed sync cycle. UI can subscribe to show a toast / banner so the
+// user knows their printed copies are stale.
+export interface VoucherRenumberNotice {
+  tableName: string;
+  docType: VoucherDocumentType;
+  renumbered: Array<{ uuid: string; newNumber: string }>;
+}
+type VoucherRenumberListener = (notice: VoucherRenumberNotice) => void;
+let voucherRenumberListener: VoucherRenumberListener | null = null;
+export function setVoucherRenumberListener(fn: VoucherRenumberListener | null): void {
+  voucherRenumberListener = fn;
+}
+
+/**
+ * Commit voucher numbers for a batch of records via the server RPC, then
+ * rewrite local rows + queued payloads to use the final assigned numbers.
+ * Called from pushBatch BEFORE the regular upsert path runs.
+ */
+async function commitVoucherBatchAndRewrite(
+  tableName: string,
+  records: QueuedRecord[]
+): Promise<void> {
+  const meta = VOUCHER_TABLE_META[tableName];
+  if (!meta) return;
+
+  interface Bill { local_uuid: string; proposed_number: number }
+  interface Group { orgId: string; fy: string; bills: Bill[] }
+
+  const groups = new Map<string, Group>();
+  const recordsByUuid = new Map<string, QueuedRecord>();
+
+  for (const rec of records) {
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(rec.payload) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const orgId = payload.organization_id as string | undefined;
+    const billUuid = payload.id as string | undefined;
+    if (!orgId || !billUuid) continue;
+
+    const proposed = extractProposedNumber(payload[meta.numberCol] as string | undefined);
+    if (proposed <= 0) {
+      // No parseable number — let the regular upsert path try; if the server
+      // has a NOT NULL constraint it'll fail loudly and we'll fix the source.
+      continue;
+    }
+
+    const fy = fyFromDateString(payload[meta.dateCol] as string | undefined);
+    const key = `${orgId}|${fy}`;
+    let g = groups.get(key);
+    if (!g) {
+      g = { orgId, fy, bills: [] };
+      groups.set(key, g);
+    }
+    g.bills.push({ local_uuid: billUuid, proposed_number: proposed });
+    recordsByUuid.set(billUuid, rec);
+  }
+
+  if (groups.size === 0) return;
+
+  const deviceId = await getDeviceId();
+  const allRenumbered: Array<{ uuid: string; newNumber: string }> = [];
+
+  for (const g of groups.values()) {
+    const { data, error } = await supabase.rpc('commit_voucher_batch', {
+      p_org_id: g.orgId,
+      p_document_type: meta.docType,
+      p_fy: g.fy,
+      p_device_id: deviceId,
+      p_bills: g.bills,
+    });
+
+    if (error) {
+      // Surface to the queue handler so the batch retries; do NOT silently
+      // push bills with proposed-but-unassigned numbers.
+      throw new Error(
+        `commit_voucher_batch failed for ${tableName} (${meta.docType}, fy=${g.fy}): ${error.message}`
+      );
+    }
+
+    const mapping = (data ?? []) as RenumberMappingRow[];
+
+    // 1. Apply mapping to local mirror + soft-copy references.
+    const applied = await applyRenumberMappingLocally(tableName, g.orgId, mapping);
+    allRenumbered.push(...applied.renumbered);
+
+    // 2. Rewrite the queued payloads so the upsert that follows uses the
+    //    FINAL document number — otherwise we'd push the stale local one.
+    const finalByUuid = new Map(mapping.map((m) => [m.local_uuid, m.final_document_number]));
+    for (const [uuid, finalNumber] of finalByUuid.entries()) {
+      const rec = recordsByUuid.get(uuid);
+      if (!rec) continue;
+      try {
+        const p = JSON.parse(rec.payload) as Record<string, unknown>;
+        p[meta.numberCol] = finalNumber;
+        rec.payload = JSON.stringify(p);
+      } catch {
+        // ignore; the bill will be pushed with whatever payload it carried
+      }
+    }
+  }
+
+  if (allRenumbered.length > 0 && voucherRenumberListener) {
+    try {
+      voucherRenumberListener({
+        tableName,
+        docType: meta.docType,
+        renumbered: allRenumbered,
+      });
+    } catch (err) {
+      console.warn('[sync] voucher renumber listener threw:', err);
+    }
+  }
+}
+
 /** Push a batch of records for one table to Supabase. */
 async function pushBatch(tableName: string, records: QueuedRecord[]): Promise<void> {
   const upserts: QueuedRecord[] = records.filter((r) => r.operation !== 'DELETE');
   const deletes: QueuedRecord[] = records.filter((r) => r.operation === 'DELETE');
 
   const idCol = tableName === 'profiles' ? 'user_id' : 'id';
+
+  // Voucher-numbered tables: atomically claim final numbers from the server
+  // and rewrite both the local rows and the queued payloads BEFORE the
+  // regular upsert path runs. Idempotent on bill UUID — safe to retry.
+  if (VOUCHER_TABLE_META[tableName] && upserts.length > 0) {
+    await commitVoucherBatchAndRewrite(tableName, upserts);
+  }
 
   // Tables with auto-generated user-visible codes get the per-row loop so a
   // single colliding row doesn't poison the rest of the batch.
@@ -801,10 +990,23 @@ export async function processSyncQueue(): Promise<{
       pushed += records.length;
       console.info(`[sync] Pushed ${records.length} ${tableName} record(s).`);
 
-      await db.execute(
-        `INSERT OR REPLACE INTO ${TABLE.SYNC_META} (table_name, last_pushed_at) VALUES (?, ?)`,
-        [tableName, Date.now()]
-      );
+      // Update the per-org push timestamp. Migration 015 made
+      // organization_id part of the PK on _sync_meta, so omitting it here
+      // (as the legacy schema allowed) fails the NOT NULL constraint and
+      // the whole cycle is reported as failed even though the actual
+      // upserts to Supabase succeeded.
+      //
+      // The batch is grouped by table_name only, so it CAN contain records
+      // from different orgs if the user is signed into multiple installs on
+      // one device. Bump every org represented in the batch.
+      const orgIds = Array.from(new Set(records.map((r) => r.organization_id))).filter(Boolean);
+      for (const orgId of orgIds) {
+        await db.execute(
+          `INSERT OR REPLACE INTO ${TABLE.SYNC_META}
+             (organization_id, table_name, last_pushed_at) VALUES (?, ?, ?)`,
+          [orgId, tableName, Date.now()]
+        );
+      }
     } catch (err) {
       if (isForeignKeyError(err)) {
         // Dependency missing — defer for next cycle (don't burn an attempt)

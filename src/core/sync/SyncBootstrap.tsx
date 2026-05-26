@@ -104,15 +104,23 @@ export const SyncBootstrap: React.FC<Props> = ({ currentUser }) => {
   }, []);
 
   // Listen for the "Sync All" button (or any caller of triggerFullResync).
-  // Clears the per-table sync state + meta so the next pass re-pulls every
-  // row from scratch, then re-arms the foreground modal.
+  // Clears the per-table sync state + meta FOR THE ACTIVE ORG so the next
+  // pass re-pulls every row from scratch, then re-arms the foreground modal.
+  // Other orgs' progress (if the same install has signed in elsewhere) is
+  // intentionally preserved.
   useEffect(() => {
     if (!currentUser) return;
     const onResync = async () => {
-      console.info('[SyncBootstrap] Full resync requested');
+      console.info('[SyncBootstrap] Full resync requested for org', currentUser.organization_id);
       try {
-        await db.execute(`DELETE FROM ${TABLE.INITIAL_SYNC_STATE}`);
-        await db.execute(`DELETE FROM ${TABLE.SYNC_META}`);
+        await db.execute(
+          `DELETE FROM ${TABLE.INITIAL_SYNC_STATE} WHERE organization_id = ?`,
+          [currentUser.organization_id]
+        );
+        await db.execute(
+          `DELETE FROM ${TABLE.SYNC_META} WHERE organization_id = ?`,
+          [currentUser.organization_id]
+        );
       } catch (err) {
         console.warn('[SyncBootstrap] Failed to clear sync state:', err);
       }
@@ -152,7 +160,7 @@ export const SyncBootstrap: React.FC<Props> = ({ currentUser }) => {
           console.warn('[SyncBootstrap] voucher warmup failed:', err)
         );
 
-        const fgDone = await isForegroundComplete();
+        const fgDone = await isForegroundComplete(currentUser.organization_id);
         console.info('[SyncBootstrap] isForegroundComplete =', fgDone);
 
         // Auto-reset any 'failed' queue records from previous sessions so they

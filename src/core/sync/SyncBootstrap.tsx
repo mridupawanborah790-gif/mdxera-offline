@@ -20,7 +20,13 @@ import {
   startBackgroundSync,
 } from '@core/sync/InitialSync';
 import { SyncEngine } from '@core/sync/SyncEngine';
-import { warmupVoucherRanges, clearVoucherReservations } from '@core/voucher/voucherService';
+import {
+  warmupVoucherRanges,
+  warmupVoucherSeries,
+  diagnoseVoucherSeries,
+  resetVoucherCursors,
+  clearVoucherReservations,
+} from '@core/voucher/voucherService';
 import { isOnline } from '@core/sync/networkMonitor';
 import { useAuthStore } from '@core/auth/authStore';
 import InitialSyncModal from '@core/components/feedback/InitialSyncModal';
@@ -79,6 +85,46 @@ export const SyncBootstrap: React.FC<Props> = ({ currentUser }) => {
       );
       console.info('[SyncBootstrap] Failed queue items reset to pending.');
     };
+    // Voucher cursor helpers. Both look up currentUser from the authStore
+    // internally so the caller can fire-and-forget from DevTools without
+    // having to construct a user object:
+    //
+    //   await window.__mdxera.warmupVoucherSeries()
+    //   await window.__mdxera.diagnoseVoucherSeries()
+    const warmupVoucherSeriesFromConsole = async (): Promise<void> => {
+      const user = useAuthStore.getState().currentUser;
+      if (!user) {
+        console.warn('[SyncBootstrap] no currentUser — cannot warmup voucher series');
+        return;
+      }
+      await warmupVoucherSeries(user.organization_id);
+      console.info('[SyncBootstrap] voucher series warmed up for', user.organization_id);
+    };
+    const diagnoseVoucherSeriesFromConsole = async () => {
+      const user = useAuthStore.getState().currentUser;
+      if (!user) {
+        console.warn('[SyncBootstrap] no currentUser — cannot diagnose voucher series');
+        return null;
+      }
+      return diagnoseVoucherSeries(user.organization_id);
+    };
+    // Drop all local cursors and re-seed from the authoritative sources.
+    // Use when a cursor has been left inflated by a past bug and warmup's
+    // "only bump up" rule won't shrink it.
+    //   await window.__mdxera.resetVoucherCursors()
+    const resetVoucherCursorsFromConsole = async (): Promise<void> => {
+      const user = useAuthStore.getState().currentUser;
+      if (!user) {
+        console.warn('[SyncBootstrap] no currentUser — cannot reset voucher cursors');
+        return;
+      }
+      await resetVoucherCursors(user.organization_id);
+      await warmupVoucherSeries(user.organization_id);
+      console.info(
+        '[SyncBootstrap] voucher cursors reset + re-warmed for',
+        user.organization_id
+      );
+    };
     (window as unknown as { __mdxera?: Record<string, unknown> }).__mdxera = {
       clearVoucherReservations,
       hydrateMemoryCacheFromSqlite,
@@ -87,6 +133,13 @@ export const SyncBootstrap: React.FC<Props> = ({ currentUser }) => {
       triggerFullResync,
       isOnline,
       resetFailedQueueItems,
+      // Voucher cursor recovery — for when "Next Sequence No" drifts.
+      //   await window.__mdxera.diagnoseVoucherSeries()  // see why
+      //   await window.__mdxera.warmupVoucherSeries()    // bump up only
+      //   await window.__mdxera.resetVoucherCursors()    // wipe + re-seed
+      warmupVoucherSeries: warmupVoucherSeriesFromConsole,
+      diagnoseVoucherSeries: diagnoseVoucherSeriesFromConsole,
+      resetVoucherCursors: resetVoucherCursorsFromConsole,
       // Schema-drift cache controls. Call these from DevTools after an org
       // upgrades its Supabase schema so the client re-discovers what columns
       // are now accepted (instead of permanently skipping them).

@@ -680,13 +680,20 @@ const VOUCHER_TABLE_META: Record<string, VoucherTableMeta> = {
   physical_inventory: { numberCol: 'voucher_no',         dateCol: 'start_date', docType: 'physical-inventory' },
 };
 
+/**
+ * Derive the fiscal-year key from a bill date. MUST match the format used by
+ * voucherService.computeFiscalYear() and the legacy
+ * `configurations.fiscalYearConfig.currentFiscalYear` (single start year,
+ * e.g. "2026" for the Indian FY 2026-04-01 → 2027-03-31). See the long
+ * comment in voucherService.ts for the bug this format alignment fixes.
+ */
 function fyFromDateString(dateStr: string | undefined): string {
   const fallback = (): string => {
     const now = new Date();
     const m = now.getMonth() + 1;
     const y = now.getFullYear();
     const start = m >= 4 ? y : y - 1;
-    return `${start}-${((start + 1) % 100).toString().padStart(2, '0')}`;
+    return `${start}`;
   };
   if (!dateStr) return fallback();
   const d = new Date(dateStr);
@@ -694,7 +701,7 @@ function fyFromDateString(dateStr: string | undefined): string {
   const m = d.getMonth() + 1;
   const y = d.getFullYear();
   const start = m >= 4 ? y : y - 1;
-  return `${start}-${((start + 1) % 100).toString().padStart(2, '0')}`;
+  return `${start}`;
 }
 
 /**

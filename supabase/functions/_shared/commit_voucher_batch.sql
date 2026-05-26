@@ -149,15 +149,39 @@ BEGIN
 
   -- FY rollover: if the configured FY differs from the incoming batch's FY
   -- AND the reset rule is annual, the counter restarts at startingNumber-1.
+  --
+  -- IMPORTANT: compare only the START YEAR (first 4 chars). Two FY format
+  -- conventions coexist in this codebase:
+  --   - Single year:  "2026"      (used by the rest of the app, by
+  --                                 configurations.fiscalYearConfig.currentFiscalYear,
+  --                                 and by commit_voucher_batch callers)
+  --   - Range form:   "2026-27"   (written by the legacy reserve_voucher_range
+  --                                 function into configurations.invoice_config.fy)
+  -- They refer to the same fiscal year. Without the substring trick, every
+  -- offline push triggers a spurious reset and the counter collapses to 1.
+  --
+  -- ABOUT THE -1 ON cfg->>'currentNumber':
+  -- `currentNumber` semantically means "the NEXT number to issue" (production
+  -- UI displays it as-is — `Next Sequence No: 695` corresponds to
+  -- currentNumber=695). To compare against incoming `proposed_number` (which
+  -- IS an actual number to be assigned), we need "last issued" = next-1.
+  -- Without the -1, a bill legitimately proposing currentNumber gets
+  -- renumbered to currentNumber+1, leaving currentNumber forever empty.
+  --
+  -- ABOUT IGNORING internalCurrentNumber:
+  -- It's a legacy chunk-end pointer that's never decremented; production
+  -- maintains only `currentNumber` for actual bill counting. Taking MAX with
+  -- the stale chunk-end would inflate v_current by 100+ on series that have
+  -- ever been touched by the legacy chunk allocator (purchase-entry e.g.
+  -- has current=207, internal=301 in prod). We read only currentNumber.
   IF (cfg ->> 'resetRule') = 'financial-year'
      AND (cfg ->> 'fy') IS NOT NULL
-     AND (cfg ->> 'fy') <> p_fy THEN
+     AND substring((cfg ->> 'fy') from 1 for 4) <> substring(p_fy from 1 for 4) THEN
     v_current := v_starting - 1;
   ELSE
     v_current := GREATEST(
       v_starting - 1,
-      COALESCE(NULLIF(cfg ->> 'internalCurrentNumber', '')::integer, v_starting - 1),
-      COALESCE(NULLIF(cfg ->> 'currentNumber', '')::integer, v_starting - 1)
+      COALESCE(NULLIF(cfg ->> 'currentNumber', '')::integer, v_starting) - 1
     );
   END IF;
 
@@ -277,16 +301,21 @@ BEGIN
   END LOOP;
 
   -- ─── Advance the configurations counter ──────────────────────────────
-  -- Both internalCurrentNumber and currentNumber are written so the legacy
-  -- app's display + the new cursor model stay in lockstep.
+  -- currentNumber stores "the NEXT number to issue", so after assigning up
+  -- to v_assigned_max we write v_assigned_max + 1. This matches what
+  -- production's web app writes when it issues a bill directly, keeping
+  -- both billing paths in lockstep on the same counter.
+  --
+  -- We intentionally do NOT touch internalCurrentNumber. It's the legacy
+  -- chunk-end pointer; the legacy reserve_voucher_range function maintains
+  -- it. If we overwrote it here we'd corrupt that side's bookkeeping.
   IF v_renumber THEN
     v_assigned_max := v_next_assign;
   END IF;
 
-  cfg := jsonb_set(cfg, '{currentNumber}',         to_jsonb(v_assigned_max), true);
-  cfg := jsonb_set(cfg, '{internalCurrentNumber}', to_jsonb(v_assigned_max), true);
-  cfg := jsonb_set(cfg, '{fy}',                    to_jsonb(p_fy),           true);
-  cfg := jsonb_set(cfg, '{resetRule}',             COALESCE(cfg -> 'resetRule', '"financial-year"'::jsonb), true);
+  cfg := jsonb_set(cfg, '{currentNumber}', to_jsonb(v_assigned_max + 1), true);
+  cfg := jsonb_set(cfg, '{fy}',            to_jsonb(p_fy),               true);
+  cfg := jsonb_set(cfg, '{resetRule}',     COALESCE(cfg -> 'resetRule', '"financial-year"'::jsonb), true);
 
   UPDATE public.configurations SET
     invoice_config            = CASE WHEN cfg_key = 'invoice_config'            THEN cfg ELSE invoice_config            END,

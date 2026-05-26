@@ -2,6 +2,7 @@ import { isOnline, onNetworkChange, checkConnectivity } from './networkMonitor';
 import { SyncQueue } from './SyncQueue';
 import { processSyncQueue } from './SyncWorker';
 import { pullDeltaFromSupabase } from './SyncPuller';
+import { warmupVoucherSeries } from '@core/voucher/voucherService';
 
 export type SyncStatus = 'idle' | 'syncing' | 'offline' | 'error';
 
@@ -52,6 +53,17 @@ async function runSyncCycle(skipConnectivityCheck = false): Promise<void> {
     const result = await processSyncQueue();
     console.info('[SyncEngine] Sync cycle result:', result);
 
+    // Keep the voucher cursors glued to the server's counter. Cheap (one
+    // SELECT per docType) and runs only when we're already online — guards
+    // against the boot-time warmup having been skipped due to a transient
+    // offline state, leaving `voucher_series_state.local_next_number`
+    // permanently behind. Errors are swallowed inside warmupVoucherSeries.
+    if (_organizationId) {
+      warmupVoucherSeries(_organizationId).catch((err) =>
+        console.warn('[SyncEngine] post-cycle voucher warmup failed:', err)
+      );
+    }
+
     if (result.failed > 0) {
       setStatus('error', `${result.failed} record(s) failed to sync`);
     } else if (result.deferred > 0) {
@@ -86,11 +98,14 @@ export const SyncEngine = {
     // Listen for network transitions
     onNetworkChange(async (online) => {
       if (online) {
-        // Network came back — pull immediately, then push
+        // Network came back — pull, push, AND re-warm voucher cursors.
+        // The boot-time warmup may have run while offline and bailed early;
+        // this is the catch-up point.
         setStatus('syncing');
         try {
           await pullDeltaFromSupabase(organizationId);
           await processSyncQueue();
+          await warmupVoucherSeries(organizationId);
           setStatus('idle');
         } catch (err) {
           setStatus('error', err instanceof Error ? err.message : 'Sync error on reconnect');

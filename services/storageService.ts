@@ -1359,13 +1359,17 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
         if (!user) return defaultValue;
         const storeKey = tableName.toUpperCase() as keyof typeof STORES;
 
-        // Priority 1: Check Memory Cache (for when IDB is disabled or during same session)
+        // Priority 1: Check Memory Cache (for when IDB is disabled or during same session).
+        // Return a shallow copy: saveData/updateMemoryCacheBulk mutate the cache
+        // array in place, so handing out the same reference makes React's
+        // setState bail out (Object.is identical) and screens fail to refresh
+        // after offline writes until the user manually reloads.
         if (
             memoryCacheOrgScope[storeKey] === user.organization_id &&
             memoryCache[storeKey] &&
             memoryCache[storeKey].length > 0
         ) {
-            return memoryCache[storeKey];
+            return [...memoryCache[storeKey]];
         }
 
         // Priority 1.5: If we are offline and SQLite has data populated by
@@ -1375,7 +1379,7 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
             try {
                 await hydrateMemoryCacheFromSqlite(user.organization_id);
                 if (memoryCache[storeKey] && memoryCache[storeKey].length > 0) {
-                    return memoryCache[storeKey];
+                    return [...memoryCache[storeKey]];
                 }
             } catch {
                 /* fall through */

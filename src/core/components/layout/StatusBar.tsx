@@ -5,6 +5,7 @@ import { AppConfigurations } from '@core/types';
 import { resolveFiscalYearConfig } from '@core/utils/fiscalYear';
 import SyncIndicator from '@core/components/feedback/SyncIndicator';
 import BackgroundSyncBadge from '@core/components/feedback/BackgroundSyncBadge';
+import { getCurrentVersion } from '@core/updates/updateService';
 
 interface StatusBarProps {
   userName: string;
@@ -17,10 +18,19 @@ interface StatusBarProps {
 
 const StatusBar: React.FC<StatusBarProps> = ({ userName, isOnline, pharmacyName, isSyncing, appEdition = 'Enterprise Edition', configurations }) => {
   const [time, setTime] = useState(new Date().toLocaleTimeString());
+  const [appVersion, setAppVersion] = useState<string>('');
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date().toLocaleTimeString()), 1000);
     return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getCurrentVersion()
+      .then(v => { if (!cancelled) setAppVersion(v); })
+      .catch(() => { /* leave blank — better than a stale hardcoded number */ });
+    return () => { cancelled = true; };
   }, []);
 
   const isLive = appEdition.toLowerCase().includes('[live]');
@@ -30,9 +40,12 @@ const StatusBar: React.FC<StatusBarProps> = ({ userName, isOnline, pharmacyName,
     <div className="h-8 bg-primary text-white flex items-center px-4 text-[13px] font-bold border-t border-white/10 flex-shrink-0 z-50 shadow-[0_-2px_4px_rgba(0,0,0,0.1)]">
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2">
-            <span className={`w-2.5 h-2.5 rounded-full ${isSyncing ? 'bg-accent animate-spin' : (isOnline ? 'bg-emerald-400' : 'bg-red-500')} ${!isSyncing && isOnline ? 'animate-pulse' : ''}`}></span>
+            {/* Offline trumps syncing: realtime drops when the network does, so
+                `isSyncing` (which is driven partly by !isRealtimeActive) would
+                otherwise stick on "Synchronizing..." forever while offline. */}
+            <span className={`w-2.5 h-2.5 rounded-full ${!isOnline ? 'bg-red-500' : (isSyncing ? 'bg-accent animate-spin' : 'bg-emerald-400 animate-pulse')}`}></span>
             <span className="uppercase tracking-widest text-[10px]">
-                {isSyncing ? 'Synchronizing...' : (isOnline ? 'Network Connected' : 'Local Workspace')}
+                {!isOnline ? 'Local Workspace' : (isSyncing ? 'Synchronizing...' : 'Network Connected')}
             </span>
         </div>
         
@@ -64,7 +77,7 @@ const StatusBar: React.FC<StatusBarProps> = ({ userName, isOnline, pharmacyName,
       <div className="ml-auto flex items-center gap-6">
           <div className="flex items-center gap-2">
             <span className="opacity-60 uppercase text-[10px]">Company:</span>
-            <span className="text-accent uppercase tracking-tighter">{pharmacyName} — {appEdition} (v1.0.12)</span>
+            <span className="text-accent uppercase tracking-tighter">{pharmacyName} — {appEdition}{appVersion ? ` (v${appVersion})` : ''}</span>
           </div>
           <div className="flex items-center gap-2 border-l border-white/10 pl-6 h-full">
             <span className="opacity-60 uppercase text-[10px]">Operator:</span>

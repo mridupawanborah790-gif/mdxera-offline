@@ -118,6 +118,21 @@ const App: React.FC = () => {
     const posRef = useRef<any>(null);
     const purchaseFormRef = useRef<any>(null);
 
+    // Reactive online/offline status. `navigator.onLine` is read once at render
+    // time and doesn't notify React when connectivity flips; subscribe to the
+    // browser's online/offline events so StatusBar reflects reality live.
+    const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
+    useEffect(() => {
+        const handleOnline = () => setIsOnline(true);
+        const handleOffline = () => setIsOnline(false);
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+        return () => {
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
+        };
+    }, []);
+
     const [inventory, setInventory] = useState<InventoryItem[]>([]);
     const [medicines, setMedicines] = useState<Medicine[]>([]);
     const medicinesRef = useRef<Medicine[]>([]);
@@ -1223,8 +1238,11 @@ const App: React.FC = () => {
                 setSourceChallansForSales(null);
             }
 
-            // Do not block UI success state on background refresh.
-            await refreshInventoryViews(currentUser, ['transactions']);
+            // Only refresh inventory here. Re-fetching `transactions` would
+            // overwrite the optimistic update above with whatever loadData
+            // returns from the cache, and historically that race left the
+            // new bill invisible in Sales History until manual reload.
+            await refreshInventoryViews(currentUser);
             // Only attempt a background Supabase reload when online; offline
             // the data is already fresh in memoryCache from the save itself.
             if (navigator.onLine) {
@@ -3236,7 +3254,7 @@ const App: React.FC = () => {
             <div className="no-print">
                 <StatusBar
                     userName={currentUser?.full_name || 'Admin'}
-                    isOnline={navigator.onLine}
+                    isOnline={isOnline}
                     pharmacyName={currentUser?.pharmacy_name || 'MDXERA'}
                     isSyncing={isReloading || !isRealtimeActive}
                     appEdition={isRealtimeActive ? "Enterprise Edition [Live]" : "Enterprise Edition"}

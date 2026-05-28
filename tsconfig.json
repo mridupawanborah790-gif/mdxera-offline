@@ -36,6 +36,12 @@
     "src/app/App.tsx",
     "src/app/Router.tsx",
     "src/core/hooks/usePermissions.ts",
-    "src/modules/inventory/services/inventoryService.ts"
+    "src/modules/inventory/services/inventoryService.ts",
+    "vitest.config.ts",
+    "**/__tests__/**",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx"
   ]
 }

@@ -207,6 +207,7 @@
 import React, { useState, useEffect } from 'react';
 import { RegisteredPharmacy } from '@core/types';
 import { login, signup, requestPasswordReset, updatePassword, verifyRecoveryToken } from '@core/services/storageService';
+import { useOfflineAsset } from '@core/hooks/useOfflineAsset';
 
 const initialFormData = {
     email: '',
@@ -235,7 +236,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onLogin, initialView = 'auth' }) =>
         if (initialView) setView(initialView);
     }, [initialView]);
 
-    const LOGO_URL = "https://sblmbkgoiefqzykjksgm.supabase.co/storage/v1/object/public/logos/ChatGPT%20Image%20Feb%203,%202026,%2009_44_47%20PM.png";
+    const LOGO_URL = useOfflineAsset("https://sblmbkgoiefqzykjksgm.supabase.co/storage/v1/object/public/logos/ChatGPT%20Image%20Feb%203,%202026,%2009_44_47%20PM.png");
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const { name, value } = e.target;

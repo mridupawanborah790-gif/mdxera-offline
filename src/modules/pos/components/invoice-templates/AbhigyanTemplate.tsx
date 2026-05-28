@@ -123,6 +123,7 @@ const AbhigyanTemplate: React.FC<TemplateProps> = ({ bill }) => {
         .border-t-black { border-top: 1px solid black !important; }
         .row-min-h { height: 19px; }
         @media print {
+          @page { margin: 0 !important; size: auto; }
           .abhigyan-page { page-break-after: always; }
           .abhigyan-page:last-child { page-break-after: auto; }
         }

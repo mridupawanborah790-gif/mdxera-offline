@@ -18,7 +18,7 @@ import MasterDataMigrationWizard from '@modules/inventory/components/MasterDataM
 import { fuzzyMatch } from '@core/utils/search';
 import { getFinancialYearLabel } from '@core/utils/invoice';
 import { supabase } from '@core/db/supabaseClient';
-import { reserveVoucherNumber } from '@core/voucher/voucherService';
+import { reserveVoucherNumber, resetVoucherCursors, warmupVoucherSeries } from '@core/voucher/voucherService';
 import { isOnline } from '@core/sync/networkMonitor';
 import { normalizeStockHandlingConfig } from '@core/utils/stockHandling';
 
@@ -272,6 +272,7 @@ const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
     // Live sequences fetched from DB for the numbering screen
     const [liveSequences, setLiveSequences] = useState<Record<string, { currentNumber: number, documentNumber: string }>>({});
     const [isLoadingLive, setIsLoadingLive] = useState(false);
+    const [isFetchingVouchers, setIsFetchingVouchers] = useState(false);
 
     // Deep merge voucher sequences from configurations prop to stay in sync with POS saves
     // while preserving other unsaved local edits in the Configuration screen.
@@ -343,6 +344,44 @@ const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
         localConfigs.deliveryChallanConfig?.prefix, localConfigs.deliveryChallanConfig?.startingNumber,
         localConfigs.physicalInventoryConfig?.prefix, localConfigs.physicalInventoryConfig?.startingNumber
     ]);
+
+    // Fetch voucher cursors from Supabase and re-seed local state
+    const handleFetchVouchersFromServer = async () => {
+        if (!currentUser) return;
+        setIsFetchingVouchers(true);
+        try {
+            await resetVoucherCursors(currentUser.organization_id);
+            await warmupVoucherSeries(currentUser.organization_id);
+            // Refresh the live sequence display after re-seeding
+            setIsLoadingLive(true);
+            const voucherKeysMap: Record<string, 'sales-gst' | 'sales-non-gst' | 'purchase-entry' | 'purchase-order' | 'sales-challan' | 'delivery-challan' | 'physical-inventory'> = {
+                'invoiceConfig': 'sales-gst',
+                'nonGstInvoiceConfig': 'sales-non-gst',
+                'purchaseConfig': 'purchase-entry',
+                'purchaseOrderConfig': 'purchase-order',
+                'salesChallanConfig': 'sales-challan',
+                'deliveryChallanConfig': 'delivery-challan',
+                'physicalInventoryConfig': 'physical-inventory',
+            };
+            const results: Record<string, any> = {};
+            for (const [configKey, docType] of Object.entries(voucherKeysMap)) {
+                try {
+                    const preview = await reserveVoucherNumber(docType, currentUser, true);
+                    results[configKey] = { currentNumber: preview.usedNumber, documentNumber: preview.documentNumber };
+                } catch (e) {
+                    console.error(`Failed to refresh sequence for ${docType}`, e);
+                }
+            }
+            setLiveSequences(results);
+            setIsLoadingLive(false);
+            addNotification('Voucher cursors synced from server successfully.', 'success');
+        } catch (e: any) {
+            addNotification('Failed to sync voucher cursors: ' + (e?.message || 'Unknown error'), 'error');
+            setIsLoadingLive(false);
+        } finally {
+            setIsFetchingVouchers(false);
+        }
+    };
 
     // Import State
     const [importType, setImportType] = useState<string | null>(null);
@@ -1512,7 +1551,21 @@ const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
 
                         {activeSection === 'invoiceNumbering' && (
                             <div className="space-y-4 animate-in fade-in duration-300">
-                                <h2 className="text-xl font-black text-gray-900 uppercase tracking-tighter border-b-2 border-primary pb-2 mb-6">Voucher Numbering Schemes</h2>
+                                <div className="flex items-center justify-between border-b-2 border-primary pb-2 mb-6">
+                                    <h2 className="text-xl font-black text-gray-900 uppercase tracking-tighter">Voucher Numbering Schemes</h2>
+                                    <button
+                                        onClick={handleFetchVouchersFromServer}
+                                        disabled={isFetchingVouchers || !isOnline()}
+                                        className="px-3 py-1.5 text-[10px] font-black uppercase tracking-wide bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+                                        title="Reset local voucher cursors and re-seed from the highest numbers on the server. Use this to fix a cursor that jumped ahead or behind."
+                                    >
+                                        {isFetchingVouchers ? (
+                                            <><span className="inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Syncing…</>
+                                        ) : (
+                                            <>↓ Sync Cursors from Server</>
+                                        )}
+                                    </button>
+                                </div>
                                 {renderVoucherSeriesInput('Sales Bill (GST)', 'invoiceConfig', localConfigs, handleConfigChange, liveSequences, isLoadingLive, resolveConfiguredFiscalYear(localConfigs))}
                                 {renderVoucherSeriesInput('Sales Bill (Non-GST)', 'nonGstInvoiceConfig', localConfigs, handleConfigChange, liveSequences, isLoadingLive, resolveConfiguredFiscalYear(localConfigs))}
                                 {renderVoucherSeriesInput('Purchase Entry / Supplier Invoice', 'purchaseConfig', localConfigs, handleConfigChange, liveSequences, isLoadingLive, resolveConfiguredFiscalYear(localConfigs))}

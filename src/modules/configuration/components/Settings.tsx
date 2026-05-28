@@ -4,6 +4,7 @@ import type { RegisteredPharmacy } from '@core/types';
 import { handleEnterToNextField } from '@core/utils/navigation';
 import { STATE_DISTRICT_MAP } from '@core/utils/constants';
 import UpdateChecker from '@core/updates/UpdateChecker';
+import { cacheRemoteAsset } from '@core/utils/assetCache';
 
 interface SettingsProps {
     currentUser: RegisteredPharmacy | null;
@@ -65,10 +66,14 @@ const Settings: React.FC<SettingsProps> = ({ currentUser, onUpdateProfile, addNo
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!formData || isSaving) return;
-        
+
         setIsSaving(true);
         try {
             await onUpdateProfile(formData);
+            // Cache any remote logo URL for offline use
+            if (formData.pharmacy_logo_url && !formData.pharmacy_logo_url.startsWith('data:')) {
+                cacheRemoteAsset(formData.pharmacy_logo_url).catch(() => {});
+            }
             addNotification("Business profile synchronized with database.", "success");
         } catch (error: any) {
             addNotification(error.message || "Failed to update profile.", "error");

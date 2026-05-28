@@ -122,6 +122,7 @@ const GftTemplate: React.FC<TemplateProps> = ({ bill }) => {
     <div className="bg-white text-black font-sans min-h-full leading-tight text-xs w-full max-w-4xl mx-auto" style={{ fontWeight: 400 }}>
       <style>{`
         @media print {
+          @page { margin: 0 !important; size: auto; }
           .gft-page {
             page-break-after: always;
           }

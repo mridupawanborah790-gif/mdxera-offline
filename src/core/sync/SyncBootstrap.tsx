@@ -38,7 +38,15 @@ import {
   snapshotSchemaDrift,
 } from '@core/sync/schemaDriftCache';
 import { auditSchemas, snapshotSchemaAudit } from '@core/sync/schemaAudit';
+import { warmupAssets } from '@core/utils/assetCache';
 import type { RegisteredPharmacy } from '@core/types';
+
+// Brand assets that are always needed offline — cached on every online boot.
+const STATIC_BRAND_ASSETS = [
+  'https://sblmbkgoiefqzykjksgm.supabase.co/storage/v1/object/public/logos/IMG_9600.PNG',
+  'https://sblmbkgoiefqzykjksgm.supabase.co/storage/v1/object/public/logos/ChatGPT%20Image%20Feb%203,%202026,%2009_44_47%20PM.png',
+  'https://sblmbkgoiefqzykjksgm.supabase.co/storage/v1/object/public/logos/ChatGPT%20Image%20Feb%203,%202026,%2009_44_47%20PM%20(1).png',
+];
 
 /**
  * Event name fired by Header's "Sync All" button (or any other caller) to
@@ -212,6 +220,17 @@ export const SyncBootstrap: React.FC<Props> = ({ currentUser }) => {
         warmupVoucherRanges(currentUser).catch((err) =>
           console.warn('[SyncBootstrap] voucher warmup failed:', err)
         );
+
+        // Cache brand + user-configured assets for offline use (best-effort).
+        if (isOnline()) {
+          const userAssets: string[] = [];
+          try {
+            const profile = currentUser as RegisteredPharmacy & { pharmacy_logo_url?: string; dashboard_logo_url?: string };
+            if (profile.pharmacy_logo_url && !profile.pharmacy_logo_url.startsWith('data:')) userAssets.push(profile.pharmacy_logo_url);
+            if (profile.dashboard_logo_url && !profile.dashboard_logo_url.startsWith('data:')) userAssets.push(profile.dashboard_logo_url);
+          } catch { /* ignore */ }
+          warmupAssets([...STATIC_BRAND_ASSETS, ...userAssets]).catch(() => {});
+        }
 
         const fgDone = await isForegroundComplete(currentUser.organization_id);
         console.info('[SyncBootstrap] isForegroundComplete =', fgDone);

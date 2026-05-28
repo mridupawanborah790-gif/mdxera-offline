@@ -55,12 +55,12 @@ const PurchaseOrderTemplate: React.FC<TemplateProps> = ({ purchaseOrder, pharmac
         @media print {
           @page {
             size: A4 portrait;
-            margin: 4mm !important;
+            margin: 0 !important;
           }
           .po-page {
-            height: 289mm;
+            height: 297mm;
             box-sizing: border-box;
-            padding: 2mm;
+            padding: 6mm;
             display: flex;
             flex-direction: column;
             break-after: page;

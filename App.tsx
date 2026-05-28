@@ -67,6 +67,7 @@ import { createSupplierQuick, formatSupplierApiError, SupplierQuickResult } from
 import { canAccessScreen, filterNavigationByPermissions } from '@core/utils/rbac';
 import { normalizeStockHandlingConfig, resolveStockHandlingConfig, logStockMovement } from '@core/utils/stockHandling';
 import SyncBootstrap, { triggerFullResync } from '@core/sync/SyncBootstrap';
+import { resolveAsset } from '@core/utils/assetCache';
 
 const DATA_ENTRY_SCREENS = [
     'pos', 'nonGstPos', 'automatedPurchaseEntry', 'manualPurchaseEntry', 'manualSupplierInvoice',
@@ -2354,9 +2355,12 @@ const App: React.FC = () => {
 
     const buildBillPharmacy = () => {
         if (!currentUser) return null;
-        const configuredLogo = configurations.displayOptions?.pharmacy_logo_url;
-        if (!configuredLogo) return currentUser;
-        return { ...currentUser, pharmacy_logo_url: configuredLogo };
+        // Prefer the logo from display options, fall back to profile logo.
+        const rawLogo = configurations.displayOptions?.pharmacy_logo_url || currentUser.pharmacy_logo_url;
+        // Always resolve to cached base64 so invoice templates and html2canvas
+        // never receive tauri:// or remote URLs that fail in non-webview contexts.
+        const resolvedLogo = rawLogo ? resolveAsset(rawLogo) : undefined;
+        return { ...currentUser, pharmacy_logo_url: resolvedLogo };
     };
 
     const buildPrintBillPayload = (tx: Transaction) => {
@@ -3209,12 +3213,7 @@ const App: React.FC = () => {
                 isReloading={isReloading}
                 onResyncAll={() => {
                     if (!currentUser) return;
-                    const ok = window.confirm(
-                        'Re-download every table (configurations, masters, transactions) from the server into local storage?\n\n' +
-                        'The setup modal will appear while masters download. Background tables continue afterwards.'
-                    );
-                    if (!ok) return;
-                    addNotification('Starting full resync — modal will appear.', 'success');
+                    addNotification('Starting full resync — setup modal will appear shortly.', 'success');
                     triggerFullResync();
                     // Refresh the legacy app state after the foreground phase
                     // completes (5s buffer; background phase will continue

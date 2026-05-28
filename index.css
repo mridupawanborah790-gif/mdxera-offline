@@ -4,6 +4,18 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Remove Chromium/Tauri's built-in print header and footer (the line that
+   shows "tauri.localhost" / "localhost:5173" and the page date/counter).
+   Chromium places these inside the default @page margin area — setting
+   margin: 0 removes that area entirely. Invoice templates supply their own
+   internal padding so nothing is clipped. */
+@media print {
+  @page {
+    margin: 0;
+    size: auto;
+  }
+}
+
 @layer base {
   html {
     -webkit-tap-highlight-color: transparent;

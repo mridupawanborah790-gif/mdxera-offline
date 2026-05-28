@@ -1,6 +1,7 @@
 ﻿
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { cacheRemoteAsset } from '@core/utils/assetCache';
 // Fix: Added AppConfigurations to imports
 import type { DetailedBill, InventoryItem, Medicine, AppConfigurations } from '@core/types';
 import MediOneTemplate from '@modules/pos/components/invoice-templates/MediOneTemplate';
@@ -79,20 +80,40 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, 
     const sanitizedCustomerName = (bill.customerName || 'Customer').replace(/[^a-z0-9]/gi, '_');
     const invoiceNo = bill.invoiceNumber || bill.id;
     document.title = `Invoice_${invoiceNo}_${sanitizedCustomerName}`;
-    
+
     // Delay print to ensure DOM/layout is fully flushed before opening print dialog
     setTimeout(() => {
-        window.print();
-        
-        // Restore title after a safe delay
-        setTimeout(() => {
-            document.title = originalTitle;
-        }, 2000);
+      window.print();
+      // Restore title after a safe delay
+      setTimeout(() => {
+        document.title = originalTitle;
+      }, 2000);
     }, 300);
   };
 
   const handleDownloadOnly = () => {
     triggerBrowserPrint();
+  };
+
+  // Before html2canvas runs, convert every <img src> that is not already a
+  // data: URL to a base64 data URL. html2canvas cannot load tauri:// or any
+  // non-HTTP(S) scheme, and may also fail on cross-origin HTTP images even
+  // with useCORS:true. Converting to inline data: guarantees rendering.
+  const resolveImagesInElement = async (el: HTMLElement): Promise<void> => {
+    const imgs = Array.from(el.querySelectorAll<HTMLImageElement>('img[src]'));
+    await Promise.allSettled(
+      imgs.map(async (img) => {
+        const src = img.getAttribute('src') || '';
+        if (!src || src.startsWith('data:') || src.startsWith('blob:')) return;
+        try {
+          const base64 = await cacheRemoteAsset(src);
+          img.setAttribute('src', base64);
+        } catch {
+          // If caching fails, remove the src so html2canvas doesn't choke on it
+          img.removeAttribute('src');
+        }
+      })
+    );
   };
 
   const handleWhatsAppShare = async () => {
@@ -132,6 +153,9 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, 
     };
 
     try {
+        // Convert all img[src] to base64 so html2canvas can render them
+        // regardless of URL scheme (tauri://, https://, etc.)
+        if (element) await resolveImagesInElement(element);
         const worker = html2pdf().set(opt).from(element).toPdf();
         const pdfBlob = await worker.output('blob').then((blob: Blob) => blob);
         const pdfFile = new File([pdfBlob], `Invoice_${invoiceNo}.pdf`, { type: 'application/pdf' });

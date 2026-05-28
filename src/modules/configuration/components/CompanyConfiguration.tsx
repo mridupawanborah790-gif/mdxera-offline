@@ -256,6 +256,8 @@ const CompanyConfiguration: React.FC<CompanyConfigurationProps> = ({ currentUser
     return currentUser?.organization_id ? `${STORAGE_KEY}_${currentUser.organization_id}` : STORAGE_KEY;
   }, [currentUser?.organization_id]);
 
+  const [isFetchingFromServer, setIsFetchingFromServer] = useState(false);
+
   const [companyForm, setCompanyForm] = useState({ code: '', description: '', status: 'Active' as Status, isDefault: false, defaultSetOfBooksId: '' });
   const [booksForm, setBooksForm] = useState({ companyCodeId: '', setOfBooksId: '', description: '', defaultCurrency: 'INR', defaultCustomerGLId: '', defaultSupplierGLId: '', defaultDemoBankGLId: '', defaultBankGLId: '', activeStatus: 'Active' as Status, postingCount: 0 });
   const [glForm, setGlForm] = useState({ setOfBooksId: '', glCode: '', glName: '', alias: '', glType: 'Asset' as GLType, accountGroup: '', subgroup: '', mappingStructure: '', postingAllowed: true, controlAccount: false, activeStatus: 'Active' as Status, postingCount: 0 });
@@ -1132,6 +1134,130 @@ const CompanyConfiguration: React.FC<CompanyConfigurationProps> = ({ currentUser
 
   const activeRule = requiredFieldRules[assignmentForm.materialMasterType];
 
+  const onFetchFromServer = async () => {
+    if (!currentUser?.organization_id) {
+      setError('No organisation found. Please log in again.');
+      return;
+    }
+    if (!isOnline()) {
+      setError('Internet connection required to fetch from server.');
+      return;
+    }
+    setIsFetchingFromServer(true);
+    setError('');
+    setSuccess('');
+    try {
+      const organizationId = currentUser.organization_id;
+      const [companiesRes, booksRes, glRes, assignmentRes, logsRes, historyRes, bankRes] = await Promise.all([
+        supabase.from('company_codes').select('*').eq('organization_id', organizationId).order('created_at', { ascending: true }),
+        supabase.from('set_of_books').select('*').eq('organization_id', organizationId).order('created_at', { ascending: true }),
+        supabase.from('gl_master').select('*').eq('organization_id', organizationId).order('created_at', { ascending: true }),
+        supabase.from('gl_assignments').select('*').eq('organization_id', organizationId).order('created_at', { ascending: true }),
+        supabase.from('setup_wizard_defaults_log').select('*').eq('organization_id', organizationId).order('created_at', { ascending: false }),
+        supabase.from('gl_assignment_history').select('*').eq('organization_id', organizationId).order('changed_at', { ascending: false }),
+        supabase.from('bank_master').select('*').eq('organization_id', organizationId).order('created_at', { ascending: true }),
+      ]);
+
+      const firstError = [companiesRes, booksRes, glRes, assignmentRes, logsRes, historyRes, bankRes].find(r => r.error)?.error;
+      if (firstError) throw new Error(firstError.message);
+
+      const booksForOrg: SetOfBooks[] = (booksRes.data || []).map((b: any) => ({
+        id: b.id,
+        companyCodeId: b.company_code_id,
+        setOfBooksId: b.set_of_books_id,
+        description: b.description || '',
+        defaultCurrency: b.default_currency || 'INR',
+        defaultCustomerGLId: b.default_customer_gl_id || undefined,
+        defaultSupplierGLId: b.default_supplier_gl_id || undefined,
+        defaultDemoBankGLId: b.default_demo_bank_gl_id || undefined,
+        defaultBankGLId: b.default_bank_gl_id || undefined,
+        activeStatus: b.active_status || 'Active',
+        postingCount: b.posting_count || 0,
+        created_by: b.created_by || SYSTEM_USER,
+        created_at: b.created_at || now(),
+        updated_by: b.updated_by || SYSTEM_USER,
+        updated_at: b.updated_at || now(),
+      }));
+
+      const normalizedCompanies: CompanyCode[] = (companiesRes.data || []).map((c: any) => {
+        const rawDefaultSob = String(c.default_set_of_books_id || '').trim();
+        const mappedByCode = booksForOrg.find((b) => b.setOfBooksId === rawDefaultSob && b.companyCodeId === c.id && b.activeStatus === 'Active');
+        return {
+          id: c.id,
+          organizationId: c.organization_id,
+          code: c.code,
+          description: c.description || '',
+          status: c.status || 'Active',
+          isDefault: !!c.is_default,
+          defaultSetOfBooksId: mappedByCode?.setOfBooksId || '',
+          created_by: c.created_by || SYSTEM_USER,
+          created_at: c.created_at || now(),
+          updated_by: c.updated_by || SYSTEM_USER,
+          updated_at: c.updated_at || now(),
+        };
+      });
+
+      const fetched: Store = {
+        companies: normalizedCompanies,
+        setOfBooks: booksForOrg.map((b) => {
+          const byId = normalizedCompanies.find(c => c.id === b.companyCodeId);
+          const byCode = normalizedCompanies.find(c => c.code === b.companyCodeId);
+          return { ...b, companyCodeId: byId?.id || byCode?.id || b.companyCodeId };
+        }),
+        glMasters: (glRes.data || []).map((g: any) => ({
+          id: g.id, setOfBooksId: g.set_of_books_id, glCode: g.gl_code, glName: g.gl_name,
+          glType: g.gl_type, accountGroup: g.account_group || '', subgroup: g.subgroup || '',
+          alias: g.alias || '', mappingStructure: g.mapping_structure || '',
+          postingAllowed: !!g.posting_allowed, controlAccount: !!g.control_account,
+          activeStatus: g.active_status || 'Active', seeded_by_system: !!g.seeded_by_system,
+          template_version: g.template_version || DEFAULT_TEMPLATE_VERSION, postingCount: g.posting_count || 0,
+          created_by: g.created_by || SYSTEM_USER, created_at: g.created_at || now(),
+          updated_by: g.updated_by || SYSTEM_USER, updated_at: g.updated_at || now(),
+        })),
+        glAssignments: (assignmentRes.data || []).map((a: any) => ({
+          id: a.id, setOfBooksId: a.set_of_books_id,
+          assignmentScope: normalizeScope(a.assignment_scope),
+          materialMasterType: normalizeScope(a.assignment_scope) === 'MATERIAL' ? a.material_master_type : undefined,
+          partyType: normalizePartyType(a.party_type), partyGroup: a.party_group || '',
+          controlGL: a.control_gl_id || '', activeStatus: a.active_status || 'Active',
+          inventoryGL: a.inventory_gl || '', purchaseGL: a.purchase_gl || '',
+          cogsGL: a.cogs_gl || '', salesGL: a.sales_gl || '',
+          discountGL: a.discount_gl || '', taxGL: a.tax_gl || '',
+          seeded_by_system: !!a.seeded_by_system, template_version: a.template_version || DEFAULT_TEMPLATE_VERSION,
+          created_by: a.created_by || SYSTEM_USER, created_at: a.created_at || now(),
+          updated_by: a.updated_by || SYSTEM_USER, updated_at: a.updated_at || now(),
+        })),
+        setupLogs: (logsRes.data || []).map((l: any) => ({
+          id: l.id, setOfBooksId: l.set_of_books_id, action: l.action, message: l.message,
+          created_at: l.created_at || now(), created_by: l.created_by || SYSTEM_USER,
+        })),
+        assignmentHistory: (historyRes.data || []).map((h: any) => ({
+          id: h.id, assignmentId: h.assignment_id, setOfBooksId: h.set_of_books_id,
+          materialMasterType: h.material_master_type, changed_at: h.changed_at || now(),
+          changed_by: h.changed_by || SYSTEM_USER, effective_from: h.effective_from || now(),
+          previous: h.previous_payload || {}, next: h.next_payload || {},
+        })),
+        bankMasters: (bankRes.data || []).map((b: any) => ({
+          id: b.id, companyCodeId: b.company_code_id, linkedBankGlId: b.linked_bank_gl_id || undefined,
+          bankName: b.bank_name || '', accountName: b.account_name || '',
+          accountNumber: b.account_number || '', ifscCode: b.ifsc_code || '',
+          branchName: b.branch_name || '', accountType: b.account_type || 'Savings',
+          openingBalance: Number(b.opening_balance || 0), openingDate: b.opening_date || '',
+          defaultBank: !!b.default_bank, activeStatus: b.active_status || 'Active',
+          created_by: b.created_by || SYSTEM_USER, created_at: b.created_at || now(),
+          updated_by: b.updated_by || SYSTEM_USER, updated_at: b.updated_at || now(),
+        })),
+      };
+
+      persist(fetched);
+      setSuccess('Company configuration fetched from server and saved to local file.');
+    } catch (e: any) {
+      setError('Fetch failed: ' + (e?.message || 'Unknown error'));
+    } finally {
+      setIsFetchingFromServer(false);
+    }
+  };
+
   const onSaveConfiguration = async () => {
     setError('');
     setSuccess('');
@@ -1508,9 +1634,19 @@ const CompanyConfiguration: React.FC<CompanyConfigurationProps> = ({ currentUser
           ))}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
           <input className="tally-input" placeholder="Search / filter" value={search} onChange={e => setSearch(e.target.value)} />
-          <div className="text-[11px] text-gray-500 font-bold uppercase p-2 border border-gray-200 bg-gray-50">Flow: Company Code → Set of Books → GL Master / Bank Master → GL Assignment</div>
+          <div className="text-[11px] text-gray-500 font-bold uppercase p-2 border border-gray-200 bg-gray-50 md:col-span-1">Flow: Company Code → Set of Books → GL Master / Bank Master → GL Assignment</div>
+          <button
+            className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black uppercase px-3 py-2 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5"
+            onClick={onFetchFromServer}
+            disabled={isFetchingFromServer || !isOnline()}
+            title="Re-fetch all company configuration tables from Supabase and save to local file."
+          >
+            {isFetchingFromServer
+              ? <><span className="inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Fetching…</>
+              : <>↓ Fetch from Server</>}
+          </button>
           <button className="bg-primary text-white text-xs font-black uppercase px-3 py-2" onClick={onSaveConfiguration}>Save Configuration</button>
         </div>
 

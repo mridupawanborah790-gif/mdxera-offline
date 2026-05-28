@@ -6,6 +6,7 @@ import Chatbot from '@core/components/ui/Chatbot'; // Import Chatbot here
 import { MASTER_SHORTCUT_OPTIONS } from '@core/utils/constants';
 import { shouldHandleScreenShortcut } from '@core/utils/screenShortcuts';
 import { buildCustomerInvoiceOutstandingMap, calculateCustomerReceivableBreakdown, calculateSupplierPayableBreakdown } from '@core/utils/helpers';
+import { useOfflineAsset } from '@core/hooks/useOfflineAsset';
 
 interface DashboardProps {
     currentUser: RegisteredPharmacy | null;
@@ -45,7 +46,9 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, configurations, tran
         }
     }, [isKeyboardActive]);
 
-    const promoImageUrl = configurations.displayOptions?.dashboard_logo_url || 'https://sblmbkgoiefqzykjksgm.supabase.co/storage/v1/object/public/logos/IMG_9600.PNG';
+    const promoImageUrl = useOfflineAsset(
+        configurations.displayOptions?.dashboard_logo_url || 'https://sblmbkgoiefqzykjksgm.supabase.co/storage/v1/object/public/logos/IMG_9600.PNG'
+    );
 
     const isVisible = (fieldId: string) => configurations.modules?.dashboard?.fields?.[fieldId] !== false;
     const showReceivables = isVisible('statReceivables');

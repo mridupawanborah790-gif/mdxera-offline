@@ -65,6 +65,9 @@ import { extractPackMultiplier, resolveUnitsPerStrip } from '@core/utils/pack';
 import { setActiveScreenScope, shouldHandleScreenShortcut } from '@core/utils/screenShortcuts';
 import { createSupplierQuick, formatSupplierApiError, SupplierQuickResult } from './services/supplierService';
 import { canAccessScreen, filterNavigationByPermissions } from '@core/utils/rbac';
+import { useModuleVisibilityStore } from '@core/visibility/moduleVisibilityStore';
+import { filterNavByVisibility } from '@core/visibility/useModuleVisibility';
+import ModuleVisibility from '@modules/configuration/components/ModuleVisibility';
 import { normalizeStockHandlingConfig, resolveStockHandlingConfig, logStockMovement } from '@core/utils/stockHandling';
 import SyncBootstrap, { triggerFullResync } from '@core/sync/SyncBootstrap';
 import { resolveAsset } from '@core/utils/assetCache';
@@ -83,7 +86,7 @@ const PERSISTABLE_SCREENS = new Set([
     'suppliers', 'customers', 'medicineMasterList', 'masterPriceMaintain', 'vendorNomenclature', 'bulkUtility',
     'doctorsMaster',
     'substituteFinder', 'promotions', 'reports', 'dailyReports', 'balanceCarryforward', 'gst', 'eway', 'ewayLoginSetup',
-    'businessUsers', 'businessRoles', 'companyConfiguration', 'configuration', 'settings',
+    'businessUsers', 'businessRoles', 'companyConfiguration', 'configuration', 'settings', 'moduleVisibility',
     'classification', 'accountReceivable', 'accountPayable', 'newJournalEntryVoucher',
     'mbcCardDashboard', 'mbcCardList', 'mbcGenerateCard', 'mbcCardTypeMaster', 'mbcCardTemplateMaster', 'mbcCardPrintPreview', 'mbcCardRenewalHistory'
 ]);
@@ -97,6 +100,11 @@ type PersistedScreenState = {
 
 const App: React.FC = () => {
     const [currentUser, setCurrentUser] = useState<RegisteredPharmacy | null>(null);
+    const loadVisibilityForUser = useModuleVisibilityStore((s) => s.loadForUser);
+    const hiddenScreens = useModuleVisibilityStore((s) => s.hiddenScreens);
+    useEffect(() => {
+        loadVisibilityForUser(currentUser?.user_id ?? null);
+    }, [currentUser?.user_id, loadVisibilityForUser]);
     const [currentPage, setCurrentPage] = useState('dashboard');
     const [currentDailyReportId, setCurrentDailyReportId] = useState('dispatchSummary');
     const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -782,19 +790,31 @@ const App: React.FC = () => {
                 // 2. If not manual, it might be a refresh token failure or network glitch.
                 // We verify by checking the current session one last time.
                 const { data: { session: verifiedSession } } = await supabase.auth.getSession();
-                if (!verifiedSession) {
-                    // Truly gone
-                    setCurrentUser(null);
-                    setInventory([]);
-                    setMedicines([]);
-                    setTransactions([]);
-                    setPurchases([]);
-                    setMrpChangeLogs([]);
-                    setIsAppLoading(false);
-                    setAuthView('auth');
-                } else {
+                if (verifiedSession) {
                     console.warn('Recovered from transient SIGNED_OUT event.');
+                    return;
                 }
+                // 3. No Supabase session — but a persisted Tauri session may
+                // still be valid. Keep the user logged in if it is; the next
+                // online sync will refresh the Supabase token.
+                try {
+                    const restored = await storage.getCurrentUser();
+                    if (restored) {
+                        console.warn('[auth] SIGNED_OUT ignored — local persisted session is still valid.');
+                        return;
+                    }
+                } catch (err) {
+                    console.warn('[auth] getCurrentUser during SIGNED_OUT failed:', err);
+                }
+                // Truly gone — wipe state and bounce to login
+                setCurrentUser(null);
+                setInventory([]);
+                setMedicines([]);
+                setTransactions([]);
+                setPurchases([]);
+                setMrpChangeLogs([]);
+                setIsAppLoading(false);
+                setAuthView('auth');
             } else if (event === 'PASSWORD_RECOVERY') {
                 setAuthView('reset');
             } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
@@ -1093,6 +1113,9 @@ const App: React.FC = () => {
         setIsAppLoading(true);
         setAppLoadError(null);
         const persistedStateKey = currentUser ? getScreenStateStorageKey(currentUser) : null;
+        // Mark this signOut as intentional so the auth listener doesn't try to
+        // "heal" the session and keep the user logged in.
+        window.localStorage.setItem('MDXERA_MANUAL_LOGOUT', 'true');
         try {
             await storage.clearCurrentUser();
             if (persistedStateKey) {
@@ -1585,6 +1608,21 @@ const App: React.FC = () => {
             }
         }
         const saved = await storage.saveData('material_master', med, currentUser);
+
+        // If the new master's name+brand matches inventory rows that aren't
+        // linked to any code yet, stamp them with this code. This makes
+        // "create master with the exact inventory name" auto-link to that
+        // material's batches.
+        try {
+            const { linkInventoryToNewMaster } = await import('@modules/inventory/services/materialMasterSync');
+            const linked = await linkInventoryToNewMaster(saved as Medicine, inventory, currentUser);
+            if (linked > 0) {
+                addNotification(`Linked ${linked} inventory batch${linked === 1 ? '' : 'es'} to new master ${saved.materialCode}.`, 'success');
+            }
+        } catch (err) {
+            console.warn('[material_master:create] inventory auto-link failed:', err);
+        }
+
         await loadData(currentUser, 'background');
         return saved;
     };
@@ -2394,6 +2432,18 @@ const App: React.FC = () => {
         const config: ModuleConfig = { visible: true, fields: configurations.modules?.[configId]?.fields || {} };
 
         try {
+            if (pageId !== 'moduleVisibility' && hiddenScreens.has(pageId)) {
+                return (
+                    <div className="flex-1 flex items-center justify-center bg-gray-50 p-8">
+                        <div className="bg-white border-2 border-gray-400 p-6 text-center">
+                            <h2 className="text-xl font-black uppercase text-gray-700">Module Hidden</h2>
+                            <p className="text-xs font-bold text-gray-600 mt-3 uppercase">
+                                This module is hidden for your user. Ask the admin to unhide it from Module Hide/Unhide.
+                            </p>
+                        </div>
+                    </div>
+                );
+            }
             if (!canAccessScreen(pageId, currentUser, teamMembers, businessRoles, 'view')) {
                 return (
                     <div className="flex-1 flex items-center justify-center bg-amber-50 p-8">
@@ -2792,6 +2842,8 @@ const App: React.FC = () => {
                         onAddProduct={handleAddInventoryItem} onUpdateProduct={handleUpdateInventoryItem}
                         mrpChangeLogs={mrpChangeLogs}
                         configurations={configurations}
+                        addNotification={addNotification}
+                        onRefresh={() => currentUser ? loadData(currentUser, 'background') : Promise.resolve()}
                     />;
                 case 'physicalInventory':
                     return <PhysicalInventory
@@ -3052,6 +3104,7 @@ const App: React.FC = () => {
                         onMigrationLockChange={setIsMigrationLocked}
                         onMigrationStateChange={setMigrationUiState}
                         forceShowMigrationPopupToken={migrationPopupToken}
+                        isActive={isActive}
                     />;
                 case 'settings':
                     return <Settings
@@ -3061,6 +3114,13 @@ const App: React.FC = () => {
                             loadData(updated, 'background');
                         })}
                         addNotification={addNotification}
+                    />;
+                case 'moduleVisibility':
+                    return <ModuleVisibility
+                        currentUser={currentUser}
+                        addNotification={addNotification}
+                        onCancel={() => handleNavigate('dashboard')}
+                        isActive={isActive}
                     />;
                 case 'classification':
                     return <Classification
@@ -3230,7 +3290,7 @@ const App: React.FC = () => {
                         currentPage={currentPage}
                         onNavigate={handleNavigate}
                         currentUser={currentUser}
-                        navigationItems={filterNavigationByPermissions(navigation, currentUser, teamMembers, businessRoles)}
+                        navigationItems={filterNavByVisibility(filterNavigationByPermissions(navigation, currentUser, teamMembers, businessRoles), hiddenScreens)}
                         configurations={configurations}
                         onToggleMasterExplorer={toggleSidebar}
                         brandName="MDXERA"

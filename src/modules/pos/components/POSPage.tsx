@@ -1779,12 +1779,14 @@ const POS = forwardRef<any, POSProps>(({
                                             {deduplicatedSearchInventory.map((res, sIdx) => {
                                                 const isSelected = sIdx === selectedSearchIndex;
                                                 const item = res.item;
+                                                const itemPolicy = getInventoryPolicy(item, medicines);
+                                                const isServiceLike = !itemPolicy.inventorised;
                                                 const totalStock = res.batches.reduce((sum, batch) => sum + (batch.stock || 0), 0);
                                                 const unitsPerPack = item.unitsPerPack || 1;
                                                 const stripsStock = Math.floor(totalStock / unitsPerPack);
                                                 const looseStock = totalStock % unitsPerPack;
-                                                const isAnyBatchExpired = res.batches.some(b => checkIsExpired(b.expiry ? String(b.expiry) : ''));
-                                                const areAllBatchesExpired = res.batches.length > 0 && res.batches.every(b => checkIsExpired(b.expiry ? String(b.expiry) : ''));
+                                                const isAnyBatchExpired = !isServiceLike && res.batches.some(b => checkIsExpired(b.expiry ? String(b.expiry) : ''));
+                                                const areAllBatchesExpired = !isServiceLike && res.batches.length > 0 && res.batches.every(b => checkIsExpired(b.expiry ? String(b.expiry) : ''));
 
                                                 return (
                                                     <tr
@@ -1805,9 +1807,9 @@ const POS = forwardRef<any, POSProps>(({
                                                             {item.code}
                                                         </td>
                                                         <td className={`p-1.5 px-3 border-r border-gray-200 ${matrixRowTextStyle} ${isSelected ? 'text-white/80' : 'text-gray-500'}`}>{item.manufacturer || item.brand}</td>
-                                                        <td className={`p-1.5 px-3 border-r border-gray-200 text-center ${matrixRowTextStyle} ${isSelected ? 'text-white' : (totalStock <= 0 ? 'text-red-500' : 'text-emerald-700')}`}>{stripsStock}</td>
-                                                        <td className={`p-1.5 px-3 border-r border-gray-200 text-center ${matrixRowTextStyle} ${isSelected ? 'text-white' : (totalStock <= 0 ? 'text-red-500' : 'text-emerald-700')}`}>{looseStock}</td>
-                                                        <td className={`p-1.5 px-3 border-r border-gray-200 text-center ${matrixRowTextStyle} ${isSelected ? 'text-white' : (totalStock <= 0 ? 'text-red-500' : 'text-emerald-700')}`}>{totalStock}</td>
+                                                        <td className={`p-1.5 px-3 border-r border-gray-200 text-center ${matrixRowTextStyle} ${isSelected ? 'text-white' : (isServiceLike ? 'text-gray-400' : (totalStock <= 0 ? 'text-red-500' : 'text-emerald-700'))}`}>{isServiceLike ? '—' : stripsStock}</td>
+                                                        <td className={`p-1.5 px-3 border-r border-gray-200 text-center ${matrixRowTextStyle} ${isSelected ? 'text-white' : (isServiceLike ? 'text-gray-400' : (totalStock <= 0 ? 'text-red-500' : 'text-emerald-700'))}`}>{isServiceLike ? '—' : looseStock}</td>
+                                                        <td className={`p-1.5 px-3 border-r border-gray-200 text-center ${matrixRowTextStyle} ${isSelected ? 'text-white' : (isServiceLike ? 'text-gray-400' : (totalStock <= 0 ? 'text-red-500' : 'text-emerald-700'))}`}>{isServiceLike ? '—' : totalStock}</td>
                                                         <td className={`p-1.5 px-3 text-right ${matrixRowTextStyle} ${isSelected ? 'text-white' : 'text-gray-900'}`}>₹{(item.mrp || 0).toFixed(2)}</td>
                                                     </tr>
                                                 );

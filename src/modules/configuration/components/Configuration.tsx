@@ -15,6 +15,7 @@ import PurchaseBillImportPreviewModal from '@modules/purchase/components/Purchas
 import SalesBillImportPreviewModal from '@modules/sales/components/SalesBillImportPreviewModal';
 import Modal from '@core/components/ui/Modal';
 import MasterDataMigrationWizard from '@modules/inventory/components/MasterDataMigrationWizard';
+import ModuleVisibility from '@modules/configuration/components/ModuleVisibility';
 import { fuzzyMatch } from '@core/utils/search';
 import { getFinancialYearLabel } from '@core/utils/invoice';
 import { supabase } from '@core/db/supabaseClient';
@@ -233,7 +234,7 @@ const MappingImportPreviewModal = ({ isOpen, onClose, onSave, data, distributors
     </Modal>
 );
 
-type ConfigSection = 'general' | 'posConfig' | 'purchaseConfig' | 'invoiceNumbering' | 'dashboardShortcuts' | 'dashboardModuleConfig' | 'displayOptions' | 'discountMaster' | 'moduleVisibility' | 'dataManagement';
+type ConfigSection = 'general' | 'posConfig' | 'purchaseConfig' | 'invoiceNumbering' | 'dashboardShortcuts' | 'moduleVisibility' | 'displayOptions' | 'discountMaster' | 'dataManagement';
 
 interface ConfigurationPageProps {
     configurations: AppConfigurations;
@@ -257,13 +258,15 @@ interface ConfigurationPageProps {
     onMigrationLockChange?: (locked: boolean) => void;
     onMigrationStateChange?: (state: { active: boolean; minimized: boolean; module: string; progressPercent: number; status: 'Processing…' | 'Completed' | 'Cancelled' }) => void;
     forceShowMigrationPopupToken?: number;
+    isActive?: boolean;
 }
 
-const ConfigurationPage: React.FC<ConfigurationPageProps> = ({ 
+const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
     configurations, onUpdateConfigurations, addNotification, currentUser,
     inventory, transactions, purchases, distributors, customers, medicines,
     onBulkAddInventory, onBulkAddDistributors, onBulkAddCustomers, onBulkAddPurchases, onBulkAddSales,
-    onBulkAddMedicines, onBulkAddMappings, mappings, onMigrationLockChange, onMigrationStateChange, forceShowMigrationPopupToken
+    onBulkAddMedicines, onBulkAddMappings, mappings, onMigrationLockChange, onMigrationStateChange, forceShowMigrationPopupToken,
+    isActive = true,
 }) => {
     const MAX_DASHBOARD_SHORTCUTS = 12;
     const [activeSection, setActiveSection] = useState<ConfigSection>('general');
@@ -933,9 +936,8 @@ const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
                             { id: 'discountMaster', name: 'Discount Master', icon: '🏷️' },
                             { id: 'invoiceNumbering', name: 'Voucher Series', icon: '🔢' },
                             { id: 'dashboardShortcuts', name: 'Gateway Shortcuts', icon: '🚀' },
-                            { id: 'dashboardModuleConfig', name: 'Dashboard Module Configuration', icon: '📈' },
+                            { id: 'moduleVisibility', name: 'Module Hide / Unhide  (Locked)', icon: '🔒' },
                             { id: 'displayOptions', name: 'Printing & Display', icon: '🖥️' },
-                            { id: 'moduleVisibility', name: 'Module Columns', icon: '📊' },
                         ].map(item => (
                             <button 
                                 key={item.id} 
@@ -1286,63 +1288,15 @@ const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
                             </div>
                         )}
 
-                        {activeSection === 'dashboardModuleConfig' && (
-                            <div className="space-y-8 animate-in fade-in duration-300 max-w-3xl">
-                                <h2 className="text-xl font-black text-gray-900 uppercase tracking-tighter border-b-2 border-primary pb-2">Dashboard Module Configuration</h2>
-                                <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">Enable or disable dashboard summary components from the main dashboard view.</p>
-
-                                <div className="bg-gray-50/60 border border-gray-200 p-5 space-y-1">
-                                    <Toggle
-                                        label="Sales (with amount display)"
-                                        enabled={(localConfigs.modules?.dashboard?.fields?.statSales) !== false}
-                                        setEnabled={() => handleModuleFieldToggle('dashboard', 'statSales')}
-                                    />
-                                    <Toggle
-                                        label="Profit (with amount display)"
-                                        enabled={(localConfigs.modules?.dashboard?.fields?.statProfit) !== false}
-                                        setEnabled={() => handleModuleFieldToggle('dashboard', 'statProfit')}
-                                    />
-                                    <Toggle
-                                        label="Purchases"
-                                        enabled={(localConfigs.modules?.dashboard?.fields?.statPurchases) !== false}
-                                        setEnabled={() => handleModuleFieldToggle('dashboard', 'statPurchases')}
-                                    />
-                                    <Toggle
-                                        label="Inventory"
-                                        enabled={(localConfigs.modules?.dashboard?.fields?.statStockValue) !== false}
-                                        setEnabled={() => handleModuleFieldToggle('dashboard', 'statStockValue')}
-                                    />
-                                    <Toggle
-                                        label="Receivables (with amount display)"
-                                        enabled={(localConfigs.modules?.dashboard?.fields?.statReceivables) !== false}
-                                        setEnabled={() => handleModuleFieldToggle('dashboard', 'statReceivables')}
-                                    />
-                                    <Toggle
-                                        label="Payables (with amount display)"
-                                        enabled={(localConfigs.modules?.dashboard?.fields?.statPayables) !== false}
-                                        setEnabled={() => handleModuleFieldToggle('dashboard', 'statPayables')}
-                                    />
-                                    <Toggle
-                                        label="Recent Vouchers"
-                                        enabled={(localConfigs.modules?.dashboard?.fields?.recentVouchers) !== false}
-                                        setEnabled={() => handleModuleFieldToggle('dashboard', 'recentVouchers')}
-                                    />
-                                    <Toggle
-                                        label="Low Stock"
-                                        enabled={(localConfigs.modules?.dashboard?.fields?.kpiLowStock) !== false}
-                                        setEnabled={() => handleModuleFieldToggle('dashboard', 'kpiLowStock')}
-                                    />
-                                    <Toggle
-                                        label="Audit"
-                                        enabled={(localConfigs.modules?.dashboard?.fields?.kpiAudits) !== false}
-                                        setEnabled={() => handleModuleFieldToggle('dashboard', 'kpiAudits')}
-                                    />
-                                    <Toggle
-                                        label="Purchase Return"
-                                        enabled={(localConfigs.modules?.dashboard?.fields?.kpiReturns) !== false}
-                                        setEnabled={() => handleModuleFieldToggle('dashboard', 'kpiReturns')}
-                                    />
-                                </div>
+                        {activeSection === 'moduleVisibility' && (
+                            <div className="-m-8 flex-1 flex flex-col min-h-0">
+                                <ModuleVisibility
+                                    key={activeSection}
+                                    currentUser={currentUser}
+                                    addNotification={addNotification}
+                                    onCancel={() => setActiveSection('general')}
+                                    isActive={isActive}
+                                />
                             </div>
                         )}
 
@@ -1413,31 +1367,6 @@ const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
                                         </div>
                                         <p className="text-[9px] font-bold text-gray-400 uppercase tracking-tighter opacity-70">PNG / JPG / JPEG allowed</p>
                                     </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {activeSection === 'moduleVisibility' && (
-                            <div className="space-y-8 animate-in fade-in duration-300">
-                                <h2 className="text-xl font-black text-gray-900 uppercase tracking-tighter border-b-2 border-primary pb-2">Column Visibility Controller</h2>
-                                <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-6">Hide or show specific data points across the main registers.</p>
-                                
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-                                    {configurableModules.map(module => (
-                                        <div key={module.id} className="space-y-4">
-                                            <h3 className="text-sm font-black text-primary uppercase tracking-[0.2em] border-b border-gray-100 pb-2">{module.name} Module</h3>
-                                            <div className="bg-gray-50/50 p-4 border border-gray-100 h-96 overflow-y-auto custom-scrollbar">
-                                                {(module.fields || []).map(field => (
-                                                    <Toggle 
-                                                        key={field.id}
-                                                        label={field.name}
-                                                        enabled={(localConfigs.modules?.[module.id]?.fields?.[field.id]) !== false}
-                                                        setEnabled={() => handleModuleFieldToggle(module.id, field.id)}
-                                                    />
-                                                ))}
-                                            </div>
-                                        </div>
-                                    ))}
                                 </div>
                             </div>
                         )}

@@ -5,7 +5,9 @@ import { invoke } from '@tauri-apps/api/core';
 import type { RegisteredPharmacy } from '@core/types';
 
 const BCRYPT_ROUNDS = 12;
-const SESSION_TTL_DAYS = 30;
+// Local sessions never expire on their own — user stays logged in until they
+// click logout explicitly.
+const SESSION_TTL_DAYS = 365 * 100;
 
 interface LocalAuthRow {
   id: string;

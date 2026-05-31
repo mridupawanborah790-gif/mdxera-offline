@@ -27,6 +27,7 @@ import {
     requestPasswordReset as _requestPasswordResetImpl,
     verifyRecoveryToken as _verifyRecoveryTokenImpl,
     updatePassword as _updatePasswordImpl,
+    restoreSession as _restoreSessionImpl,
 } from '../src/core/auth/authService';
 import { SyncQueue } from '../src/core/sync/SyncQueue';
 import { pushWithDriftLearning } from '../src/core/sync/schemaDriftCache';
@@ -389,12 +390,44 @@ const normalizeMaterialMasterType = (value: unknown): string | undefined => {
 };
 
     const getHighestLocalMaterialCode = async (organizationId: string): Promise<number> => {
-        const localRows = await idb.getAll(STORES.MATERIAL_MASTER);
-        return localRows.reduce((max, row) => {
-            if (row?.organization_id !== organizationId) return max;
-            const parsed = parseMaterialCodeNumber(row?.materialCode);
-            return parsed !== null && parsed > max ? parsed : max;
-        }, MATERIAL_CODE_START - 1);
+        // Look in BOTH IDB and memoryCache. memoryCache is populated by
+        // hydrateMemoryCacheFromSqlite — on a fresh browser session, IDB may
+        // be empty even when SQLite has the full master list. Without the
+        // memoryCache check, the next code would be MATERIAL_CODE_START
+        // (10000000), guaranteeing collisions with already-synced rows.
+        const reduceMax = (rows: any[], current: number) =>
+            rows.reduce((max, row) => {
+                if (row?.organization_id !== organizationId) return max;
+                const parsed = parseMaterialCodeNumber(row?.materialCode);
+                return parsed !== null && parsed > max ? parsed : max;
+            }, current);
+
+        let highest = MATERIAL_CODE_START - 1;
+        try {
+            const idbRows = await idb.getAll(STORES.MATERIAL_MASTER);
+            highest = reduceMax(idbRows, highest);
+        } catch { /* IDB unavailable; fall through */ }
+
+        const cached = memoryCache['MATERIAL_MASTER'];
+        if (Array.isArray(cached)) highest = reduceMax(cached, highest);
+
+        // SQLite is the durable source of truth. Query it directly so we
+        // catch rows that were synced into SQLite but never put into IDB
+        // (hydration writes only to memoryCache; persistLocalRowToSqlite
+        // mirrors writes to SQLite). One small SELECT is cheap.
+        try {
+            const mod = await import('../src/core/db/client');
+            const rows = await mod.db.select<{ material_code: string }>(
+                `SELECT material_code FROM material_master WHERE organization_id = ?`,
+                [organizationId],
+            );
+            for (const r of rows) {
+                const parsed = parseMaterialCodeNumber(r?.material_code);
+                if (parsed !== null && parsed > highest) highest = parsed;
+            }
+        } catch { /* SQLite unavailable; rely on the above */ }
+
+        return highest;
     };
 
     const getHighestRemoteMaterialCode = async (organizationId: string): Promise<number> => {
@@ -2167,17 +2200,23 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
     export const updatePassword = _updatePasswordImpl;
 
     export const getCurrentUser = async (): Promise<RegisteredPharmacy | null> => {
-        // 1. Get fresh session from Supabase to verify true authentication state
+        // 1. Try Supabase's in-memory session first.
         const { data: { session } } = await supabase.auth.getSession();
-        if (!session?.user) {
-            // Clear stale local profile cache if no auth session exists
-            await idb.clearAllStores();
-            return null;
+        let userId = session?.user?.id ?? null;
+
+        // 2. If no Supabase session, try restoring from the Tauri persisted
+        //    plugin-store + local-session token. This is the path that keeps
+        //    the user logged in across app close/reopen even when the
+        //    webview's localStorage was wiped or the access token expired
+        //    while the device was offline. We do NOT clear idb stores here:
+        //    only an explicit logout should do that.
+        if (!userId) {
+            const restored = await _restoreSessionImpl();
+            if (!restored) return null;
+            userId = restored.user_id;
         }
 
-        const userId = session.user.id;
-
-        // 2. Try to fetch fresh profile from network first if online
+        // 3. Try to fetch fresh profile from network first if online
         if (navigator.onLine) {
             try {
                 const freshProfile = await fetchProfile(userId);
@@ -2187,7 +2226,7 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
             }
         }
 
-        // 3. Fallback to cached profile specifically for this user
+        // 4. Fallback to cached profile specifically for this user
         const cached = await idb.get(STORES.PROFILES, userId) as RegisteredPharmacy | null;
         return cached || null;
     };

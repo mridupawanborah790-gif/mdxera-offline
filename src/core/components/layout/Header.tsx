@@ -40,6 +40,7 @@ const Header: React.FC<HeaderProps> = ({ onNewBillClick, currentUser, onNavigate
       { id: 'businessUsers', label: 'Business Users' },
       { id: 'classification', label: 'Classification' },
       { id: 'settings', label: 'System Settings' },
+      { id: 'moduleVisibility', label: 'Module Hide / Unhide  (Locked)' },
       { id: 'eway', label: 'Statutory / E-Way Billing Management' },
       { id: 'ewayLoginSetup', label: 'E-Way Login Setup' },
     ]

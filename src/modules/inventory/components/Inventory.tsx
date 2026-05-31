@@ -6,6 +6,7 @@ import EditProductModal from '@modules/inventory/components/EditProductModal';
 import ExportInventoryModal from '../components/ExportInventoryModal';
 import MrpChangeLogModal from '../components/MrpChangeLogModal';
 import InventoryBatchDetailModal from '../components/InventoryBatchDetailModal';
+import SyncMaterialMasterModal from '../components/SyncMaterialMasterModal';
 import type { InventoryItem, RegisteredPharmacy, ModuleConfig, AppConfigurations, Medicine, MrpChangeLogEntry } from '@core/types';
 import { fuzzyMatch } from '@core/utils/search';
 import { formatExpiryToMMYY, normalizeImportDate } from '@core/utils/helpers';
@@ -50,6 +51,8 @@ interface InventoryProps {
     onUpdateProduct: (item: InventoryItem) => Promise<void>;
     mrpChangeLogs?: MrpChangeLogEntry[];
     configurations?: AppConfigurations | null;
+    addNotification?: (message: string, type: 'success' | 'error' | 'warning') => void;
+    onRefresh?: () => Promise<void> | void;
 }
 
 interface GroupedInventoryRow {
@@ -84,11 +87,14 @@ const Inventory: React.FC<InventoryProps> = ({
     onAddProduct,
     onUpdateProduct,
     mrpChangeLogs = [],
-    configurations
+    configurations,
+    addNotification,
+    onRefresh,
 }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+    const [isSyncMasterModalOpen, setIsSyncMasterModalOpen] = useState(false);
     const [itemToEdit, setItemToEdit] = useState<InventoryItem | null>(null);
     const [lowStockFilter, setLowStockFilter] = useState(false);
     const [isColumnSelectorOpen, setIsColumnSelectorOpen] = useState(false);
@@ -673,6 +679,14 @@ const Inventory: React.FC<InventoryProps> = ({
                                 PRINT
                             </button>
 
+                            <button
+                                onClick={() => setIsSyncMasterModalOpen(true)}
+                                className="px-4 py-1.5 border border-gray-400 bg-white text-primary font-black uppercase text-xs tracking-widest hover:bg-gray-50 transition-all active:scale-95 shadow-sm"
+                                title="Reconcile inventory rows with Material Master"
+                            >
+                                Sync to Master
+                            </button>
+
                             <button onClick={() => setIsAddModalOpen(true)} className="px-4 py-1.5 tally-button-accent text-xs font-black uppercase tracking-widest">F2: ADD INVENTORY</button>
                         </div>
                     </div>
@@ -855,16 +869,21 @@ const Inventory: React.FC<InventoryProps> = ({
 
             {isAddModalOpen && <AddProductModal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} onAddProduct={onAddProduct} organizationId={currentUser?.organization_id || ''} medicines={medicines} />}
             {itemToEdit && (
-                <EditProductModal 
-                    isOpen={!!itemToEdit} 
-                    onClose={() => setItemToEdit(null)} 
-                    onSave={onUpdateProduct} 
-                    productToEdit={itemToEdit} 
-                    onPrintBarcodeClick={() => {}} 
+                <EditProductModal
+                    isOpen={!!itemToEdit}
+                    onClose={() => setItemToEdit(null)}
+                    onSave={onUpdateProduct}
+                    productToEdit={itemToEdit}
+                    onPrintBarcodeClick={() => {}}
                     onNext={handleNextProduct}
                     onPrevious={handlePreviousProduct}
                     hasNext={selectedIndex < paginatedItems.length - 1 || currentPage < totalPages}
                     hasPrevious={selectedIndex > 0 || currentPage > 1}
+                    inventory={inventory}
+                    medicines={medicines}
+                    currentUser={currentUser}
+                    addNotification={addNotification}
+                    onRefresh={onRefresh}
                 />
             )}
             {isExportModalOpen && (
@@ -876,6 +895,17 @@ const Inventory: React.FC<InventoryProps> = ({
                 />
             )}
             <MrpChangeLogModal isOpen={isMrpLogOpen} onClose={() => setIsMrpLogOpen(false)} logs={mrpChangeLogs} />
+            {isSyncMasterModalOpen && (
+                <SyncMaterialMasterModal
+                    isOpen={isSyncMasterModalOpen}
+                    onClose={() => setIsSyncMasterModalOpen(false)}
+                    inventory={inventory}
+                    medicines={medicines}
+                    currentUser={currentUser}
+                    addNotification={addNotification ?? (() => {})}
+                    onRefresh={async () => { await onRefresh?.(); }}
+                />
+            )}
             <InventoryBatchDetailModal
                 isOpen={!!detailRow}
                 onClose={() => setDetailRowKey(null)}

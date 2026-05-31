@@ -1,11 +1,16 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Modal from '@core/components/ui/Modal';
-import type { InventoryItem } from '@core/types';
+import type { InventoryItem, Medicine, RegisteredPharmacy } from '@core/types';
 import { renderBarcode, generateRandomBarcode } from '@core/utils/barcode';
 import { handleEnterToNextField } from '@core/utils/navigation';
 import { normalizeImportDate, formatExpiryToMMYY } from '@core/utils/helpers';
 import { buildTotalStockFromBreakup, getStockBreakup } from '@core/utils/stock';
 import { isLiquidOrWeightPack, resolveUnitsPerStrip } from '@core/utils/pack';
+import {
+    materialKey,
+    createMasterFromGroup,
+    type MaterialGroupStatus,
+} from '../services/materialMasterSync';
 
 interface EditProductModalProps {
     isOpen: boolean;
@@ -17,23 +22,35 @@ interface EditProductModalProps {
     onPrevious?: () => void;
     hasNext?: boolean;
     hasPrevious?: boolean;
+    /** All inventory rows — used to find sibling batches of this material. */
+    inventory?: InventoryItem[];
+    medicines?: Medicine[];
+    currentUser?: RegisteredPharmacy | null;
+    addNotification?: (message: string, type: 'success' | 'error' | 'warning') => void;
+    onRefresh?: () => Promise<void> | void;
 }
 
 const matrixRowTextStyle = "text-2xl font-normal tracking-tight uppercase leading-tight";
 
-const EditProductModal: React.FC<EditProductModalProps> = ({ 
-    isOpen, 
-    onClose, 
-    onSave, 
-    productToEdit, 
+const EditProductModal: React.FC<EditProductModalProps> = ({
+    isOpen,
+    onClose,
+    onSave,
+    productToEdit,
     onPrintBarcodeClick,
     onNext,
     onPrevious,
     hasNext,
     hasPrevious,
+    inventory = [],
+    medicines = [],
+    currentUser,
+    addNotification,
+    onRefresh,
 }) => {
     const [product, setProduct] = useState<InventoryItem | null>(null);
     const [expiryDisplay, setExpiryDisplay] = useState('');
+    const [linkingMaster, setLinkingMaster] = useState(false);
     const barcodeRef = useRef<SVGSVGElement>(null);
 
     useEffect(() => {
@@ -48,6 +65,17 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
             renderBarcode(barcodeRef.current, product.barcode);
         }
     }, [product?.barcode, isOpen]);
+
+    const linkedMaster = useMemo(() => {
+        if (!product) return null;
+        const code = (product.code || '').trim();
+        if (code) {
+            const byCode = medicines.find(m => (m.materialCode || '').trim() === code);
+            if (byCode) return byCode;
+        }
+        const key = materialKey(product.name, product.brand);
+        return medicines.find(m => materialKey(m.name, m.brand) === key) || null;
+    }, [product?.code, product?.name, product?.brand, medicines]);
 
     if (!isOpen || !product) return null;
 
@@ -95,10 +123,15 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
     };
 
     const handleSave = () => {
-        if (product) {
-            onSave(product);
-            onClose();
-        }
+        if (!product) return;
+        // If a Material Master exists for this name+brand but no code is set
+        // on the inventory row, stamp it now so the link actually persists.
+        const codeToSave = (product.code || '').trim();
+        const finalProduct = (!codeToSave && linkedMaster?.materialCode)
+            ? { ...product, code: linkedMaster.materialCode }
+            : product;
+        onSave(finalProduct);
+        onClose();
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
@@ -113,6 +146,39 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
         }
     };
 
+
+    const canLinkToMaster = !linkedMaster && !!currentUser;
+
+    const handleLinkToMaster = async () => {
+        if (!currentUser || !product || linkingMaster) return;
+        setLinkingMaster(true);
+        try {
+            const key = materialKey(product.name, product.brand);
+            const members = inventory.filter(i => materialKey(i.name, i.brand) === key);
+            const group: MaterialGroupStatus = {
+                key,
+                name: product.name || '',
+                brand: product.brand || '',
+                batchCount: members.length || 1,
+                totalStock: members.reduce((s, m) => s + Number(m.stock || 0), 0),
+                representative: product,
+                members: members.length ? members : [product],
+                master: null,
+                inMaster: false,
+            };
+            const result = await createMasterFromGroup(group, currentUser);
+            setProduct(prev => prev ? { ...prev, code: result.medicine.materialCode } : prev);
+            addNotification?.(
+                `Linked to Material Master · code ${result.medicine.materialCode} · ${result.updatedBatches} batch${result.updatedBatches === 1 ? '' : 'es'} updated`,
+                'success',
+            );
+            await onRefresh?.();
+        } catch (err: any) {
+            addNotification?.(err?.message || 'Failed to create Material Master record.', 'error');
+        } finally {
+            setLinkingMaster(false);
+        }
+    };
 
     const unitsPerPack = resolveUnitsPerStrip(product.unitsPerPack, product.packType);
     const isLiquidOrWeight = isLiquidOrWeightPack(product.packType);
@@ -177,6 +243,22 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
                                         placeholder="Link to Master Code"
                                         className={`w-full text-xl font-mono font-bold uppercase border-b-2 outline-none bg-transparent ${productToEdit?.code ? 'border-gray-100 text-gray-400 cursor-not-allowed' : 'border-gray-300 focus:border-primary'}`}
                                     />
+                                    {canLinkToMaster && (
+                                        <button
+                                            type="button"
+                                            onClick={handleLinkToMaster}
+                                            disabled={linkingMaster}
+                                            className="mt-2 w-full px-3 py-1.5 text-[10px] font-black uppercase tracking-widest border border-primary text-primary hover:bg-primary hover:text-white disabled:opacity-50 transition-colors"
+                                            title="Create a Material Master record from this item and link all its batches"
+                                        >
+                                            {linkingMaster ? 'Creating…' : 'Create in Material Master'}
+                                        </button>
+                                    )}
+                                    {!!linkedMaster && !product.code && (
+                                        <div className="mt-1 text-[9px] font-bold uppercase text-emerald-700">
+                                            Master exists: <span className="font-mono">{linkedMaster.materialCode}</span> — save to apply
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                             <div className="grid grid-cols-2 gap-6">

@@ -120,6 +120,9 @@ const Reports: React.FC<ReportsProps> = ({
   const [sortConfig, setSortConfig] = useState<{ column: string; direction: SortDirection } | null>(null);
   const [filterModalOpen, setFilterModalOpen] = useState(false);
   const [columnModalOpen, setColumnModalOpen] = useState(false);
+  const [filterColumnSearch, setFilterColumnSearch] = useState<Record<string, string>>({});
+  const [currentReportPage, setCurrentReportPage] = useState(1);
+  const [reportPageSize, setReportPageSize] = useState(50);
   const [mfrSalesViewMode, setMfrSalesViewMode] = useState<MfrSalesViewMode>('detailed');
   const [stockMovementViewMode, setStockMovementViewMode] = useState<StockMovementViewMode>('detailed');
   const [inventoryValueViewMode, setInventoryValueViewMode] = useState<InventoryValueViewMode>('batchWise');
@@ -1320,6 +1323,56 @@ const Reports: React.FC<ReportsProps> = ({
     return [...filteredData, stockMovementTotalRow];
   }, [activeReportId, filteredData, stockMovementTotalRow]);
 
+  // Reset to page 1 when the underlying data, sort, or filters change.
+  useEffect(() => { setCurrentReportPage(1); }, [activeReportId, filteredData.length, reportPageSize]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredData.length / reportPageSize));
+  const pageStart = (currentReportPage - 1) * reportPageSize;
+  const pageEnd = pageStart + reportPageSize;
+  const paginatedData = useMemo(
+    () => filteredData.slice(pageStart, pageEnd),
+    [filteredData, pageStart, pageEnd]
+  );
+
+  // Format an expiry-column value as MM-YYYY. Falls back to the original value
+  // when it isn't a parseable date (e.g. "N/A", "—", already formatted).
+  const formatExpiryCell = (value: any): string => {
+    if (value === null || value === undefined || value === '') return '-';
+    const s = String(value).trim();
+    if (!s || s === 'N/A' || s === '-' || s === '—') return s;
+    if (/^\d{2}-\d{4}$/.test(s)) return s;
+    const d = new Date(s);
+    if (Number.isNaN(d.getTime())) return s;
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    return `${mm}-${d.getFullYear()}`;
+  };
+  const isExpiryColumn = (col: string) => /^(expiry|exp\.?|exp date)$/i.test(col.trim());
+
+  // Keyboard shortcuts: Ctrl+F → filter pop-up, Ctrl+C → column pop-up.
+  // Only fire when a report is active and the user isn't typing in an input.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const target = e.target as HTMLElement | null;
+      const inEditable = target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
+      const k = e.key.toLowerCase();
+      if (k === 'f') {
+        if (inEditable) return;
+        e.preventDefault();
+        setFilterModalOpen(true);
+      } else if (k === 'c') {
+        // Don't hijack copy when the user has selected text or is in an input.
+        if (inEditable) return;
+        const sel = window.getSelection?.();
+        if (sel && sel.toString().length > 0) return;
+        e.preventDefault();
+        setColumnModalOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   const activeFilterChips = useMemo(() => {
     return Object.entries(activeFilters).flatMap(([field, values]) => values.map(value => ({ field, value })));
   }, [activeFilters]);
@@ -1497,17 +1550,24 @@ const Reports: React.FC<ReportsProps> = ({
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredData.map((row, idx) => (
-                    <tr
-                      key={`${activeReportId}-${idx}`}
-                      onClick={() => setSelectedRowIndex(idx)}
-                      className={`${selectedRowIndex === idx ? 'bg-primary/20' : idx % 2 ? 'bg-white' : 'bg-gray-50'} hover:bg-primary/10 cursor-pointer`}
-                    >
-                      {visibleColumns.map(col => (
-                        <td key={`${idx}-${col}`} className={`px-2 py-1 border-b border-r whitespace-nowrap ${col === 'Doctor Name' ? 'text-left' : (typeof row[col] === 'number' ? 'text-right' : 'text-left')}`}>{String(row[col] ?? '-')}</td>
-                      ))}
-                    </tr>
-                  ))}
+                  {paginatedData.map((row, localIdx) => {
+                    const idx = pageStart + localIdx;
+                    return (
+                      <tr
+                        key={`${activeReportId}-${idx}`}
+                        onClick={() => setSelectedRowIndex(idx)}
+                        className={`${selectedRowIndex === idx ? 'bg-primary/20' : idx % 2 ? 'bg-white' : 'bg-gray-50'} hover:bg-primary/10 cursor-pointer`}
+                      >
+                        {visibleColumns.map(col => {
+                          const raw = row[col];
+                          const display = isExpiryColumn(col) ? formatExpiryCell(raw) : String(raw ?? '-');
+                          return (
+                            <td key={`${idx}-${col}`} className={`px-2 py-1 border-b border-r whitespace-nowrap ${col === 'Doctor Name' ? 'text-left' : (typeof raw === 'number' ? 'text-right' : 'text-left')}`}>{display}</td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
                 </tbody>
                 {activeReportId === 'stockMovementSummary' && stockMovementTotalRow && (
                   <tfoot>
@@ -1521,6 +1581,51 @@ const Reports: React.FC<ReportsProps> = ({
               </table>
             )}
           </div>
+
+          {filteredData.length > 0 && (
+            <div className="border-t px-2 py-1 text-[10px] bg-white flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="font-bold">
+                {pageStart + 1}–{Math.min(pageEnd, filteredData.length)} of {filteredData.length}
+              </span>
+              <div className="flex items-center gap-1 ml-2">
+                <button
+                  type="button"
+                  onClick={() => setCurrentReportPage(1)}
+                  disabled={currentReportPage === 1}
+                  className="px-2 py-0.5 border border-gray-300 disabled:opacity-40"
+                >« First</button>
+                <button
+                  type="button"
+                  onClick={() => setCurrentReportPage(p => Math.max(1, p - 1))}
+                  disabled={currentReportPage === 1}
+                  className="px-2 py-0.5 border border-gray-300 disabled:opacity-40"
+                >‹ Prev</button>
+                <span className="px-2">Page {currentReportPage} / {totalPages}</span>
+                <button
+                  type="button"
+                  onClick={() => setCurrentReportPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentReportPage >= totalPages}
+                  className="px-2 py-0.5 border border-gray-300 disabled:opacity-40"
+                >Next ›</button>
+                <button
+                  type="button"
+                  onClick={() => setCurrentReportPage(totalPages)}
+                  disabled={currentReportPage >= totalPages}
+                  className="px-2 py-0.5 border border-gray-300 disabled:opacity-40"
+                >Last »</button>
+              </div>
+              <label className="ml-auto flex items-center gap-1">
+                Rows per page:
+                <select
+                  value={reportPageSize}
+                  onChange={(e) => setReportPageSize(Number(e.target.value))}
+                  className="border border-gray-300 px-1 py-0.5"
+                >
+                  {[25, 50, 100, 200, 500].map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </label>
+            </div>
+          )}
 
           <div className="border-t px-2 py-1 text-[10px] bg-gray-100 flex flex-wrap gap-x-4 gap-y-1">
             {activeReportId === 'stockSummary' ? (
@@ -1643,27 +1748,52 @@ const Reports: React.FC<ReportsProps> = ({
         </div>
       </Modal>
 
-      <Modal isOpen={filterModalOpen} onClose={() => setFilterModalOpen(false)} title="Filter Report" widthClass="max-w-3xl">
-        <div className="p-3 overflow-auto text-xs">
-          <div className="grid grid-cols-3 gap-3">
-            {headers.map(col => (
-              <div key={col} className="border border-gray-200 p-2">
-                <div className="font-semibold mb-1">{col}</div>
-                <div className="max-h-48 overflow-auto space-y-1">
-                  {filterOptions[col]?.map(value => (
-                    <label key={`${col}-${value}`} className="flex items-center gap-1">
-                      <input type="checkbox" checked={(activeFilters[col] || []).includes(value)} onChange={() => toggleFilterValue(col, value)} />
-                      <span className="truncate">{value || '(Blank)'}</span>
-                    </label>
-                  ))}
+      <Modal isOpen={filterModalOpen} onClose={() => setFilterModalOpen(false)} title="Filter Report" widthClass="max-w-7xl" heightClass="h-[85vh]">
+        <div className="p-4 flex-1 overflow-auto text-xs">
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+            {headers.map(col => {
+              const search = filterColumnSearch[col] || '';
+              const selectedCount = (activeFilters[col] || []).length;
+              const options = (filterOptions[col] || []).filter(value =>
+                !search || String(value ?? '').toLowerCase().includes(search.toLowerCase())
+              );
+              return (
+                <div key={col} className="border border-gray-300 p-2 flex flex-col min-h-[280px]">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="font-semibold uppercase tracking-wide text-[11px]">{col}</div>
+                    {selectedCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setActiveFilters(prev => { const next = { ...prev }; delete next[col]; return next; })}
+                        className="text-[10px] text-red-600 hover:underline"
+                      >clear ({selectedCount})</button>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(e) => setFilterColumnSearch(prev => ({ ...prev, [col]: e.target.value }))}
+                    placeholder={`Search ${col.toLowerCase()}…`}
+                    className="w-full px-2 py-1 border border-gray-300 text-[11px] mb-1.5 focus:border-primary focus:outline-none"
+                  />
+                  <div className="flex-1 overflow-auto space-y-0.5 border-t border-gray-100 pt-1">
+                    {options.length === 0 ? (
+                      <div className="text-[10px] text-gray-400 italic py-2">No values match.</div>
+                    ) : options.map(value => (
+                      <label key={`${col}-${value}`} className="flex items-center gap-1.5 px-1 py-0.5 hover:bg-yellow-50 cursor-pointer">
+                        <input type="checkbox" checked={(activeFilters[col] || []).includes(value)} onChange={() => toggleFilterValue(col, value)} />
+                        <span className="truncate flex-1">{value || '(Blank)'}</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
-          <div className="flex justify-end mt-3 gap-2">
-            <button onClick={clearAllFilters} className="px-3 py-1 border border-gray-300">Clear All</button>
-            <button onClick={() => setFilterModalOpen(false)} className="px-3 py-1 border border-primary bg-primary text-white">Done</button>
-          </div>
+        </div>
+        <div className="flex justify-end gap-2 px-4 py-2 border-t border-gray-200 bg-gray-50">
+          <button onClick={() => { clearAllFilters(); setFilterColumnSearch({}); }} className="px-3 py-1 border border-gray-300 text-xs">Clear All</button>
+          <button onClick={() => setFilterModalOpen(false)} className="px-4 py-1 border border-primary bg-primary text-white text-xs">Done</button>
         </div>
       </Modal>
 

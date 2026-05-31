@@ -7,6 +7,7 @@ import { MASTER_SHORTCUT_OPTIONS } from '@core/utils/constants';
 import { shouldHandleScreenShortcut } from '@core/utils/screenShortcuts';
 import { buildCustomerInvoiceOutstandingMap, calculateCustomerReceivableBreakdown, calculateSupplierPayableBreakdown } from '@core/utils/helpers';
 import { useOfflineAsset } from '@core/hooks/useOfflineAsset';
+import { useModuleVisibility } from '@core/visibility/useModuleVisibility';
 
 interface DashboardProps {
     currentUser: RegisteredPharmacy | null;
@@ -50,9 +51,13 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, configurations, tran
         configurations.displayOptions?.dashboard_logo_url || 'https://sblmbkgoiefqzykjksgm.supabase.co/storage/v1/object/public/logos/IMG_9600.PNG'
     );
 
-    const isVisible = (fieldId: string) => configurations.modules?.dashboard?.fields?.[fieldId] !== false;
+    const { isDashboardFieldHidden } = useModuleVisibility();
+    const isVisible = (fieldId: string) =>
+        configurations.modules?.dashboard?.fields?.[fieldId] !== false &&
+        !isDashboardFieldHidden(fieldId);
     const showReceivables = isVisible('statReceivables');
     const showPayables = isVisible('statPayables');
+    const showExpiryBar = !isDashboardFieldHidden('expiryBar');
 
     const todayLocalStr = useMemo(() => {
         const now = new Date();
@@ -329,7 +334,7 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, configurations, tran
 
             </main>
 
-            {expiryAlerts.length > 0 && (
+            {showExpiryBar && expiryAlerts.length > 0 && (
                 <div className="sticky bottom-0 z-20 border-t-2 border-emerald-700/70 bg-emerald-200/60 text-emerald-950 shadow-[0_-4px_16px_rgba(6,78,59,0.15)] backdrop-blur-sm">
                     <div className="flex flex-col gap-3 px-3 py-2 md:flex-row md:items-center md:justify-between md:px-5">
                         <div className="text-xs font-extrabold uppercase tracking-[0.12em]">

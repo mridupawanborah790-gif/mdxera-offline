@@ -19,9 +19,28 @@ const toNumeric = (value: any): number | undefined => {
     return Number.isFinite(parsed) ? parsed : undefined;
 };
 
-const getPreferredGeminiModel = (): string => {
+// AI provider config. Defaults assume Groq via the `groq_ai` Edge Function
+// (request/response contract is identical to the legacy `gemini-ocr-main`
+// function — see supabase/functions/groq_ai/index.ts).
+//
+// Override via .env.local if you want to point at the old Gemini function:
+//   VITE_AI_FUNCTION=gemini-ocr-main
+//   VITE_AI_MODEL=gemini-2.5-flash
+const getPreferredAiModel = (): string => {
     const env = (import.meta as any).env || {};
-    return String(env.VITE_GEMINI_MODEL || env.VITE_GOOGLE_MODEL || 'gemini-2.5-flash').trim();
+    return String(
+        env.VITE_AI_MODEL ||
+        env.VITE_GROQ_MODEL ||
+        // legacy fallbacks (kept so existing .env entries don't break)
+        env.VITE_GEMINI_MODEL ||
+        env.VITE_GOOGLE_MODEL ||
+        'meta-llama/llama-4-scout-17b-16e-instruct',
+    ).trim();
+};
+
+const getAiFunctionName = (): string => {
+    const env = (import.meta as any).env || {};
+    return String(env.VITE_AI_FUNCTION || 'groq_ai').trim();
 };
 
 const SUPABASE_URL = (import.meta as any).env.VITE_SUPABASE_URL;
@@ -32,10 +51,11 @@ const callGeminiOcr = async (request: string | GeminiOcrRequest): Promise<any> =
         throw new Error("Supabase configuration is missing in .env");
     }
 
-    const model = getPreferredGeminiModel();
+    const model = getPreferredAiModel();
+    const functionName = getAiFunctionName();
     const payload: GeminiOcrRequest = typeof request === 'string' ? { prompt: request } : request;
 
-    const response = await fetch(`${SUPABASE_URL}/functions/v1/gemini-ocr-main`, {
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/${functionName}`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -162,18 +182,6 @@ export const extractPrescription = async (file: FileInput, pharmacyName: string)
     } catch (error) {
         console.error('Prescription AI Error:', error);
         return { items: [], error: 'Prescription analysis failed. Please ensure the image is clear.' };
-    }
-};
-
-export const generateTextToSpeech = async (text: string): Promise<string> => {
-    try {
-        const result = await callGeminiOcr(`Convert to speech audio base64 for this text: ${text}`);
-        const rawData = result?.data || result;
-        const inlineData = rawData?.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData || p.inline_data);
-        const media = inlineData?.inlineData || inlineData?.inline_data;
-        return media?.data || '';
-    } catch (error) {
-        throw new Error(parseNetworkAndApiError(error));
     }
 };
 

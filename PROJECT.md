@@ -20,6 +20,7 @@
 11. [Per-user module visibility](#11-per-user-module-visibility)
 12. [Inventory ↔ Material Master reconciliation](#12-inventory--material-master-reconciliation)
 13. [Reports module conventions](#13-reports-module-conventions)
+13a. [AI provider (Groq via Supabase Edge Function)](#13a-ai-provider-groq-via-supabase-edge-function)
 14. [Service-material handling in POS](#14-service-material-handling-in-pos)
 15. [Releasing](#15-releasing)
 16. [Operations runbook](#16-operations-runbook)
@@ -51,9 +52,13 @@ codebase has been bridging them safely.
 
 ```bash
 npm install
-# Set env (in .env.local)
-#   VITE_GEMINI_PRIMARY_API_KEY=...     (Gemini, used by inline AI features)
-#   VITE_GEMINI_MODEL=gemini-flash-lite-latest  (optional)
+# Optional .env.local overrides:
+#   VITE_SUPABASE_URL=...           override the hard-coded Supabase project URL
+#   VITE_SUPABASE_ANON_KEY=...      override the hard-coded anon key
+#   VITE_AI_FUNCTION=groq_ai        (default) which Edge Function to call for AI
+#   VITE_AI_MODEL=...               override the AI model (see §13a)
+# AI provider key (Groq) is set in Supabase Secrets, NOT in .env.local. See §13a.
+
 npm run dev          # browser dev mode (Tauri-only features no-op)
 npm run tauri:dev    # full desktop shell
 npm run build        # production web build
@@ -62,14 +67,10 @@ npm test             # runs the Vitest parity + unit suite
 npx tsc --noEmit     # type-check only
 ```
 
-Gemini env-var fallbacks supported by code: `VITE_GEMINI_API_KEY`,
-`VITE_API_KEY`, `GEMINI_PRIMARY_API_KEY`, `GEMINI_API_KEY`, `API_KEY`.
-
-The default model is `gemini-flash-lite-latest` if `VITE_GEMINI_MODEL` is
-unset. The Supabase URL + anon key are hard-coded fallbacks in
+The Supabase URL + anon key are hard-coded fallbacks in
 `src/core/db/supabaseClient.ts` and `src/core/sync/networkMonitor.ts`;
 override with `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` if you point
-a build at a different project.
+a build at a different project. AI provider config lives in §13a.
 
 ---
 
@@ -812,6 +813,74 @@ automatically.
 `supplierWisePurchase` (id `supplierWisePurchase`, group "Purchase
 Reports") is the existing example for a grouped report — it builds a
 `Map<supplier, aggregates>` then converts to rows.
+
+---
+
+## 13a. AI provider (Groq via Supabase Edge Function)
+
+All AI features (purchase-bill OCR, prescription OCR, captions, chatbot,
+GST queries, Substitute Finder, Promotions) go through one Supabase Edge
+Function. The client doesn't talk to any LLM provider directly.
+
+### Pipeline
+
+```
+client (services/geminiService.ts)
+   → POST {SUPABASE_URL}/functions/v1/{VITE_AI_FUNCTION}
+       → supabase/functions/groq_ai/index.ts  (Edge Function)
+           → https://api.groq.com/openai/v1/chat/completions
+               with key from Supabase Secret GROQ_API_KEY
+```
+
+The Edge Function re-wraps Groq's OpenAI-style response
+(`choices[0].message.content`) into Gemini's shape
+(`candidates[0].content.parts[0].text`) so the client's
+`getTextFromResultData` parser doesn't change. This makes provider swaps
+client-invisible.
+
+### Configuration
+
+| Secret / env var | Where | Purpose |
+|---|---|---|
+| `GROQ_API_KEY` | Supabase Dashboard → Edge Functions → Secrets | Required. Authenticates the Edge Function to Groq |
+| `GROQ_DEFAULT_MODEL` | Supabase Dashboard → Edge Functions → Secrets | Optional org-default model. Falls back to `meta-llama/llama-4-scout-17b-16e-instruct` |
+| `VITE_AI_FUNCTION` | `.env.local` on the client | Edge function name (default `groq_ai`). Set to `gemini-ocr-main` to flip back to Gemini |
+| `VITE_AI_MODEL` | `.env.local` on the client | Per-call model override (e.g. `meta-llama/llama-4-maverick-17b-128e-instruct` for higher quality) |
+| `VITE_GEMINI_MODEL`, `VITE_GOOGLE_MODEL` | `.env.local` on the client | Legacy fallbacks — still honored so existing setups aren't broken |
+
+The client default model is `meta-llama/llama-4-scout-17b-16e-instruct`
+(vision + text, fast, free tier). For more accuracy on dense invoices use
+`meta-llama/llama-4-maverick-17b-128e-instruct`.
+
+### What it covers vs what it doesn't
+
+| Feature | Status |
+|---|---|
+| Purchase-bill OCR (multimodal: image + JSON prompt) | ✅ |
+| Prescription / sales OCR | ✅ |
+| Chatbot, GST Center text Q&A, Substitute Finder | ✅ |
+| Promo captions | ✅ |
+| **TTS** (`generateTextToSpeech`) | **Removed.** Groq has no TTS; the function was dead code (never called). Re-add via a real TTS provider if needed |
+| **Image generation** (`generatePromotionalImage`) | Pass-through: the function still runs but Groq returns text, not image data. Promotions screen will get an empty image and fall back. Use a real image-gen provider if needed |
+
+### Switching providers
+
+To go back to Gemini:
+1. Set `VITE_AI_FUNCTION=gemini-ocr-main` and `VITE_AI_MODEL=gemini-2.5-flash` in `.env.local`.
+2. Rebuild — no source change needed.
+
+The old Gemini Edge Function (`supabase/functions/gemini_ocr/index.ts`)
+is still in the repo unchanged, so you can keep both deployed and flip
+between them per-environment.
+
+### Rotating the Groq key
+
+1. https://console.groq.com/keys → revoke the old key, generate a new one.
+2. Supabase Dashboard → Project Settings → Edge Functions → Secrets → update `GROQ_API_KEY`.
+3. No client redeploy needed — the secret is read at function invocation.
+
+**Never commit the key.** Never paste it in chat. Treat it like the
+Tauri updater private key.
 
 ---
 

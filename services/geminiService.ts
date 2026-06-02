@@ -1,5 +1,6 @@
 import type { ExtractedPurchaseBill, PurchaseItem, SubstituteResult, ExtractedSalesBill, FileInput } from "../types";
 import { parseNetworkAndApiError } from '../utils/error';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../src/core/db/supabaseClient';
 
 interface GeminiOcrRequest {
     prompt: string;
@@ -43,12 +44,9 @@ const getAiFunctionName = (): string => {
     return String(env.VITE_AI_FUNCTION || 'groq_ai').trim();
 };
 
-const SUPABASE_URL = (import.meta as any).env.VITE_SUPABASE_URL;
-const SUPABASE_ANON_KEY = (import.meta as any).env.VITE_SUPABASE_ANON_KEY;
-
 const callGeminiOcr = async (request: string | GeminiOcrRequest): Promise<any> => {
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-        throw new Error("Supabase configuration is missing in .env");
+        throw new Error("Supabase configuration is missing.");
     }
 
     const model = getPreferredAiModel();

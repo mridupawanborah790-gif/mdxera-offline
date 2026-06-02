@@ -2844,6 +2844,7 @@ const App: React.FC = () => {
                         configurations={configurations}
                         addNotification={addNotification}
                         onRefresh={() => currentUser ? loadData(currentUser, 'background') : Promise.resolve()}
+                        onAddMedicineMaster={handleAddMedicineMaster}
                     />;
                 case 'physicalInventory':
                     return <PhysicalInventory

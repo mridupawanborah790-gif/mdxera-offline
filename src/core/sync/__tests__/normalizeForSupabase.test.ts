@@ -18,8 +18,8 @@
  *   and the UUID guard so anyone touching SyncWorker can see what's
  *   expected.
  *
- *   See ARCHITECTURE.md §13 for the four data-flow directions this
- *   parity is part of.
+ *   See PROJECT.md §7 (Sync data flows) for the four data-flow
+ *   directions this parity is part of.
  *
  * What these tests do NOT cover:
  *   - The Supabase RPC behaviour itself (out of scope — no test DB).

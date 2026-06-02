@@ -10,7 +10,11 @@ interface AddMedicineModalProps {
     onClose: () => void;
     onAddMedicine: (newMedicine: Omit<Medicine, 'id' | 'created_at' | 'updated_at'>) => void | Medicine | Promise<void | Medicine>;
     onMedicineSaved?: (savedMedicine: Medicine) => void;
-    initialName?: string; 
+    initialName?: string;
+    /** Optional bulk-prefill for all fields (used when seeding from an
+     *  inventory row in the alter flow). `initialName` still wins if both
+     *  are provided. */
+    initialValues?: Partial<Omit<Medicine, 'id' | 'created_at' | 'updated_at'>>;
     organizationId: string;
     organizationType?: string | null;
     existingMedicines?: Medicine[];
@@ -50,7 +54,7 @@ const initialState: Omit<Medicine, 'id' | 'created_at' | 'updated_at'> = {
 
 type FormErrors = Partial<Record<keyof typeof initialState, string>>;
 
-const AddMedicineModal: React.FC<AddMedicineModalProps> = ({ isOpen, onClose, onAddMedicine, onMedicineSaved, initialName, organizationId, organizationType, existingMedicines = [] }) => {
+const AddMedicineModal: React.FC<AddMedicineModalProps> = ({ isOpen, onClose, onAddMedicine, onMedicineSaved, initialName, initialValues, organizationId, organizationType, existingMedicines = [] }) => {
     const [formState, setFormState] = useState(initialState);
     const [errors, setErrors] = useState<FormErrors>({});
     const [showConfirmClose, setShowConfirmClose] = useState(false);
@@ -110,11 +114,17 @@ const AddMedicineModal: React.FC<AddMedicineModalProps> = ({ isOpen, onClose, on
 
     useEffect(() => {
         if (isOpen) {
-            setFormState({ ...initialState, name: initialName || '', organization_id: organizationId });
+            setFormState({
+                ...initialState,
+                ...(initialValues || {}),
+                // explicit overrides win over initialValues
+                name: initialName || initialValues?.name || '',
+                organization_id: organizationId,
+            });
             setErrors({});
             setIsSaving(false);
         }
-    }, [isOpen, initialName, organizationId]);
+    }, [isOpen, initialName, initialValues, organizationId]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();

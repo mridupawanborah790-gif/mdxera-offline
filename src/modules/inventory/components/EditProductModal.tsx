@@ -6,11 +6,8 @@ import { handleEnterToNextField } from '@core/utils/navigation';
 import { normalizeImportDate, formatExpiryToMMYY } from '@core/utils/helpers';
 import { buildTotalStockFromBreakup, getStockBreakup } from '@core/utils/stock';
 import { isLiquidOrWeightPack, resolveUnitsPerStrip } from '@core/utils/pack';
-import {
-    materialKey,
-    createMasterFromGroup,
-    type MaterialGroupStatus,
-} from '../services/materialMasterSync';
+import { materialKey } from '../services/materialMasterSync';
+import AddMedicineModal from './AddMedicineModal';
 
 interface EditProductModalProps {
     isOpen: boolean;
@@ -28,6 +25,9 @@ interface EditProductModalProps {
     currentUser?: RegisteredPharmacy | null;
     addNotification?: (message: string, type: 'success' | 'error' | 'warning') => void;
     onRefresh?: () => Promise<void> | void;
+    /** Bound to App.handleAddMedicineMaster — creates the master and
+     *  auto-links sibling inventory rows by name+brand. */
+    onAddMedicineMaster?: (med: Omit<Medicine, 'id'>) => Promise<Medicine | void> | Medicine | void;
 }
 
 const matrixRowTextStyle = "text-2xl font-normal tracking-tight uppercase leading-tight";
@@ -47,10 +47,11 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
     currentUser,
     addNotification,
     onRefresh,
+    onAddMedicineMaster,
 }) => {
     const [product, setProduct] = useState<InventoryItem | null>(null);
     const [expiryDisplay, setExpiryDisplay] = useState('');
-    const [linkingMaster, setLinkingMaster] = useState(false);
+    const [isAddMasterOpen, setIsAddMasterOpen] = useState(false);
     const barcodeRef = useRef<SVGSVGElement>(null);
 
     useEffect(() => {
@@ -147,38 +148,34 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
     };
 
 
-    const canLinkToMaster = !linkedMaster && !!currentUser;
+    const canLinkToMaster = !linkedMaster && !!currentUser && !!onAddMedicineMaster;
 
-    const handleLinkToMaster = async () => {
-        if (!currentUser || !product || linkingMaster) return;
-        setLinkingMaster(true);
-        try {
-            const key = materialKey(product.name, product.brand);
-            const members = inventory.filter(i => materialKey(i.name, i.brand) === key);
-            const group: MaterialGroupStatus = {
-                key,
-                name: product.name || '',
-                brand: product.brand || '',
-                batchCount: members.length || 1,
-                totalStock: members.reduce((s, m) => s + Number(m.stock || 0), 0),
-                representative: product,
-                members: members.length ? members : [product],
-                master: null,
-                inMaster: false,
-            };
-            const result = await createMasterFromGroup(group, currentUser);
-            setProduct(prev => prev ? { ...prev, code: result.medicine.materialCode } : prev);
-            addNotification?.(
-                `Linked to Material Master · code ${result.medicine.materialCode} · ${result.updatedBatches} batch${result.updatedBatches === 1 ? '' : 'es'} updated`,
-                'success',
-            );
-            await onRefresh?.();
-        } catch (err: any) {
-            addNotification?.(err?.message || 'Failed to create Material Master record.', 'error');
-        } finally {
-            setLinkingMaster(false);
-        }
-    };
+    /** Seed the AddMedicineModal from this inventory row so the user can
+     *  review/tweak pack, GST, MRP, etc. before the master is created. */
+    const masterInitialValues = useMemo((): Partial<Medicine> | undefined => {
+        if (!product) return undefined;
+        const packStr = (product.packType || '').trim();
+        return {
+            name: product.name || '',
+            brand: product.brand || '',
+            manufacturer: product.manufacturer || '',
+            composition: product.composition || '',
+            pack: packStr || '',
+            barcode: product.barcode || '',
+            hsnCode: product.hsnCode || '',
+            gstRate: Number(product.gstPercent ?? 0),
+            mrp: product.mrp != null ? String(product.mrp) : '0',
+            description: product.description || '',
+            materialMasterType: 'trading_goods',
+            isInventorised: true,
+            isSalesEnabled: true,
+            isPurchaseEnabled: true,
+            isPrescriptionRequired: false,
+            valuationMethod: 'standard',
+            standardPriceRate: Number(product.purchasePrice ?? 0) || 0,
+            is_active: true,
+        };
+    }, [product]);
 
     const unitsPerPack = resolveUnitsPerStrip(product.unitsPerPack, product.packType);
     const isLiquidOrWeight = isLiquidOrWeightPack(product.packType);
@@ -246,12 +243,11 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
                                     {canLinkToMaster && (
                                         <button
                                             type="button"
-                                            onClick={handleLinkToMaster}
-                                            disabled={linkingMaster}
-                                            className="mt-2 w-full px-3 py-1.5 text-[10px] font-black uppercase tracking-widest border border-primary text-primary hover:bg-primary hover:text-white disabled:opacity-50 transition-colors"
-                                            title="Create a Material Master record from this item and link all its batches"
+                                            onClick={() => setIsAddMasterOpen(true)}
+                                            className="mt-2 w-full px-3 py-1.5 text-[10px] font-black uppercase tracking-widest border border-primary text-primary hover:bg-primary hover:text-white transition-colors"
+                                            title="Open Material Master creation prefilled from this row"
                                         >
-                                            {linkingMaster ? 'Creating…' : 'Create in Material Master'}
+                                            Create in Material Master…
                                         </button>
                                     )}
                                     {!!linkedMaster && !product.code && (
@@ -422,6 +418,27 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
                     </button>
                 </div>
             </div>
+            {isAddMasterOpen && onAddMedicineMaster && currentUser && (
+                <AddMedicineModal
+                    isOpen={isAddMasterOpen}
+                    onClose={() => setIsAddMasterOpen(false)}
+                    organizationId={currentUser.organization_id}
+                    onAddMedicine={(med) => onAddMedicineMaster({ ...med, organization_id: currentUser.organization_id }) as any}
+                    onMedicineSaved={async (saved) => {
+                        // Stamp the new code onto the local product state so
+                        // the user just clicks Accept Alteration to also
+                        // persist any other field edits.
+                        setProduct(prev => prev ? { ...prev, code: saved.materialCode } : prev);
+                        addNotification?.(
+                            `Linked to Material Master · code ${saved.materialCode}`,
+                            'success',
+                        );
+                        await onRefresh?.();
+                    }}
+                    initialValues={masterInitialValues}
+                    existingMedicines={medicines}
+                />
+            )}
         </Modal>
     );
 };

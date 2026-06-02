@@ -53,6 +53,7 @@ interface InventoryProps {
     configurations?: AppConfigurations | null;
     addNotification?: (message: string, type: 'success' | 'error' | 'warning') => void;
     onRefresh?: () => Promise<void> | void;
+    onAddMedicineMaster?: (med: Omit<Medicine, 'id'>) => Promise<Medicine | void> | Medicine | void;
 }
 
 interface GroupedInventoryRow {
@@ -90,6 +91,7 @@ const Inventory: React.FC<InventoryProps> = ({
     configurations,
     addNotification,
     onRefresh,
+    onAddMedicineMaster,
 }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -884,6 +886,7 @@ const Inventory: React.FC<InventoryProps> = ({
                     currentUser={currentUser}
                     addNotification={addNotification}
                     onRefresh={onRefresh}
+                    onAddMedicineMaster={onAddMedicineMaster}
                 />
             )}
             {isExportModalOpen && (

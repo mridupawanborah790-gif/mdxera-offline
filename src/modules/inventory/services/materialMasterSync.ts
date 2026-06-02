@@ -11,7 +11,6 @@
  */
 import * as storage from '@core/services/storageService';
 import type { InventoryItem, Medicine, RegisteredPharmacy } from '@core/types';
-import { extractPackMultiplier, resolveUnitsPerStrip } from '@core/utils/pack';
 import { supabase } from '@core/db/supabaseClient';
 
 /**
@@ -109,11 +108,11 @@ export function groupInventoryByMaterial(
 function buildMasterPayload(
   group: MaterialGroupStatus,
   organizationId: string,
+  overrides?: Partial<Medicine>,
 ): Omit<Medicine, 'id' | 'materialCode' | 'created_at' | 'updated_at'> {
   const rep = group.representative;
   const pack = (rep.packType || '').trim();
-  const inferredUnits = resolveUnitsPerStrip(extractPackMultiplier(pack) ?? rep.unitsPerPack ?? 1, pack);
-  return {
+  const base = {
     organization_id: organizationId,
     name: group.name,
     brand: group.brand || '',
@@ -135,8 +134,16 @@ function buildMasterPayload(
     valuationMethod: 'standard',
     standardPriceRate: Number(rep.purchasePrice ?? 0) || 0,
     movingAverageRate: 0,
-  } as any; // unitsPerPack isn't part of Medicine; we keep it on inventory only.
+  };
+  // overrides win — caller can stamp e.g. gstRate=5 across a bulk run.
+  return { ...base, ...(overrides || {}) } as any;
 }
+
+/** Fixed-by-policy fields applied to every material created via bulk sync. */
+const BULK_DEFAULTS: Partial<Medicine> = {
+  gstRate: 5,
+  isPrescriptionRequired: false,
+};
 
 /**
  * Create a master record for a group and stamp every batch with the new code.
@@ -145,9 +152,10 @@ function buildMasterPayload(
 export async function createMasterFromGroup(
   group: MaterialGroupStatus,
   user: RegisteredPharmacy,
+  overrides?: Partial<Medicine>,
 ): Promise<{ medicine: Medicine; updatedBatches: number }> {
   await ensureLiveAuth();
-  const payload = buildMasterPayload(group, user.organization_id);
+  const payload = buildMasterPayload(group, user.organization_id, overrides);
   const saved = (await storage.saveData('material_master', payload, user)) as Medicine;
   const newCode = saved.materialCode;
   if (!newCode) throw new Error(`Material master created without a code (id=${saved.id}).`);
@@ -188,7 +196,7 @@ export async function bulkCreateFromInventory(
     const g = groups[i];
     onProgress?.(i, groups.length, g.name);
     try {
-      const result = await createMasterFromGroup(g, user);
+      const result = await createMasterFromGroup(g, user, BULK_DEFAULTS);
       created += 1;
       updatedBatches += result.updatedBatches;
     } catch (err: any) {

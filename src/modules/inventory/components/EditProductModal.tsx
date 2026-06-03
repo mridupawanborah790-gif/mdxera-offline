@@ -78,6 +78,56 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
         return medicines.find(m => materialKey(m.name, m.brand) === key) || null;
     }, [product?.code, product?.name, product?.brand, medicines]);
 
+    // Auto-link to Material Master on open: if a master matches this row by
+    // name+brand but the inventory row has no code yet, stamp the code and
+    // persist immediately so the user doesn't have to hit Save just to link.
+    // The ref guards against re-firing while the async save is in flight (the
+    // parent may re-render with productToEdit still lacking code). Cleared on
+    // close so reopening always retries if the link still hasn't taken.
+    const autoLinkedIdRef = useRef<string | null>(null);
+    useEffect(() => {
+        if (!isOpen) {
+            autoLinkedIdRef.current = null;
+            return;
+        }
+        if (!product) return;
+        if ((product.code || '').trim()) return;
+        const masterCode = linkedMaster?.materialCode;
+        if (!masterCode) return;
+        if (autoLinkedIdRef.current === product.id) return;
+        autoLinkedIdRef.current = product.id;
+        const linked = { ...product, code: masterCode };
+        setProduct(linked);
+        void Promise.resolve(onSave(linked));
+    }, [isOpen, product, linkedMaster, onSave]);
+
+    /** Seed the AddMedicineModal from this inventory row so the user can
+     *  review/tweak pack, GST, MRP, etc. before the master is created. */
+    const masterInitialValues = useMemo((): Partial<Medicine> | undefined => {
+        if (!product) return undefined;
+        const packStr = (product.packType || '').trim();
+        return {
+            name: product.name || '',
+            brand: product.brand || '',
+            manufacturer: product.manufacturer || '',
+            composition: product.composition || '',
+            pack: packStr || '',
+            barcode: product.barcode || '',
+            hsnCode: product.hsnCode || '',
+            gstRate: Number(product.gstPercent ?? 0),
+            mrp: product.mrp != null ? String(product.mrp) : '0',
+            description: product.description || '',
+            materialMasterType: 'trading_goods',
+            isInventorised: true,
+            isSalesEnabled: true,
+            isPurchaseEnabled: true,
+            isPrescriptionRequired: false,
+            valuationMethod: 'standard',
+            standardPriceRate: Number(product.purchasePrice ?? 0) || 0,
+            is_active: true,
+        };
+    }, [product]);
+
     if (!isOpen || !product) return null;
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -150,33 +200,6 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
 
     const canLinkToMaster = !linkedMaster && !!currentUser && !!onAddMedicineMaster;
 
-    /** Seed the AddMedicineModal from this inventory row so the user can
-     *  review/tweak pack, GST, MRP, etc. before the master is created. */
-    const masterInitialValues = useMemo((): Partial<Medicine> | undefined => {
-        if (!product) return undefined;
-        const packStr = (product.packType || '').trim();
-        return {
-            name: product.name || '',
-            brand: product.brand || '',
-            manufacturer: product.manufacturer || '',
-            composition: product.composition || '',
-            pack: packStr || '',
-            barcode: product.barcode || '',
-            hsnCode: product.hsnCode || '',
-            gstRate: Number(product.gstPercent ?? 0),
-            mrp: product.mrp != null ? String(product.mrp) : '0',
-            description: product.description || '',
-            materialMasterType: 'trading_goods',
-            isInventorised: true,
-            isSalesEnabled: true,
-            isPurchaseEnabled: true,
-            isPrescriptionRequired: false,
-            valuationMethod: 'standard',
-            standardPriceRate: Number(product.purchasePrice ?? 0) || 0,
-            is_active: true,
-        };
-    }, [product]);
-
     const unitsPerPack = resolveUnitsPerStrip(product.unitsPerPack, product.packType);
     const isLiquidOrWeight = isLiquidOrWeightPack(product.packType);
     const stockBreakup = getStockBreakup(product.stock, unitsPerPack, product.packType);
@@ -236,9 +259,9 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
                                         name="code"
                                         value={product.code || ''}
                                         onChange={handleChange}
-                                        readOnly={!!productToEdit?.code}
+                                        readOnly={!!product.code}
                                         placeholder="Link to Master Code"
-                                        className={`w-full text-xl font-mono font-bold uppercase border-b-2 outline-none bg-transparent ${productToEdit?.code ? 'border-gray-100 text-gray-400 cursor-not-allowed' : 'border-gray-300 focus:border-primary'}`}
+                                        className={`w-full text-xl font-mono font-bold uppercase border-b-2 outline-none bg-transparent ${product.code ? 'border-gray-100 text-gray-400 cursor-not-allowed' : 'border-gray-300 focus:border-primary'}`}
                                     />
                                     {canLinkToMaster && (
                                         <button
@@ -252,7 +275,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
                                     )}
                                     {!!linkedMaster && !product.code && (
                                         <div className="mt-1 text-[9px] font-bold uppercase text-emerald-700">
-                                            Master exists: <span className="font-mono">{linkedMaster.materialCode}</span> — save to apply
+                                            Linking to master <span className="font-mono">{linkedMaster.materialCode}</span>…
                                         </div>
                                     )}
                                 </div>

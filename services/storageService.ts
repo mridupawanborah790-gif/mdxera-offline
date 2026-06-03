@@ -938,8 +938,12 @@ const normalizeMaterialMasterType = (value: unknown): string | undefined => {
                 import('../src/core/db/client'),
                 import('../src/core/sync/columnFilter'),
             ]);
-            const remotePayload = getSupabasePayload(tableName, payload);
-            const snake = toSnake(remotePayload);
+            // Don't run getSupabasePayload here — that strip targets Supabase's
+            // narrower schema and would drop columns that DO exist locally
+            // (e.g. inventory.code, added in migration 011). adaptRowForSqlite
+            // is already schema-aware and keeps only columns SQLite actually
+            // has, so the local persister can take the raw payload.
+            const snake = toSnake(payload);
             const adapted = await adaptRowForSqlite(tableName, snake, { syncStatus });
             if (!adapted) return; // local table doesn't exist yet
             await db.upsert(tableName, adapted);

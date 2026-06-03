@@ -200,6 +200,14 @@ function mirrorOwnerIdColumns(tableName: string, row: Record<string, unknown>): 
   return out;
 }
 
+// Columns that live in local SQLite but have no Supabase counterpart. Because
+// `db.upsert` is INSERT OR REPLACE, a remote pull would otherwise wipe these
+// back to NULL on every sync. We preload the existing local row and reinject
+// these values into the adapted payload so the link survives.
+const LOCAL_ONLY_PRESERVE: Record<string, string[]> = {
+  inventory: ['code', 'material_id'],
+};
+
 async function upsertLocalRow(
   tableName: string,
   remote: Record<string, unknown>
@@ -211,6 +219,24 @@ async function upsertLocalRow(
   // and sets _sync_status/_local_only automatically.
   const adapted = await adaptRowForSqlite(tableName, reconciled, { syncStatus: 'synced' });
   if (!adapted) return; // table doesn't exist locally — skip
+
+  const preserveCols = LOCAL_ONLY_PRESERVE[tableName];
+  if (preserveCols && adapted.id) {
+    const existing = await db.select<Record<string, unknown>>(
+      `SELECT ${preserveCols.join(', ')} FROM ${tableName} WHERE id = ? LIMIT 1`,
+      [adapted.id as string],
+    );
+    if (existing.length > 0) {
+      for (const col of preserveCols) {
+        const incoming = adapted[col];
+        const local = existing[0][col];
+        if ((incoming === undefined || incoming === null) && local != null) {
+          adapted[col] = local;
+        }
+      }
+    }
+  }
+
   await db.upsert(tableName, adapted);
 }
 

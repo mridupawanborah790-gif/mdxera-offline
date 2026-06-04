@@ -56,7 +56,20 @@ function isNetworkError(err: unknown): boolean {
   return false;
 }
 
-// ── Persisted session store (tauri-plugin-store) ───────────────────────────
+// ── Persisted session store ────────────────────────────────────────────────
+//
+// Sessions are mirrored to TWO backends so they survive app close/reload in
+// both the Tauri desktop build and the plain-browser build:
+//
+//   1. Tauri plugin-store (`auth/session.json`) — the original primary; survives
+//      across reinstalls in the OS data dir.
+//   2. localStorage         (`mdxera.auth.*`)    — the fallback; the only thing
+//      available when running in a browser (no Tauri runtime). Without it,
+//      `persistSession` was a no-op in browsers and the user was thrown back
+//      to the login screen on every reload.
+//
+// Writes go to both; reads prefer Tauri's store and fall back to localStorage
+// so the desktop flow is unchanged. Both are cleared on explicit logout.
 
 async function getStore() {
   const { Store } = await import('@tauri-apps/plugin-store');
@@ -64,17 +77,54 @@ async function getStore() {
   return Store.load('auth/session.json');
 }
 
+const LS_KEYS = {
+  supabaseSession: 'mdxera.auth.supabaseSession',
+  localSession:    'mdxera.auth.localSession',
+  user:            'mdxera.auth.user',
+} as const;
+
+function lsAvailable(): boolean {
+  try { return typeof window !== 'undefined' && !!window.localStorage; }
+  catch { return false; }
+}
+
+function lsWrite(key: string, value: unknown | null): void {
+  if (!lsAvailable()) return;
+  try {
+    if (value === null || value === undefined) {
+      window.localStorage.removeItem(key);
+    } else {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    }
+  } catch { /* quota / private-mode — non-fatal */ }
+}
+
+function lsRead<T>(key: string): T | null {
+  if (!lsAvailable()) return null;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw) as T;
+  } catch { return null; }
+}
+
 async function persistSession(data: {
   supabaseSession?: SupabaseSession | null;
   localSession?: LocalSession | null;
   user?: RegisteredPharmacy | null;
 }): Promise<void> {
+  // Always mirror to localStorage first — it's synchronous and never throws.
+  if (data.supabaseSession !== undefined) lsWrite(LS_KEYS.supabaseSession, data.supabaseSession);
+  if (data.localSession !== undefined)    lsWrite(LS_KEYS.localSession,    data.localSession);
+  if (data.user !== undefined)            lsWrite(LS_KEYS.user,            data.user);
+
+  // Then write to the Tauri store if we're running inside Tauri.
   try {
     const store = await getStore();
     if (data.supabaseSession !== undefined) await store.set('supabaseSession', data.supabaseSession);
     if (data.localSession !== undefined) await store.set('localSession', data.localSession);
     if (data.user !== undefined) await store.set('user', data.user);
-  } catch { /* not running in Tauri context — ignore */ }
+  } catch { /* not running in Tauri context — localStorage already has it */ }
 }
 
 async function loadPersistedSession(): Promise<{
@@ -82,19 +132,31 @@ async function loadPersistedSession(): Promise<{
   localSession: LocalSession | null;
   user: RegisteredPharmacy | null;
 }> {
+  // Prefer the Tauri store (it persists across browser-data wipes in the
+  // desktop build), fall back to localStorage if it isn't available or has
+  // no entry yet.
+  let supabaseSession: SupabaseSession | null = null;
+  let localSession: LocalSession | null = null;
+  let user: RegisteredPharmacy | null = null;
   try {
     const store = await getStore();
-    return {
-      supabaseSession: (await store.get<SupabaseSession>('supabaseSession')) ?? null,
-      localSession: (await store.get<LocalSession>('localSession')) ?? null,
-      user: (await store.get<RegisteredPharmacy>('user')) ?? null,
-    };
-  } catch {
-    return { supabaseSession: null, localSession: null, user: null };
-  }
+    supabaseSession = (await store.get<SupabaseSession>('supabaseSession')) ?? null;
+    localSession    = (await store.get<LocalSession>('localSession'))    ?? null;
+    user            = (await store.get<RegisteredPharmacy>('user'))      ?? null;
+  } catch { /* Tauri not available — fall through to localStorage */ }
+
+  if (!supabaseSession) supabaseSession = lsRead<SupabaseSession>(LS_KEYS.supabaseSession);
+  if (!localSession)    localSession    = lsRead<LocalSession>(LS_KEYS.localSession);
+  if (!user)            user            = lsRead<RegisteredPharmacy>(LS_KEYS.user);
+
+  return { supabaseSession, localSession, user };
 }
 
 async function clearPersistedSession(): Promise<void> {
+  // Clear both stores so an explicit logout truly logs the user out.
+  lsWrite(LS_KEYS.supabaseSession, null);
+  lsWrite(LS_KEYS.localSession,    null);
+  lsWrite(LS_KEYS.user,            null);
   try {
     const store = await getStore();
     await store.set('supabaseSession', null);
@@ -310,12 +372,16 @@ export async function restoreSession(): Promise<RegisteredPharmacy | null> {
       }
       // Refresh returned null but didn't throw — fall through to local check
     } catch (err) {
+      // Don't clear the persisted session on a non-network failure: a flaky
+      // 4xx, a temporarily revoked refresh token, or a brief auth outage will
+      // ask the user to log in again even though their LOCAL session token
+      // (HMAC-signed, 100-year TTL) is still perfectly valid. Fall through to
+      // the local check instead — if the local token validates we trust it,
+      // and the next online startup will refresh the Supabase side cleanly.
       if (!isNetworkError(err)) {
-        // Session was revoked server-side — clear and require re-login
-        await clearPersistedSession();
-        return null;
+        console.warn('[auth] Supabase refresh failed during restore — falling back to local session:', err);
       }
-      // Network error — keep going to local session check
+      // else: network error — keep going to local session check
     }
   }
 
@@ -329,8 +395,11 @@ export async function restoreSession(): Promise<RegisteredPharmacy | null> {
     return user;
   }
 
-  // All sessions expired — require re-login
-  await clearPersistedSession();
+  // No usable session anywhere — but DON'T clear here. Clearing was a holdover
+  // from when this branch implied the server had revoked the session; with the
+  // localStorage fallback we now hit this branch in benign cases too (e.g.
+  // first-ever boot before any login). Leaving the entries alone is harmless
+  // because they're nulls anyway, and an explicit logout already clears them.
   return null;
 }
 

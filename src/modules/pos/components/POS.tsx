@@ -1165,7 +1165,15 @@ const POS = forwardRef<any, POSProps>(({
             billType: isNonGst ? 'non-gst' : 'regular',
             itemCount: cartItems.length,
             pricingMode: localPricingMode,
-            prescriptionImages: prescriptions.map(p => p.data),
+            // p.data is the raw base64 payload (the data: URI prefix is stripped
+            // before sending to Gemini). Re-wrap it as a full data URI so the
+            // Sales History preview can render it with <img src>.
+            prescriptionImages: prescriptions.map(p => {
+                if (typeof p.data !== 'string') return p.data;
+                if (p.data.startsWith('data:')) return p.data;
+                const mime = p.type === 'pdf' ? 'application/pdf' : 'image/png';
+                return `data:${mime};base64,${p.data}`;
+            }),
             previousBalanceBeforeBill: Number(previousBalanceBeforeBill.toFixed(2)),
             balanceAfterBill,
             linkedChallans: conversionDraft?.linkedChallans || undefined,

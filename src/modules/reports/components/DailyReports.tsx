@@ -62,7 +62,9 @@ const getPeriodDefaults = () => {
 
 const formatDate = (date: string) => {
   if (!date) return '--';
-  return new Date(date).toLocaleDateString('en-GB');
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return '--';
+  return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
 };
 
 type ReportRow = {

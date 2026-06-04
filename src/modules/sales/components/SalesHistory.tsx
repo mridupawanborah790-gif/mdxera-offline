@@ -54,6 +54,345 @@ const POSIcon = (props: React.SVGProps<SVGSVGElement>) => (
 
 const ITEMS_PER_PAGE = 15;
 
+/**
+ * Older POS bills stored prescriptions as bare base64 (the `data:<mime>;base64,`
+ * prefix was stripped before sending to Gemini and never re-added on save).
+ * Sniff the base64 magic bytes and rebuild a proper data URI so <img src>
+ * renders the document instead of showing a broken-image icon.
+ */
+const ensurePrescriptionDataUri = (raw: string): string => {
+    if (typeof raw !== 'string' || raw.length === 0) return raw;
+    if (raw.startsWith('data:')) return raw;
+    if (raw.startsWith('http://') || raw.startsWith('https://') || raw.startsWith('blob:')) return raw;
+    // Trim whitespace/newlines that some uploads include.
+    const b64 = raw.replace(/\s+/g, '');
+    // Magic bytes via base64 prefix detection (more reliable than guessing).
+    let mime = 'image/png'; // safe default; browsers ignore the label and use the bytes anyway
+    if (b64.startsWith('JVBERi'))      mime = 'application/pdf';        // %PDF
+    else if (b64.startsWith('/9j/'))   mime = 'image/jpeg';             // FFD8FF
+    else if (b64.startsWith('iVBOR'))  mime = 'image/png';              // 89504E47
+    else if (b64.startsWith('R0lGOD')) mime = 'image/gif';              // GIF87a/89a
+    else if (b64.startsWith('UklGR'))  mime = 'image/webp';             // RIFF
+    return `data:${mime};base64,${b64}`;
+};
+
+/** Collect all prescription URLs / data URIs attached to a transaction (legacy single + images array). */
+const getPrescriptionsFor = (tx: Transaction | null | undefined): string[] => {
+    if (!tx) return [];
+    const single = (tx as any).prescriptionUrl ? [String((tx as any).prescriptionUrl)] : [];
+    const raw = (tx as any).prescriptionImages;
+    let images: string[] = [];
+    if (Array.isArray(raw)) {
+        images = raw.filter((v): v is string => typeof v === 'string' && v.length > 0);
+    } else if (typeof raw === 'string' && raw.trim()) {
+        // Some legacy rows stored JSON-stringified array (SQLite TEXT column).
+        try {
+            const parsed = JSON.parse(raw);
+            images = Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string' && v.length > 0) : [raw];
+        } catch {
+            images = [raw];
+        }
+    }
+    return [...single, ...images].map(ensurePrescriptionDataUri);
+};
+
+const RxIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <path d="M6 4h6a4 4 0 0 1 0 8H6"/><line x1="6" y1="4" x2="6" y2="20"/><line x1="10" y1="12" x2="18" y2="20"/><line x1="14" y1="14" x2="18" y2="10"/>
+    </svg>
+);
+
+type RxAsset = {
+    /** Original data:/http URI — used directly for <img src>; cheap and stable. */
+    displaySrc: string;
+    /** Blob URL — built once per modal open. Used for PDF <object> embed and for downloads. */
+    blobSrc: string;
+    mime: string;
+    isPdf: boolean;
+    ext: string;
+};
+
+/** Read the mime type out of a `data:<mime>;base64,...` URI, or null for http(s)/blob. */
+const parseDataUriMime = (uri: string): string | null => {
+    if (!uri.startsWith('data:')) return null;
+    const match = uri.match(/^data:([^;,]+)[;,]/);
+    return match ? match[1] : null;
+};
+
+const mimeToExt = (mime: string): string => {
+    switch (mime) {
+        case 'application/pdf': return 'pdf';
+        case 'image/jpeg':
+        case 'image/jpg':       return 'jpg';
+        case 'image/png':       return 'png';
+        case 'image/gif':       return 'gif';
+        case 'image/webp':      return 'webp';
+        default:                return 'bin';
+    }
+};
+
+/**
+ * Convert a `data:` URI to a Blob URL. This unblocks two things:
+ *   1. `<iframe src>` PDF preview is fast & reliable (data: URIs of 1–5 MB
+ *      stall the parser and sometimes never load).
+ *   2. `<a download>` actually downloads — Chromium/Safari/Tauri webviews
+ *      drop the `download` attribute on large data URIs, but it's respected
+ *      on blob URLs.
+ * Returns the original string unchanged for non-data sources (http, blob).
+ */
+const dataUriToBlobUrl = (uri: string): { url: string; revoke: () => void } => {
+    if (!uri.startsWith('data:')) return { url: uri, revoke: () => {} };
+    try {
+        const commaIdx = uri.indexOf(',');
+        const meta = uri.substring(5, commaIdx); // e.g. image/png;base64
+        const data = uri.substring(commaIdx + 1);
+        const isBase64 = /;base64$/i.test(meta);
+        const mime = meta.replace(/;base64$/i, '') || 'application/octet-stream';
+        let bytes: Uint8Array;
+        if (isBase64) {
+            const binary = atob(data);
+            bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        } else {
+            bytes = new TextEncoder().encode(decodeURIComponent(data));
+        }
+        // Pass the underlying buffer — Blob accepts ArrayBuffer directly, and
+        // this sidesteps the strict-mode Uint8Array<ArrayBufferLike> mismatch.
+        const blob = new Blob([bytes.buffer as ArrayBuffer], { type: mime });
+        const url = URL.createObjectURL(blob);
+        return { url, revoke: () => { try { URL.revokeObjectURL(url); } catch {} } };
+    } catch (err) {
+        console.warn('[rx] failed to convert data URI to blob URL — falling back to raw URI', err);
+        return { url: uri, revoke: () => {} };
+    }
+};
+
+interface PrescriptionPreviewModalProps {
+    transaction: Transaction;
+    urls: string[]; // already normalized via getPrescriptionsFor (full data URIs or http URLs)
+    onClose: () => void;
+}
+
+const PrescriptionPreviewModal: React.FC<PrescriptionPreviewModalProps> = ({ transaction: tx, urls, onClose }) => {
+    const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+    const [assets, setAssets] = useState<RxAsset[]>([]);
+
+    // Build the asset list (with blob URLs) ONCE per transaction. Earlier this
+    // was a useMemo keyed on the `urls` array reference — because the parent
+    // rebuilds that array every render, blob URLs were thrashed mid-fetch and
+    // images broke. Pinning to `tx.id` makes lifetimes stable for the whole
+    // time the modal is open.
+    useEffect(() => {
+        const created: string[] = [];
+        const built: RxAsset[] = urls.map(raw => {
+            const mime = parseDataUriMime(raw) || (raw.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/png');
+            const { url } = dataUriToBlobUrl(raw);
+            if (url !== raw && url.startsWith('blob:')) created.push(url);
+            return {
+                displaySrc: raw,         // raw data:/http URI — what <img src> uses
+                blobSrc: url,            // blob: URL (or the raw URI if conversion failed) — for downloads + PDF embed
+                mime,
+                isPdf: mime === 'application/pdf',
+                ext: mimeToExt(mime),
+            };
+        });
+        setAssets(built);
+        return () => {
+            for (const u of created) {
+                try { URL.revokeObjectURL(u); } catch { /* no-op */ }
+            }
+        };
+        // urls is intentionally excluded — we only want to rebuild when the
+        // user opens a different transaction, not on every parent re-render.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [tx.id]);
+
+    const downloadOne = (asset: RxAsset, idx: number) => {
+        const link = document.createElement('a');
+        // Always download via the blob URL — Chromium/Tauri webviews ignore the
+        // `download` attribute on large data: URIs, so the click would open the
+        // file inline instead of saving it.
+        link.href = asset.blobSrc;
+        link.download = `Rx_${tx.invoiceNumber || tx.id}_${idx + 1}.${asset.ext}`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+    const lightboxAsset = lightboxIndex !== null ? assets[lightboxIndex] : null;
+
+    return (
+        <Modal
+            isOpen={true}
+            onClose={onClose}
+            title={`Prescription Preview — ${tx.invoiceNumber || tx.id}`}
+            widthClass="max-w-5xl"
+            heightClass="h-[85vh]"
+        >
+            <div className="px-5 pt-4 pb-3 border-b border-gray-200 bg-white flex-shrink-0 flex flex-wrap items-baseline justify-between gap-3">
+                <div>
+                    <div className="text-sm font-bold uppercase tracking-wide text-gray-900">{tx.customerName || 'Walk-in Customer'}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                        {new Date(tx.date).toLocaleDateString('en-IN')} · {assets.length} document{assets.length === 1 ? '' : 's'} attached
+                    </div>
+                </div>
+                {assets.length > 1 && (
+                    <button
+                        onClick={() => assets.forEach((a, idx) => downloadOne(a, idx))}
+                        className="px-3 py-1.5 border border-gray-300 bg-white text-xs hover:bg-gray-50 flex items-center gap-2"
+                    >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        Download All
+                    </button>
+                )}
+            </div>
+
+            <div className="p-5 flex-1 overflow-auto bg-gray-50">
+                {assets.length === 0 ? (
+                    <div className="h-full flex items-center justify-center text-sm text-gray-400 italic">No prescription attached.</div>
+                ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                        {assets.map((asset, index) => (
+                            <div key={index} className="bg-white border border-gray-300 flex flex-col shadow-sm">
+                                <div
+                                    className="relative aspect-[4/5] w-full bg-gray-100 overflow-hidden flex items-center justify-center cursor-pointer"
+                                    onClick={() => setLightboxIndex(index)}
+                                    title={asset.isPdf ? 'Click to enlarge PDF' : 'Click to enlarge image'}
+                                >
+                                    {asset.isPdf ? (
+                                        // A grid of <iframe> PDFs is slow and many webviews refuse
+                                        // to embed `data:` PDFs at all (Chrome has blocked that
+                                        // since v60). Show a static PDF card here; the lightbox
+                                        // below renders the real embed when the user clicks in.
+                                        <div className="flex flex-col items-center justify-center text-gray-500 p-4">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" className="mb-3 text-red-500"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                                            <span className="text-xs font-bold uppercase tracking-widest text-gray-700">PDF Document</span>
+                                            <span className="text-[10px] text-gray-400 mt-1">Click to preview</span>
+                                        </div>
+                                    ) : (
+                                        <img src={asset.displaySrc} alt={`Prescription ${index + 1}`} className="w-full h-full object-contain" />
+                                    )}
+                                    <div className="absolute top-2 left-2 bg-black/60 text-white text-[10px] font-black uppercase tracking-wider px-2 py-0.5">
+                                        Rx #{index + 1}{asset.isPdf ? ' · PDF' : ''}
+                                    </div>
+                                </div>
+                                <div className="flex border-t border-gray-200 text-xs">
+                                    <button
+                                        type="button"
+                                        onClick={() => setLightboxIndex(index)}
+                                        className="flex-1 py-2 hover:bg-gray-50 border-r border-gray-200 flex items-center justify-center gap-1.5"
+                                    >
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                        View
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => downloadOne(asset, index)}
+                                        className="flex-1 py-2 hover:bg-gray-50 flex items-center justify-center gap-1.5"
+                                    >
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                                        Download
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            <div className="flex justify-end items-center gap-2 px-5 py-3 border-t border-gray-200 bg-white flex-shrink-0">
+                <button
+                    onClick={onClose}
+                    className="px-4 py-2 border border-gray-300 bg-white text-xs hover:bg-gray-50"
+                >
+                    Close
+                </button>
+            </div>
+
+            {lightboxAsset && (
+                <div
+                    className="fixed inset-0 z-[300] bg-black/85 flex items-center justify-center p-6"
+                    onClick={() => setLightboxIndex(null)}
+                >
+                    <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setLightboxIndex(null); }}
+                        className="absolute top-5 right-5 text-white p-2 hover:bg-white/10 rounded z-10"
+                        aria-label="Close lightbox"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                    {assets.length > 1 && (
+                        <>
+                            <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); setLightboxIndex((idx) => (idx === null ? 0 : (idx - 1 + assets.length) % assets.length)); }}
+                                className="absolute left-5 text-white p-3 hover:bg-white/10 rounded-full z-10"
+                                aria-label="Previous"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); setLightboxIndex((idx) => (idx === null ? 0 : (idx + 1) % assets.length)); }}
+                                className="absolute right-5 text-white p-3 hover:bg-white/10 rounded-full z-10"
+                                aria-label="Next"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                            </button>
+                        </>
+                    )}
+                    <div
+                        className="w-full h-full max-w-6xl max-h-full flex items-center justify-center"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        {lightboxAsset.isPdf ? (
+                            // <object> is the most reliable inline-PDF embed across browsers
+                            // and webviews; <iframe> with data: URIs is blocked in Chromium
+                            // and blob: URIs are spotty in some WKWebView builds. We pass the
+                            // blob URL (built once in the useEffect above) and provide an
+                            // in-place fallback if the embed can't render.
+                            <object
+                                data={lightboxAsset.blobSrc}
+                                type="application/pdf"
+                                className="w-full h-full bg-white rounded"
+                            >
+                                <div className="w-full h-full flex flex-col items-center justify-center bg-white rounded gap-4 p-8 text-center">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-red-500"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                                    <div className="text-sm text-gray-700">This browser can't render the PDF inline.</div>
+                                    <div className="flex gap-3">
+                                        <button
+                                            onClick={() => window.open(lightboxAsset.blobSrc, '_blank')}
+                                            className="px-4 py-2 border border-gray-300 bg-white text-xs hover:bg-gray-50"
+                                        >
+                                            Open in new tab
+                                        </button>
+                                        <button
+                                            onClick={() => downloadOne(lightboxAsset, lightboxIndex!)}
+                                            className="px-4 py-2 border border-primary bg-primary text-white text-xs"
+                                        >
+                                            Download PDF
+                                        </button>
+                                    </div>
+                                </div>
+                            </object>
+                        ) : (
+                            <img
+                                src={lightboxAsset.displaySrc}
+                                alt={`Prescription ${lightboxIndex! + 1}`}
+                                className="max-h-full max-w-full object-contain"
+                            />
+                        )}
+                    </div>
+                    <div className="absolute bottom-5 left-1/2 -translate-x-1/2 text-white text-xs font-bold uppercase tracking-widest z-10">
+                        Rx #{lightboxIndex! + 1} of {assets.length}{lightboxAsset.isPdf ? ' · PDF' : ''}
+                    </div>
+                </div>
+            )}
+        </Modal>
+    );
+};
+
 const getInvoiceSequenceNumber = (transaction: Transaction): number => {
     const invoiceRef = String(transaction.invoiceNumber || transaction.id || '');
     
@@ -92,6 +431,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
     const [selectedTransactionId, setSelectedTransactionId] = useState<string | null>(null);
     const [actionWarning, setActionWarning] = useState<string>('');
     const [viewingTransaction, setViewingTransaction] = useState<Transaction | null>(null);
+    const [rxViewingTransaction, setRxViewingTransaction] = useState<Transaction | null>(null);
 
     const requestSort = (key: SortableKeys) => {
         let direction: 'ascending' | 'descending' = 'ascending';
@@ -316,6 +656,22 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
         downloadCsv(`invoice-${tx.id}.csv`, csvContent);
     }, [requireSelectedTransaction]);
 
+    const handleViewRxSelected = useCallback(() => {
+        const tx = requireSelectedTransaction();
+        if (!tx) return;
+        if (getPrescriptionsFor(tx).length === 0) {
+            setActionWarning('No prescription attached to this bill.');
+            return;
+        }
+        setRxViewingTransaction(tx);
+    }, [requireSelectedTransaction]);
+
+    const handleViewRxFor = useCallback((tx: Transaction) => {
+        if (getPrescriptionsFor(tx).length === 0) return;
+        setSelectedTransactionId(tx.id);
+        setRxViewingTransaction(tx);
+    }, []);
+
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (!shouldHandleScreenShortcut(e, 'salesHistory', { allowedKeysWhenInputFocused: ['F5'] })) return;
@@ -357,6 +713,9 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
             } else if (e.key === 'F8') {
                 e.preventDefault();
                 handlePrintSelected();
+            } else if (e.key === 'F9') {
+                e.preventDefault();
+                handleViewRxSelected();
             } else if (e.key === 'Delete') {
                 e.preventDefault();
                 handleCancelSelected();
@@ -370,7 +729,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [paginatedTransactions, selectedTransaction, handleViewSelected, handleEditSelected, handleReturnOrderSelected, handleViewJournalSelected, handlePrintSelected, handleCancelSelected, handleExportSelected, currentPage, totalPages]);
+    }, [paginatedTransactions, selectedTransaction, handleViewSelected, handleEditSelected, handleReturnOrderSelected, handleViewJournalSelected, handlePrintSelected, handleCancelSelected, handleExportSelected, handleViewRxSelected, currentPage, totalPages]);
 
     const renderPageNumbers = () => {
         const delta = 2;
@@ -527,6 +886,17 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                             <button disabled={!selectedTransaction} onClick={handleReturnOrderSelected} className="px-3 py-1.5 tally-border bg-white text-[10px] font-black uppercase disabled:opacity-50">F6: Return Order</button>
                             <button disabled={!selectedTransaction} onClick={handleViewJournalSelected} className="px-3 py-1.5 tally-border bg-white text-[10px] font-black uppercase disabled:opacity-50">F7: View Journal Entry</button>
                             <button disabled={!selectedTransaction} onClick={handlePrintSelected} className="px-3 py-1.5 tally-border bg-white text-[10px] font-black uppercase disabled:opacity-50">F8: Print</button>
+                            <button
+                                disabled={!selectedTransaction || getPrescriptionsFor(selectedTransaction).length === 0}
+                                onClick={handleViewRxSelected}
+                                className="px-3 py-1.5 tally-border bg-white text-[10px] font-black uppercase disabled:opacity-50 flex items-center gap-1.5"
+                                title={selectedTransaction && getPrescriptionsFor(selectedTransaction).length > 0
+                                    ? `View ${getPrescriptionsFor(selectedTransaction).length} prescription(s)`
+                                    : 'No prescription attached'}
+                            >
+                                <RxIcon className="w-3 h-3" />
+                                F9: View Rx
+                            </button>
                             <button disabled={!selectedTransaction} onClick={handleCancelSelected} className="px-3 py-1.5 tally-border bg-white text-[10px] font-black uppercase text-red-700 disabled:opacity-50">Delete: Cancel</button>
                             <button disabled={!selectedTransaction} onClick={handleExportSelected} className="px-3 py-1.5 tally-border bg-white text-[10px] font-black uppercase disabled:opacity-50">F3: Export</button>
                             <button onClick={handleRefresh} disabled={isSyncing} className="px-3 py-1.5 tally-button-primary text-[10px] font-black uppercase disabled:opacity-60">F5: Refresh</button>
@@ -555,6 +925,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                                     <th className="p-2 border-r border-gray-400 text-center w-28 cursor-pointer hover:bg-gray-200 transition-colors" onClick={() => requestSort('status')}>
                                         <div className="flex items-center justify-center">Status <SortIcon sortKey="status" sortConfig={sortConfig} /></div>
                                     </th>
+                                    <th className="p-2 text-center w-16">Rx</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-200">
@@ -610,6 +981,29 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                                                 )}
                                             </div>
                                         </td>
+                                        <td className="p-2 text-center" onClick={(e) => e.stopPropagation()}>
+                                            {(() => {
+                                                const rxList = getPrescriptionsFor(tx);
+                                                if (rxList.length === 0) {
+                                                    return <span className={`text-[10px] font-bold ${selectedTransactionId === tx.id ? 'text-white/40' : 'text-gray-300 group-hover:text-white/40'}`}>—</span>;
+                                                }
+                                                return (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleViewRxFor(tx)}
+                                                        title={`View ${rxList.length} prescription${rxList.length === 1 ? '' : 's'}`}
+                                                        className={`inline-flex items-center gap-1 px-2 py-1 border text-[10px] font-black uppercase transition-colors ${
+                                                            selectedTransactionId === tx.id
+                                                                ? 'bg-white/10 border-white/40 text-white hover:bg-white/20'
+                                                                : 'bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100 group-hover:bg-white/10 group-hover:border-white/40 group-hover:text-white'
+                                                        }`}
+                                                    >
+                                                        <RxIcon className="w-3 h-3" />
+                                                        {rxList.length > 1 ? `Rx · ${rxList.length}` : 'Rx'}
+                                                    </button>
+                                                );
+                                            })()}
+                                        </td>
                                     </tr>
                                 )})}
                             </tbody>
@@ -662,9 +1056,9 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
             />
 
             {viewingTransaction && (
-                <Modal 
-                    isOpen={!!viewingTransaction} 
-                    onClose={() => setViewingTransaction(null)} 
+                <Modal
+                    isOpen={!!viewingTransaction}
+                    onClose={() => setViewingTransaction(null)}
                     title={`View Sales Invoice: ${viewingTransaction.invoiceNumber || viewingTransaction.id}`}
                 >
                     <div className="h-[90vh] overflow-hidden flex flex-col">
@@ -688,6 +1082,14 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                         />
                     </div>
                 </Modal>
+            )}
+
+            {rxViewingTransaction && (
+                <PrescriptionPreviewModal
+                    transaction={rxViewingTransaction}
+                    urls={getPrescriptionsFor(rxViewingTransaction)}
+                    onClose={() => setRxViewingTransaction(null)}
+                />
             )}
         </main>
     );

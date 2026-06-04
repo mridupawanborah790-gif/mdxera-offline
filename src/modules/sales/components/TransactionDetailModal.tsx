@@ -80,10 +80,40 @@ const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
             .reduce((sum, ret) => sum + (ret.totalRefund || 0), 0);
     }, [transaction, salesReturns]);
 
+    // Legacy bills (and SQLite-mirrored rows) may store the JSON-stringified
+    // array or bare base64 without the `data:<mime>;base64,` prefix. Normalize
+    // both forms so the <img> tags below actually render.
+    const ensurePrescriptionDataUri = (raw: string): string => {
+        if (typeof raw !== 'string' || raw.length === 0) return raw;
+        if (raw.startsWith('data:') || raw.startsWith('http://') || raw.startsWith('https://') || raw.startsWith('blob:')) return raw;
+        const b64 = raw.replace(/\s+/g, '');
+        let mime = 'image/png';
+        if (b64.startsWith('JVBERi'))      mime = 'application/pdf';
+        else if (b64.startsWith('/9j/'))   mime = 'image/jpeg';
+        else if (b64.startsWith('iVBOR'))  mime = 'image/png';
+        else if (b64.startsWith('R0lGOD')) mime = 'image/gif';
+        else if (b64.startsWith('UklGR'))  mime = 'image/webp';
+        return `data:${mime};base64,${b64}`;
+    };
+
+    let imagesArr: string[] = [];
+    if (Array.isArray(prescriptionImages)) {
+        imagesArr = prescriptionImages.filter((v): v is string => typeof v === 'string' && v.length > 0);
+    } else if (typeof prescriptionImages === 'string' && (prescriptionImages as string).trim()) {
+        try {
+            const parsed = JSON.parse(prescriptionImages as string);
+            imagesArr = Array.isArray(parsed)
+                ? parsed.filter((v): v is string => typeof v === 'string' && v.length > 0)
+                : [prescriptionImages as string];
+        } catch {
+            imagesArr = [prescriptionImages as string];
+        }
+    }
+
     const allPrescriptions = [
         ...(prescriptionUrl ? [prescriptionUrl] : []),
-        ...(prescriptionImages || [])
-    ];
+        ...imagesArr,
+    ].map(ensurePrescriptionDataUri);
 
     const displaySubtotal = subtotal ?? items.reduce((sum, item) => {
         const uPP = item.unitsPerPack || 1;

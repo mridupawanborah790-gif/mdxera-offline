@@ -1093,6 +1093,36 @@ const App: React.FC = () => {
         };
     }, [currentUser, loadData]);
 
+    // Drop the stale `sync_status: 'pending'` marker from in-memory rows as
+    // soon as SyncWorker confirms a successful push. Without this the
+    // "Sync Pending" badges in Sales History (and similar views) stick until
+    // the user reloads, even though the row is already on the server.
+    useEffect(() => {
+        const onSynced = (e: Event) => {
+            const detail = (e as CustomEvent).detail || {};
+            const table: string | undefined = detail.tableName;
+            const ids: string[] = Array.isArray(detail.ids) ? detail.ids : [];
+            if (!table || ids.length === 0) return;
+            const idSet = new Set(ids);
+            const clearStatus = <T extends { id?: string; sync_status?: string | null }>(rows: T[]) =>
+                rows.map(row => (row && row.id && idSet.has(row.id) && row.sync_status === 'pending'
+                    ? ({ ...row, sync_status: undefined } as T)
+                    : row));
+            switch (table) {
+                case 'sales_bill':       setTransactions(prev => clearStatus(prev as any) as any); break;
+                case 'purchases':        setPurchases(prev => clearStatus(prev as any) as any); break;
+                case 'sales_returns':    setSalesReturns(prev => clearStatus(prev as any) as any); break;
+                case 'suppliers':        setSuppliers(prev => clearStatus(prev as any) as any); break;
+                case 'customers':        setCustomers(prev => clearStatus(prev as any) as any); break;
+                case 'inventory':        setInventory(prev => clearStatus(prev as any) as any); break;
+                case 'material_master':  setMedicines(prev => clearStatus(prev as any) as any); break;
+                default: break;
+            }
+        };
+        window.addEventListener('sync-rows-synced', onSynced);
+        return () => window.removeEventListener('sync-rows-synced', onSynced);
+    }, []);
+
     const handleLogin = (user: RegisteredPharmacy) => {
         setCurrentPage('dashboard');
         setAppLoadError(null);

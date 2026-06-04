@@ -519,6 +519,17 @@ async function markEntityRowsSynced(
     // Either way it's non-fatal — the queue row is already marked done.
     console.debug(`[sync] markEntityRowsSynced(${tableName}) skipped:`, (err as Error)?.message);
   }
+
+  // Notify the UI so it can drop the stale `sync_status: 'pending'` from the
+  // matching in-memory rows without forcing a full data reload. Without this
+  // the "Sync Pending" badge in Sales History sticks until the user reloads.
+  try {
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new CustomEvent('sync-rows-synced', { detail: { tableName, ids } }));
+    }
+  } catch {
+    /* no-op */
+  }
 }
 
 /**

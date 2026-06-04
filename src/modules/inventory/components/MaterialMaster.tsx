@@ -8,7 +8,8 @@ import { fuzzyMatch } from '@core/utils/search';
 import { shouldHandleScreenShortcut } from '@core/utils/screenShortcuts';
 
 const uniformTextStyle = "text-2xl font-normal tracking-tight uppercase leading-tight";
-const ITEMS_PER_PAGE = 10;
+const FALLBACK_ROW_HEIGHT_PX = 56;
+const MIN_ITEMS_PER_PAGE = 10;
 
 type MedicineSortableKeys = keyof Medicine;
 
@@ -61,6 +62,35 @@ const MaterialMaster: React.FC<MaterialMasterProps> = ({
     const [medSearchTerm, setMedSearchTerm] = useState('');
     const [medSortConfig, setMedSortConfig] = useState<{ key: MedicineSortableKeys; direction: 'ascending' | 'descending' }>({ key: 'name', direction: 'ascending' });
     const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState(MIN_ITEMS_PER_PAGE);
+    const tableScrollRef = useRef<HTMLDivElement | null>(null);
+
+    useEffect(() => {
+        if (activeSubModule !== 'master') return;
+        const recompute = () => {
+            const el = tableScrollRef.current;
+            if (!el) return;
+            const thead = el.querySelector('thead');
+            const firstRow = el.querySelector('tbody tr');
+            const headerHeight = thead ? thead.getBoundingClientRect().height : 0;
+            const rowHeight = firstRow ? firstRow.getBoundingClientRect().height : FALLBACK_ROW_HEIGHT_PX;
+            const available = el.clientHeight - headerHeight;
+            if (available <= 0 || rowHeight <= 0) return;
+            const fit = Math.floor(available / rowHeight);
+            setItemsPerPage(prev => {
+                const next = Math.max(MIN_ITEMS_PER_PAGE, fit);
+                return next === prev ? prev : next;
+            });
+        };
+        const raf = requestAnimationFrame(recompute);
+        const el = tableScrollRef.current;
+        const ro = el ? new ResizeObserver(recompute) : null;
+        if (el && ro) ro.observe(el);
+        return () => {
+            cancelAnimationFrame(raf);
+            ro?.disconnect();
+        };
+    }, [activeSubModule]);
     
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -70,10 +100,10 @@ const MaterialMaster: React.FC<MaterialMasterProps> = ({
         setActiveSubModule(initialSubModule);
     }, [initialSubModule]);
 
-    // Reset page when search term or sorting changes
+    // Reset page when search term, sorting, or page size changes
     useEffect(() => {
         setCurrentPage(1);
-    }, [medSearchTerm, medSortConfig]);
+    }, [medSearchTerm, medSortConfig, itemsPerPage]);
 
     const handleOpenEditModal = (med: Medicine) => {
         setMedicineToEdit(med);
@@ -111,11 +141,11 @@ const MaterialMaster: React.FC<MaterialMasterProps> = ({
         return filtered;
     }, [medSortConfig, medicines, medSearchTerm]);
 
-    const totalPages = Math.ceil(filteredAndSortedMedicines.length / ITEMS_PER_PAGE);
+    const totalPages = Math.ceil(filteredAndSortedMedicines.length / itemsPerPage);
     
     const paginatedMedicines = useMemo(() => {
-        const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-        return filteredAndSortedMedicines.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+        const startIndex = (currentPage - 1) * itemsPerPage;
+        return filteredAndSortedMedicines.slice(startIndex, startIndex + itemsPerPage);
     }, [filteredAndSortedMedicines, currentPage]);
 
     const moduleTitles: Record<SubModule, string> = {
@@ -188,7 +218,7 @@ const MaterialMaster: React.FC<MaterialMasterProps> = ({
     };
 
     return (
-        <main className="flex-1 overflow-hidden flex flex-col page-fade-in bg-app-bg">
+        <main className="h-full flex-1 overflow-hidden flex flex-col page-fade-in bg-app-bg">
             <div className="bg-primary text-white h-7 flex items-center px-4 justify-between border-b border-gray-600 shadow-md flex-shrink-0">
                 <span className="text-[10px] font-black uppercase tracking-widest">{moduleTitles[activeSubModule]}</span>
                 <span className="text-[10px] font-black uppercase text-accent">Total Items: {medicines.length}</span>
@@ -206,9 +236,9 @@ const MaterialMaster: React.FC<MaterialMasterProps> = ({
                     )}
                 </div>
 
-                <div className="flex-1 overflow-hidden">
+                <div className="flex-1 overflow-hidden flex flex-col min-h-0">
                     {activeSubModule === 'master' && (
-                        <Card className="h-full flex flex-col p-0 tally-border !rounded-none overflow-hidden bg-white shadow-inner">
+                        <Card className="flex-1 min-h-0 flex flex-col p-0 tally-border !rounded-none overflow-hidden bg-white shadow-inner">
                             <div className="p-2 border-b border-gray-400 bg-gray-50 flex-shrink-0 flex gap-4 items-center justify-between">
                                 <div className="relative flex-1 max-w-lg">
                                     <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
@@ -221,7 +251,7 @@ const MaterialMaster: React.FC<MaterialMasterProps> = ({
                                     </button>
                                 </div>
                             </div>
-                            <div className="overflow-auto flex-1">
+                            <div className="overflow-auto flex-1" ref={tableScrollRef}>
                                 <table className="min-w-full border-collapse">
                                     <thead className="bg-[#e1e1e1] sticky top-0 z-10 border-b border-gray-400">
                                         <tr className={`${uniformTextStyle} text-gray-700`}>
@@ -240,7 +270,7 @@ const MaterialMaster: React.FC<MaterialMasterProps> = ({
                                                 key={med.id} 
                                                 className="hover:bg-primary hover:text-white transition-colors cursor-pointer group" 
                                             >
-                                                <td className={`py-1.5 px-2 border-r border-gray-200 text-center group-hover:text-white text-gray-400 ${uniformTextStyle}`}>{((currentPage - 1) * ITEMS_PER_PAGE) + idx + 1}</td>
+                                                <td className={`py-1.5 px-2 border-r border-gray-200 text-center group-hover:text-white text-gray-400 ${uniformTextStyle}`}>{((currentPage - 1) * itemsPerPage) + idx + 1}</td>
                                                 <td className="py-1.5 px-2 border-r border-gray-200">
                                                     <div className="flex flex-col">
                                                         <span className={`leading-none group-hover:text-white text-gray-900 ${uniformTextStyle}`}>{med.name}</span>
@@ -312,7 +342,7 @@ const MaterialMaster: React.FC<MaterialMasterProps> = ({
                     )}
 
                     {activeSubModule === 'sync' && (
-                        <div className="h-full overflow-y-auto custom-scrollbar">
+                        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
                             <SupplierSyncView 
                                 suppliers={suppliers}
                                 medicines={medicines}
@@ -324,7 +354,7 @@ const MaterialMaster: React.FC<MaterialMasterProps> = ({
                     )}
 
                     {activeSubModule === 'bulk' && (
-                        <Card className="p-16 tally-border bg-white text-center flex flex-col items-center justify-center h-full">
+                        <Card className="p-16 tally-border bg-white text-center flex flex-col items-center justify-center flex-1 min-h-0">
                              <p className="font-black uppercase tracking-[0.4em] text-gray-900 text-2xl">Central Data Migration</p>
                              <p className="text-base mt-4 text-gray-500 max-w-md">Batch migration and utility tools for system maintenance.</p>
                              <button onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-config', { detail: 'dataManagement' }))} className="mt-10 px-12 py-4 tally-button-primary text-xs shadow-2xl tracking-[0.2em]">Open Data Management</button>

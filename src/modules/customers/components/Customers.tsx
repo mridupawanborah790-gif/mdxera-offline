@@ -112,21 +112,18 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
                     </div>
                     <div className="flex-1 overflow-y-auto divide-y divide-gray-200">
                         {filteredCustomers.map(cust => (
-                            <div 
-                                key={cust.id} 
-                                onClick={() => setSelectedCustomer(cust)} 
-                                className={`p-4 cursor-pointer transition-all border-l-[8px] ${selectedCustomer?.id === cust.id ? 'bg-primary text-white border-primary shadow-lg' : 'border-transparent hover:bg-primary hover:text-white group'}`}
+                            <button
+                                key={cust.id}
+                                type="button"
+                                onClick={() => setSelectedCustomer(cust)}
+                                className={`w-full text-left p-3 transition-all border-l-[6px] ${selectedCustomer?.id === cust.id ? 'bg-primary text-white border-primary shadow-lg' : 'border-transparent hover:bg-primary hover:text-white group'}`}
                             >
-                                <div className="flex justify-between items-center">
-                                    <div className="flex-1 min-w-0 pr-2">
-                                        <p className={`${uniformTextStyle} truncate ${selectedCustomer?.id === cust.id ? 'text-white' : 'group-hover:text-white'}`}>{cust.name}</p>
-                                        <p className={`${uniformTextStyle} !text-base mt-1 ${selectedCustomer?.id === cust.id ? 'text-white/70' : 'text-gray-500 group-hover:text-white/70'}`}>{cust.phone || 'N/A'}</p>
-                                    </div>
-                                    {(cust.is_blocked || cust.is_active === false) && (
-                                        <span className={`text-[9px] font-black uppercase px-2 py-1 border ${selectedCustomer?.id === cust.id ? 'border-white text-white' : 'border-red-600 text-red-600 group-hover:text-white group-hover:border-white'}`}>Blocked</span>
-                                    )}
-                                </div>
-                            </div>
+                                <p className={`${uniformTextStyle} !text-xl truncate ${selectedCustomer?.id === cust.id ? 'text-white' : 'group-hover:text-white'}`}>{cust.name}</p>
+                                <p className={`text-xs font-bold uppercase truncate ${selectedCustomer?.id === cust.id ? 'text-white/70' : 'text-gray-500 group-hover:text-white/70'}`}>{cust.phone || 'N/A'}</p>
+                                {(cust.is_blocked || cust.is_active === false) && (
+                                    <p className={`text-[9px] font-black uppercase mt-1 ${selectedCustomer?.id === cust.id ? 'text-white' : 'text-red-600 group-hover:text-white'}`}>Blocked</p>
+                                )}
+                            </button>
                         ))}
                     </div>
                     <div className="p-3 border-t border-gray-400 bg-gray-50 flex gap-2 flex-shrink-0">
@@ -141,21 +138,13 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
                             <div className="p-6 bg-gray-100 border-b border-gray-400 flex justify-between items-start flex-shrink-0">
                                 <div className="flex-1 min-w-0">
                                     <h3 className={`${uniformTextStyle} !text-4xl text-primary truncate`}>{selectedCustomer.name}</h3>
-                                    <p className="text-sm font-bold text-gray-500 uppercase mt-3">Contact: {selectedCustomer.phone || 'N/A'} | Area: {selectedCustomer.area || 'N/A'}</p>
-                                    <p className="text-xs font-black uppercase mt-2">Status: <span className={(selectedCustomer.is_blocked || selectedCustomer.is_active === false) ? 'text-red-600' : 'text-emerald-700'}>{(selectedCustomer.is_blocked || selectedCustomer.is_active === false) ? 'Blocked' : 'Active'}</span></p>
-                                </div>
-                                <div className="w-full mt-5 p-4 bg-white border border-gray-300 rounded">
-                                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 mb-3">Address Details</p>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-                                        {addressFields.map(({ label, key }) => (
-                                            <div key={key} className="min-w-0">
-                                                <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">{label}</p>
-                                                <p className={`${uniformTextStyle} !text-base text-gray-900 break-words`}>{selectedCustomer[key] || '—'}</p>
-                                            </div>
-                                        ))}
+                                    <div className="flex flex-wrap gap-x-8 gap-y-2 mt-3 text-sm font-bold text-gray-500 uppercase">
+                                        <span>Contact: <span className="text-gray-900 tally-font-data-mono">{selectedCustomer.phone || 'N/A'}</span></span>
+                                        <span>Area: <span className="text-gray-900 tally-font-data-mono">{selectedCustomer.area || 'N/A'}</span></span>
+                                        <span>Status: <span className={(selectedCustomer.is_blocked || selectedCustomer.is_active === false) ? 'text-red-600' : 'text-emerald-700'}>{(selectedCustomer.is_blocked || selectedCustomer.is_active === false) ? 'Blocked' : 'Active'}</span></span>
                                     </div>
                                 </div>
-                                <div className="flex gap-2 ml-4">
+                                <div className="flex gap-2 ml-4 flex-shrink-0">
                                     <button onClick={() => setIsPriceListModalOpen(true)} className="px-4 py-2 tally-border bg-white font-black text-[10px] uppercase shadow-sm">Price List</button>
                                     <button onClick={() => setIsEditModalOpen(true)} className="px-4 py-2 tally-border bg-white font-black text-[10px] uppercase shadow-sm">Alter</button>
                                     {(selectedCustomer.is_blocked || selectedCustomer.is_active === false) ? (
@@ -174,6 +163,18 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
                                     >
                                         Delete Customer
                                     </button>
+                                </div>
+                            </div>
+
+                            <div className="p-4 border-b border-gray-300 bg-white flex-shrink-0">
+                                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 mb-3">Address Details</p>
+                                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                                    {addressFields.map(({ label, key }) => (
+                                        <div key={key} className="min-w-0 border border-gray-200 p-3">
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">{label}</p>
+                                            <p className="text-sm font-bold text-gray-900 break-words">{selectedCustomer[key] || '—'}</p>
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
                             

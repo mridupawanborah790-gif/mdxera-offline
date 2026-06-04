@@ -468,7 +468,14 @@ const POS = forwardRef<any, POSProps>(({
             paymentMode: finalPaymentMode,
             billType: isNonGst ? 'non-gst' : 'regular',
             itemCount: cartItems.length,
-            prescriptionImages: prescriptions.map(p => p.data),
+            // p.data is raw base64 (prefix stripped for Gemini). Wrap as a full
+            // data URI so Sales History / TransactionDetailModal can render it.
+            prescriptionImages: prescriptions.map(p => {
+                if (typeof p.data !== 'string') return p.data;
+                if (p.data.startsWith('data:')) return p.data;
+                const mime = p.type === 'pdf' ? 'application/pdf' : 'image/png';
+                return `data:${mime};base64,${p.data}`;
+            }),
             previousBalanceBeforeBill: Number(previousBalanceBeforeBill.toFixed(2)),
             balanceAfterBill,
         };

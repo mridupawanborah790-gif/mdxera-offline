@@ -2204,23 +2204,34 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
     export const updatePassword = _updatePasswordImpl;
 
     export const getCurrentUser = async (): Promise<RegisteredPharmacy | null> => {
-        // 1. Try Supabase's in-memory session first.
-        const { data: { session } } = await supabase.auth.getSession();
-        let userId = session?.user?.id ?? null;
-
-        // 2. If no Supabase session, try restoring from the Tauri persisted
-        //    plugin-store + local-session token. This is the path that keeps
-        //    the user logged in across app close/reopen even when the
-        //    webview's localStorage was wiped or the access token expired
-        //    while the device was offline. We do NOT clear idb stores here:
-        //    only an explicit logout should do that.
-        if (!userId) {
-            const restored = await _restoreSessionImpl();
-            if (!restored) return null;
-            userId = restored.user_id;
+        // Always try the persisted session first — it round-trips a full user
+        // object via Tauri plugin-store + localStorage and already handles the
+        // Supabase token refresh internally. If it returns a user, we have a
+        // valid logged-in profile no matter what IndexedDB / Supabase auth say.
+        // This is the path that keeps the user logged in across app
+        // close/reopen including offline reloads.
+        let restored: RegisteredPharmacy | null = null;
+        try {
+            restored = await _restoreSessionImpl();
+        } catch (err) {
+            console.warn('[storage] restoreSession failed:', err);
         }
 
-        // 3. Try to fetch fresh profile from network first if online
+        // Figure out the user id we care about. Supabase's own cached session
+        // is checked as a secondary source — useful if restoreSession returns
+        // null but Supabase's auth library still has a fresh session in
+        // memory/localStorage from a prior login on the same device.
+        let userId: string | null = restored?.user_id ?? null;
+        if (!userId) {
+            try {
+                const { data: { session } } = await supabase.auth.getSession();
+                userId = session?.user?.id ?? null;
+            } catch { /* offline / supabase init error — ignore */ }
+        }
+        if (!userId) return null;
+
+        // If we're online, try to refresh the profile from Supabase so the
+        // user sees any cross-device changes (name, roles, etc.).
         if (navigator.onLine) {
             try {
                 const freshProfile = await fetchProfile(userId);
@@ -2230,7 +2241,13 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
             }
         }
 
-        // 4. Fallback to cached profile specifically for this user
+        // Prefer the persisted profile from restoreSession — it's the
+        // authoritative offline copy. (Falling through to IndexedDB used to
+        // happen here but IDB is disabled in this build, so that path returned
+        // null and the user was bounced to the login screen on every offline
+        // reload.) Only hit IDB as a last resort for any future build that
+        // re-enables it.
+        if (restored) return restored;
         const cached = await idb.get(STORES.PROFILES, userId) as RegisteredPharmacy | null;
         return cached || null;
     };

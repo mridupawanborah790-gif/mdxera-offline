@@ -67,7 +67,8 @@ export async function patchMbcCard(
     `UPDATE ${TABLE.MBC_CARDS} SET ${sets}, updated_at = ?, _sync_status = 'pending' WHERE id = ?`,
     [...vals, new Date().toISOString(), id]
   );
-  await SyncQueue.enqueue('UPDATE', TABLE.MBC_CARDS, id, { id, ...patch }, user.organization_id);
+  await SyncQueue.enqueue('UPDATE', TABLE.MBC_CARDS, id, { id, organization_id: user.organization_id, ...patch }, user.organization_id);
+
 }
 
 // ── Card Types ─────────────────────────────────────────────────────────────
@@ -145,3 +146,60 @@ export async function addMbcCardHistory(entry: Record<string, unknown>, user: Re
   await db.upsert(TABLE.MBC_CARD_HISTORY, row);
   await SyncQueue.enqueue('INSERT', TABLE.MBC_CARD_HISTORY, row.id as string, row, user.organization_id);
 }
+
+// ── Card Value History ─────────────────────────────────────────────────────
+
+/**
+ * Fetch all value-history rows for a specific card, most recent first.
+ * Tries SQLite first; falls back to Supabase and caches results locally.
+ */
+export async function fetchMbcCardValueHistory(
+  cardId: string,
+  user: RegisteredPharmacy
+): Promise<Record<string, unknown>[]> {
+  // Try SQLite first (offline-first). Filter by both card_id and organization_id.
+  const rows = await db.select<Record<string, unknown>>(
+    `SELECT * FROM ${TABLE.MBC_CARD_VALUE_HISTORY}
+     WHERE card_id = ? AND (organization_id = ? OR organization_id IS NULL)
+     ORDER BY created_at DESC`,
+    [cardId, user.organization_id]
+  );
+  if (rows.length > 0) return rows;
+
+  // Supabase fallback: organization_id is now a proper column on the server.
+  const { data } = await supabase
+    .from('mbc_card_value_history')
+    .select('*')
+    .eq('organization_id', user.organization_id)
+    .eq('card_id', cardId)
+    .order('created_at', { ascending: false });
+
+  if (data?.length) {
+    await db.bulkUpsert(TABLE.MBC_CARD_VALUE_HISTORY, data.map(serialize));
+    return data;
+  }
+  return [];
+}
+
+
+/**
+ * Write a single value-history entry to SQLite and enqueue it for Supabase push.
+ * Call this from saveAddedCardValue after patching card_value on the card itself.
+ */
+export async function saveMbcCardValueHistory(
+  entry: Record<string, unknown>,
+  user: RegisteredPharmacy
+): Promise<void> {
+  const row = serialize(entry);
+  if (!row.organization_id) row.organization_id = user.organization_id;
+  if (!row.created_at) row.created_at = new Date().toISOString();
+  await db.upsert(TABLE.MBC_CARD_VALUE_HISTORY, row);
+  await SyncQueue.enqueue(
+    'INSERT',
+    TABLE.MBC_CARD_VALUE_HISTORY,
+    row.id as string,
+    row,
+    user.organization_id
+  );
+}
+

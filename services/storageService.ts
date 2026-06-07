@@ -227,6 +227,21 @@ export const hydrateMemoryCacheFromSqlite = async (organizationId: string): Prom
     const memoryCache: Record<string, any[]> = {};
     const memoryCacheOrgScope: Record<string, string> = {};
 
+    // Cross-window synchronization
+    const syncChannel = new BroadcastChannel('mdxera-sync-channel');
+    syncChannel.onmessage = (event) => {
+        if (event.data?.action === 'invalidate' && event.data?.table) {
+            const storeKey = event.data.table.toUpperCase();
+            if (memoryCache[storeKey]) {
+                delete memoryCache[storeKey];
+                delete memoryCacheOrgScope[storeKey];
+                if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('mdxera-cache-invalidated', { detail: { table: event.data.table } }));
+                }
+            }
+        }
+    };
+
     const updateMemoryCacheBulk = (tableName: string, dataArray: any[], organizationId: string) => {
         const storeKey = tableName.toUpperCase();
         if (memoryCacheOrgScope[storeKey] !== organizationId) {
@@ -901,6 +916,17 @@ const normalizeMaterialMasterType = (value: unknown): string | undefined => {
         }, {} as any);
     };
 
+    export const ensureLiveAuth = async (): Promise<void> => {
+        if (!navigator.onLine) return;
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw new Error('Could not read auth session. Please log in again.');
+        if (data.session) return;
+        const refreshed = await supabase.auth.refreshSession();
+        if (refreshed.error || !refreshed.data.session) {
+            throw new Error('Your session has expired. Please log out and log in again to continue.');
+        }
+    };
+
     const isNetworkError = (error: any): boolean => {
         if (!navigator.onLine) return true;
         const msg = error?.message?.toLowerCase() || '';
@@ -1016,18 +1042,20 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
 
         await idb.put(STORES[tableName.toUpperCase() as keyof typeof STORES], dbPayload);
 
-        // OFFLINE PATH: don't try Supabase, enqueue for the SyncEngine to flush later.
+        // ONLINE PATH: don't try Supabase, enqueue for the SyncEngine to flush later.
         if (!navigator.onLine) {
             // Mirror the write into SQLite as 'pending' BEFORE enqueueing so a
             // crash between the two leaves a recoverable row (hydration will
             // pick it up; the worker can replay from _sync_queue).
             await persistLocalRowToSqlite(tableName, dbPayload, 'pending');
             await enqueueForSync(tableName, isUpdate, dbPayload, user.organization_id);
+            syncChannel.postMessage({ action: 'invalidate', table: tableName });
             return dbPayload;
         }
 
         if (navigator.onLine) {
             try {
+                await ensureLiveAuth();
                 const remotePayload = getSupabasePayload(tableName, dbPayload);
                 const snakeData = toSnake(remotePayload);
                 
@@ -1202,6 +1230,7 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
                 // on next boot reflects the server-confirmed state without
                 // having to wait for the next puller cycle.
                 await persistLocalRowToSqlite(tableName, syncedData, 'synced');
+                syncChannel.postMessage({ action: 'invalidate', table: tableName });
 
                 return syncedData;
             } catch (e: any) {
@@ -1213,6 +1242,7 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
                     // flushes doesn't lose the write.
                     await persistLocalRowToSqlite(tableName, dbPayload, 'pending');
                     await enqueueForSync(tableName, isUpdate, dbPayload, user.organization_id);
+                    syncChannel.postMessage({ action: 'invalidate', table: tableName });
                     return dbPayload; // DO NOT throw for network errors, let UI continue
                 }
 
@@ -1305,6 +1335,7 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
             if (orgId && SYNC_QUEUE_TABLES.has(tableName)) {
                 try {
                     await SyncQueue.enqueue('DELETE', tableName, id, { id }, orgId);
+                    syncChannel.postMessage({ action: 'invalidate', table: tableName });
                 } catch (err) {
                     console.warn(`[storage] deleteData(${tableName}) enqueue failed:`, err);
                 }
@@ -1315,12 +1346,15 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
         // ONLINE PATH: try Supabase directly. On network error, fall back to
         // the queue so the user's intent is preserved.
         try {
+            await ensureLiveAuth();
             const { error } = await supabase.from(tableName).delete().eq('id', id);
             if (error) throw error;
+            syncChannel.postMessage({ action: 'invalidate', table: tableName });
         } catch (err) {
             if (isNetworkError(err) && orgId && SYNC_QUEUE_TABLES.has(tableName)) {
                 try {
                     await SyncQueue.enqueue('DELETE', tableName, id, { id }, orgId);
+                    syncChannel.postMessage({ action: 'invalidate', table: tableName });
                 } catch (queueErr) {
                     console.warn(`[storage] deleteData(${tableName}) fallback enqueue failed:`, queueErr);
                 }

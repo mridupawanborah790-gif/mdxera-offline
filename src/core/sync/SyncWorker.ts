@@ -68,6 +68,7 @@ const TABLE_PRIORITY: Record<string, number> = {
   // Cards (depend on card_types)
   mbc_cards:             60,
   mbc_card_history:      61,
+  mbc_card_value_history: 62,
 
   // Adjuncts (depend on transactions)
   mrp_change_log:        70,
@@ -334,7 +335,11 @@ const LOCAL_ONLY_COLUMNS: Record<string, Set<string>> = {
     'medicineMasterConfig',     'medicine_master_config',
     'fiscalYearConfig',         'fiscal_year_config',
   ]),
+  // NOTE: mbc_card_value_history was previously listed here because the
+  // Supabase table lacked an organization_id column. That column has now been
+  // added to the server schema, so organization_id must be included in pushes.
 };
+
 
 function camelToSnake(s: string): string {
   // Leave already-snake_case keys alone. For PascalCase like SyncStatus →

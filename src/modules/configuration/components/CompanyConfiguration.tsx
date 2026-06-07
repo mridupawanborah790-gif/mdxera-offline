@@ -1,8 +1,9 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Card from '@core/components/ui/Card';
 import { supabase } from '@core/db/supabaseClient';
 import { RegisteredPharmacy } from '@core/types';
 import { isOnline } from '@core/sync/networkMonitor';
+import { ensureLiveAuth } from '@core/services/storageService';
 
 const STORAGE_KEY = 'mdxera_company_configuration_v2';
 
@@ -1147,6 +1148,7 @@ const CompanyConfiguration: React.FC<CompanyConfigurationProps> = ({ currentUser
     setError('');
     setSuccess('');
     try {
+      await ensureLiveAuth();
       const organizationId = currentUser.organization_id;
       const [companiesRes, booksRes, glRes, assignmentRes, logsRes, historyRes, bankRes] = await Promise.all([
         supabase.from('company_codes').select('*').eq('organization_id', organizationId).order('created_at', { ascending: true }),
@@ -1319,6 +1321,7 @@ const CompanyConfiguration: React.FC<CompanyConfigurationProps> = ({ currentUser
     }
 
     try {
+      await ensureLiveAuth();
       // Step 1: Upsert Company Codes with temporary non-default flags.
       // This avoids the DB trigger rejecting rows where a default company is persisted
       // before its Set of Books row exists in the same sync run.

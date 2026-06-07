@@ -36,6 +36,7 @@ export const TABLE = {
   MBC_CARD_TYPES: 'mbc_card_types',
   MBC_CARD_TEMPLATES: 'mbc_card_templates',
   MBC_CARD_HISTORY: 'mbc_card_history',
+  MBC_CARD_VALUE_HISTORY: 'mbc_card_value_history',
 
   // Internal sync tables — never pushed to Supabase
   SYNC_QUEUE: '_sync_queue',
@@ -84,4 +85,5 @@ export const SYNCABLE_TABLES: TableName[] = [
   TABLE.MBC_CARD_TYPES,
   TABLE.MBC_CARD_TEMPLATES,
   TABLE.MBC_CARD_HISTORY,
+  TABLE.MBC_CARD_VALUE_HISTORY,
 ];

@@ -24,7 +24,10 @@ const TABLE_META: Record<string, { pk?: string; deltaCol?: string | null }> = {
   // mbc_card_history on production has neither updated_at nor created_at —
   // always full-pull (small table).
   mbc_card_history:    { deltaCol: null },
+  // mbc_card_value_history only has created_at, so use it for delta filtering.
+  mbc_card_value_history: { deltaCol: 'created_at' },
   sales_returns:       { deltaCol: 'created_at' },
+
   purchase_returns:    { deltaCol: 'created_at' },
 };
 
@@ -51,6 +54,17 @@ function isSchemaMissingError(message: string): boolean {
  * on every 30-second sync cycle.
  */
 const _permanentlyMissingTables = new Set<string>();
+
+/**
+ * Tables that exist on Supabase but have NO `organization_id` column.
+ * The `.eq('organization_id', ...)` filter is skipped for these tables;
+ * the full table is pulled instead (they are small by design).
+ * NOTE: mbc_card_value_history was here temporarily; organization_id was added
+ * to that table's Supabase schema and this workaround is no longer needed.
+ */
+const NO_ORG_FILTER_TABLES = new Set<string>([
+  // empty — all current syncable tables have organization_id on the server
+]);
 
 /** Pull changes from Supabase for all syncable tables and apply them to SQLite. */
 export async function pullDeltaFromSupabase(organizationId: string): Promise<void> {
@@ -80,11 +94,16 @@ async function pullTable(
 
   const pk = pkColumn(tableName);
   const delta = deltaColumn(tableName);
+  const skipOrgFilter = NO_ORG_FILTER_TABLES.has(tableName);
   try {
     let query = supabase
       .from(tableName)
-      .select('*')
-      .eq('organization_id', organizationId);
+      .select('*');
+
+    // Only filter by organization_id when the server table has that column.
+    if (!skipOrgFilter) {
+      query = query.eq('organization_id', organizationId) as typeof query;
+    }
 
     if (lastPulledAt !== null && delta) {
       const since = new Date(lastPulledAt).toISOString();

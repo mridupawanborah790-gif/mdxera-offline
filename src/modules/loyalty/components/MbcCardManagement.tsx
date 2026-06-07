@@ -1,11 +1,12 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Card from '@core/components/ui/Card';
-import type { RegisteredPharmacy, MbcCard, MbcCardHistory, MbcCardTemplate, MbcCardType } from '@core/types';
+import type { RegisteredPharmacy, MbcCard, MbcCardHistory, MbcCardTemplate, MbcCardType, MbcCardValueHistory } from '@core/types';
 import {
   fetchMbcCardTypes, saveMbcCardType,
   fetchMbcCardTemplates, saveMbcCardTemplate,
   fetchMbcCards, saveMbcCard, patchMbcCard,
   fetchMbcCardHistory, addMbcCardHistory,
+  fetchMbcCardValueHistory, saveMbcCardValueHistory,
 } from '@modules/loyalty/services/loyaltyService';
 
 export type MbcScreen =
@@ -118,6 +119,18 @@ const formatDateForDisplay = (value?: string | null) => {
   if (!year || !month || !day) return value;
   return `${day}-${month}-${year}`;
 };
+const formatDateTimeForDisplay = (value?: string | null) => {
+  if (!value) return '-';
+  try {
+    return new Date(value).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+  } catch {
+    return value;
+  }
+};
+const formatCurrencyValue = (value?: number | null) => {
+  if (value === undefined || value === null) return '0.00';
+  return Number(value).toFixed(2);
+};
 const getValidityPeriodText = (fromDate: string, toDate: string) => {
   const from = new Date(fromDate);
   const to = new Date(toDate);
@@ -189,6 +202,14 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
   const [templates, setTemplates] = useState<MbcCardTemplate[]>([]);
   const [cards, setCards] = useState<MbcCard[]>([]);
   const [history, setHistory] = useState<MbcCardHistory[]>([]);
+
+  // ── Value history overlay state ──────────────────────────────────────────
+  const [valueHistoryCard, setValueHistoryCard] = useState<MbcCard | null>(null);
+  const [valueHistory, setValueHistory] = useState<MbcCardValueHistory[]>([]);
+  const [loadingValueHistory, setLoadingValueHistory] = useState(false);
+
+  // ── Card list keyboard navigation ref ────────────────────────────────────
+  const cardListRef = useRef<HTMLTableSectionElement>(null);
 
   const [typeForm, setTypeForm] = useState<Partial<MbcCardType>>(EMPTY_TYPE);
   const [templateForm, setTemplateForm] = useState<Partial<MbcCardTemplate>>(EMPTY_TEMPLATE);
@@ -569,6 +590,7 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
     const addedValue = enteredAmount;
     const previousValue = Number(addCardValueForm.currentCardValue || 0);
     const newValue = previousValue + addedValue;
+    const now = new Date(addCardValueForm.valueDate).toISOString();
     setLoading(true);
     try {
       try {
@@ -578,6 +600,21 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
         return;
       }
 
+      // Write to mbc_card_value_history (new in PR #768)
+      await saveMbcCardValueHistory({
+        card_id: addCardValueForm.cardId,
+        card_number: addCardValueForm.cardNumber,
+        customer_name: addCardValueForm.customerName,
+        previous_value: previousValue,
+        added_value: addedValue,
+        new_value: newValue,
+        added_by: currentUser.full_name,
+        remarks: addCardValueForm.narration || '',
+        created_at: now,
+        organization_id: currentUser.organization_id,
+      }, currentUser);
+
+      // Also write to mbc_card_history for the audit timeline
       await addMbcCardHistory({
         organization_id: currentUser.organization_id,
         mbc_card_id: addCardValueForm.cardId,
@@ -586,11 +623,19 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
         new_card_value: newValue,
         remarks: addCardValueForm.narration || '',
         action_by: currentUser.full_name,
-        action_date: new Date(addCardValueForm.valueDate).toISOString(),
+        action_date: now,
       }, currentUser);
 
       closeAddCardValuePopup();
       await Promise.all([fetchCards(), fetchRenewalHistory(), fetchCardTypes(), fetchTemplates()]);
+
+      // If the value history overlay is open for this card, refresh it
+      if (valueHistoryCard?.id === addCardValueForm.cardId) {
+        const freshHistory = await fetchMbcCardValueHistory(addCardValueForm.cardId, currentUser);
+        setValueHistory(freshHistory as unknown as MbcCardValueHistory[]);
+        // Update the displayed card too
+        setValueHistoryCard(prev => prev ? { ...prev, card_value: newValue } : null);
+      }
     } finally {
       setLoading(false);
     }
@@ -599,6 +644,73 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
   const printPreviewCard = cards.find(c => c.id === selectedCardId) || cards[0];
   const printType = printPreviewCard ? cardTypeMap.get(printPreviewCard.card_type_id) : undefined;
   const printTemplate = printPreviewCard ? templateMap.get(printPreviewCard.template_id || '') : undefined;
+
+  // ── Value history overlay helpers ─────────────────────────────────────────
+
+  const openValueHistoryPopup = useCallback(async (card: MbcCard) => {
+    // Show immediately with whatever live card state we have
+    const liveCard = cards.find(c => c.id === card.id) ?? card;
+    setValueHistoryCard(liveCard);
+    setValueHistory([]);
+    setLoadingValueHistory(true);
+    try {
+      const data = await fetchMbcCardValueHistory(card.id, currentUser);
+      setValueHistory(data as unknown as MbcCardValueHistory[]);
+    } catch (err) {
+      console.warn('[MbcCardManagement] fetchMbcCardValueHistory failed:', err);
+    } finally {
+      setLoadingValueHistory(false);
+    }
+  }, [cards, currentUser]);
+
+  const closeValueHistoryPopup = useCallback(() => {
+    setValueHistoryCard(null);
+    setValueHistory([]);
+  }, []);
+
+  const printValueHistory = useCallback(() => {
+    window.print();
+  }, []);
+
+  const exportValueHistoryCSV = useCallback(() => {
+    if (!valueHistoryCard) return;
+    const headers = ['Date', 'Previous Value', 'Added / Deducted', 'New Value', 'Added By', 'Remarks'];
+    const rows = valueHistory.map(h => [
+      formatDateTimeForDisplay(h.created_at),
+      formatCurrencyValue(h.previous_value),
+      formatCurrencyValue(h.added_value),
+      formatCurrencyValue(h.new_value),
+      h.added_by ?? '-',
+      h.remarks ?? '-',
+    ]);
+    const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `card_value_history_${valueHistoryCard.card_number}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [valueHistory, valueHistoryCard]);
+
+  // ── Keyboard navigation for card list ─────────────────────────────────────
+
+  const handleCardListKeyDown = useCallback((e: React.KeyboardEvent<HTMLTableSectionElement>) => {
+    if (!filteredCards.length) return;
+    const currentIdx = filteredCards.findIndex(c => c.id === selectedCardId);
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const nextIdx = Math.min(currentIdx + 1, filteredCards.length - 1);
+      setSelectedCardId(filteredCards[nextIdx].id);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const prevIdx = Math.max(currentIdx - 1, 0);
+      setSelectedCardId(filteredCards[prevIdx].id);
+    } else if (e.key === 'Escape') {
+      setSelectedCardId('');
+    }
+  }, [filteredCards, selectedCardId]);
+
 
   const summary = useMemo(() => {
     const now = new Date();
@@ -911,18 +1023,34 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
                     <th key={h} className="p-2 text-left border-r">{h}</th>
                   ))}
                 </tr></thead>
-                <tbody>
+                <tbody ref={cardListRef} tabIndex={0} onKeyDown={handleCardListKeyDown}
+                  style={{ outline: 'none' }}
+                >
                   {filteredCards.map(card => {
                     const status = getCardStatus(card);
+                    const isSelected = card.id === selectedCardId;
                     return (
-                      <tr key={card.id} className="border-t">
+                      <tr
+                        key={card.id}
+                        className={`border-t cursor-pointer ${isSelected ? 'bg-blue-50 ring-1 ring-primary ring-inset' : 'hover:bg-gray-50'}`}
+                        onClick={() => setSelectedCardId(card.id)}
+                      >
                         <td className="p-2">{card.card_number}</td>
                         <td className="p-2">{card.customer_name}</td>
                         <td className="p-2">{formatDateForDisplay(card.date_of_birth)}</td>
                         <td className="p-2">{[card.address_line_1, card.address_line_2, card.city].filter(Boolean).join(', ')}</td>
                         <td className="p-2">{card.phone_number}</td>
                         <td className="p-2">{cardTypeMap.get(card.card_type_id)?.type_name || '-'}</td>
-                        <td className="p-2">{card.card_value}</td>
+                        <td className="p-2">
+                          {/* Clickable value — opens full-screen value history overlay (PR #768) */}
+                          <button
+                            className="underline text-primary font-bold hover:text-primary/80 transition-colors"
+                            title="View Card Value History"
+                            onClick={e => { e.stopPropagation(); void openValueHistoryPopup(card); }}
+                          >
+                            {formatCurrencyValue(card.card_value)}
+                          </button>
+                        </td>
                         <td className="p-2">{formatDateForDisplay(card.validity_from)}</td>
                         <td className="p-2">{formatDateForDisplay(card.validity_to)}</td>
                         <td className="p-2">{card.validity_period_text}</td>
@@ -930,11 +1058,13 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
                         <td className="p-2">{card.created_by}</td>
                         <td className="p-2">{formatDateForDisplay(card.created_at?.slice(0, 10))}</td>
                         <td className="p-2 whitespace-nowrap">
-                          <button className="px-2 py-1 border mr-1" onClick={() => loadCardForEdit(card)}>Edit</button>
-                          <button className="px-2 py-1 border mr-1" onClick={() => { setSelectedCardId(card.id); onNavigate('mbcCardPrintPreview'); }}>Print</button>
-                          <button className="px-2 py-1 border mr-1" onClick={() => { setSelectedCardId(card.id); onNavigate('mbcCardRenewalHistory'); }}>Renew/Upgrade</button>
-                          <button className="px-2 py-1 border mr-1" onClick={() => openAddCardValuePopup(card)}>Add Card Value</button>
-                          <button className="px-2 py-1 border" onClick={async () => {
+                          <button className="px-2 py-1 border mr-1" onClick={e => { e.stopPropagation(); loadCardForEdit(card); }}>Edit</button>
+                          <button className="px-2 py-1 border mr-1" onClick={e => { e.stopPropagation(); setSelectedCardId(card.id); onNavigate('mbcCardPrintPreview'); }}>Print</button>
+                          <button className="px-2 py-1 border mr-1" onClick={e => { e.stopPropagation(); setSelectedCardId(card.id); onNavigate('mbcCardRenewalHistory'); }}>Renew/Upgrade</button>
+                          <button className="px-2 py-1 border mr-1" onClick={e => { e.stopPropagation(); openAddCardValuePopup(card); }}>Add Card Value</button>
+                          <button className="px-2 py-1 border mr-1" onClick={e => { e.stopPropagation(); void openValueHistoryPopup(card); }}>Value History</button>
+                          <button className="px-2 py-1 border" onClick={async e => {
+                            e.stopPropagation();
                             setLoading(true);
                             try {
                               await patchMbcCard(card.id, { status: 'inactive' }, currentUser);
@@ -1092,6 +1222,120 @@ const MbcCardManagement: React.FC<Props> = ({ currentUser, activeScreen, onNavig
               <button className="px-3 py-2 border border-gray-300 text-xs font-black uppercase" onClick={closeAddCardValuePopup}>Cancel</button>
             </div>
           </Card>
+        </div>
+      )}
+
+      {/* ── Full-screen Card Value History Overlay (PR #768) ────────────── */}
+      {valueHistoryCard && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex flex-col" role="dialog" aria-modal="true" aria-label="Card Value History">
+          {/* Header bar */}
+          <div className="bg-primary text-white px-4 py-2 flex items-center justify-between flex-shrink-0">
+            <div>
+              <span className="text-xs font-black uppercase tracking-widest">Card Value History</span>
+              <span className="ml-3 text-xs font-semibold opacity-80">
+                {valueHistoryCard.card_number} — {valueHistoryCard.customer_name}
+              </span>
+            </div>
+            <div className="flex gap-2">
+              <button
+                className="px-3 py-1 border border-white/40 text-xs font-bold uppercase hover:bg-white/10 transition-colors"
+                onClick={() => openAddCardValuePopup(valueHistoryCard)}
+              >+ Add Value</button>
+              <button
+                className="px-3 py-1 border border-white/40 text-xs font-bold uppercase hover:bg-white/10 transition-colors"
+                onClick={printValueHistory}
+              >Print</button>
+              <button
+                className="px-3 py-1 border border-white/40 text-xs font-bold uppercase hover:bg-white/10 transition-colors"
+                onClick={exportValueHistoryCSV}
+              >Export CSV</button>
+              <button
+                className="px-3 py-1 border border-white/40 text-xs font-bold uppercase hover:bg-white/10 transition-colors"
+                onClick={closeValueHistoryPopup}
+              >✕ Close</button>
+            </div>
+          </div>
+
+          {/* Card summary */}
+          <div className="bg-white border-b px-4 py-3 grid grid-cols-2 md:grid-cols-5 gap-x-6 gap-y-1 text-xs flex-shrink-0">
+            {[
+              ['Card Number', valueHistoryCard.card_number],
+              ['Customer', valueHistoryCard.customer_name],
+              ['Phone', valueHistoryCard.phone_number],
+              ['Card Type', cardTypeMap.get(valueHistoryCard.card_type_id)?.type_name ?? '-'],
+              ['Current Value', `₹ ${formatCurrencyValue(cards.find(c => c.id === valueHistoryCard.id)?.card_value ?? valueHistoryCard.card_value)}`],
+              ['Validity From', formatDateForDisplay(valueHistoryCard.validity_from)],
+              ['Validity To', formatDateForDisplay(valueHistoryCard.validity_to)],
+              ['Status', getCardStatus(valueHistoryCard).toUpperCase()],
+              ['Issued By', valueHistoryCard.created_by ?? '-'],
+              ['Issue Date', formatDateForDisplay(valueHistoryCard.issue_date)],
+            ].map(([label, value]) => (
+              <div key={label as string}>
+                <div className="text-[10px] font-black uppercase text-gray-400">{label}</div>
+                <div className="font-semibold text-gray-800 truncate">{value}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* History table */}
+          <div className="flex-1 overflow-auto bg-gray-50">
+            {loadingValueHistory ? (
+              <div className="flex items-center justify-center h-32 text-xs text-gray-500">Loading history…</div>
+            ) : valueHistory.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-32 text-xs text-gray-400">
+                <div className="mb-1 text-2xl">📋</div>
+                <div>No value history found for this card.</div>
+                <div className="mt-1 text-gray-400">Use "Add Value" to record the first transaction.</div>
+              </div>
+            ) : (
+              <table className="w-full text-xs border-collapse">
+                <thead className="bg-gray-100 sticky top-0">
+                  <tr>
+                    {['#', 'Date & Time', 'Previous Value (₹)', 'Added / Deducted (₹)', 'New Value (₹)', 'Type', 'Added By', 'Remarks'].map(h => (
+                      <th key={h} className="p-2 text-left border-r border-gray-200 font-black uppercase text-[10px]">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {valueHistory.map((h, idx) => {
+                    const isCredit = Number(h.added_value) >= 0;
+                    return (
+                      <tr key={h.id} className={`border-t ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'}`}>
+                        <td className="p-2 text-gray-400">{valueHistory.length - idx}</td>
+                        <td className="p-2 whitespace-nowrap">{formatDateTimeForDisplay(h.created_at)}</td>
+                        <td className="p-2 text-right">{formatCurrencyValue(h.previous_value)}</td>
+                        <td className={`p-2 text-right font-bold ${isCredit ? 'text-green-600' : 'text-red-500'}`}>
+                          {isCredit ? '+' : ''}{formatCurrencyValue(h.added_value)}
+                        </td>
+                        <td className="p-2 text-right font-bold">{formatCurrencyValue(h.new_value)}</td>
+                        <td className={`p-2 font-bold uppercase text-[10px] ${isCredit ? 'text-green-600' : 'text-red-500'}`}>
+                          {isCredit ? 'Credit' : 'Debit'}
+                        </td>
+                        <td className="p-2">{h.added_by ?? '-'}</td>
+                        <td className="p-2 text-gray-600">{h.remarks || '-'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot className="bg-gray-100 sticky bottom-0">
+                  <tr>
+                    <td colSpan={2} className="p-2 font-black uppercase text-[10px]">Total ({valueHistory.length} transactions)</td>
+                    <td className="p-2" />
+                    <td className="p-2 text-right font-black">
+                      {(() => {
+                        const net = valueHistory.reduce((s, h) => s + Number(h.added_value), 0);
+                        return `${net >= 0 ? '+' : ''}${formatCurrencyValue(net)}`;
+                      })()}
+                    </td>
+                    <td className="p-2 text-right font-black">
+                      {formatCurrencyValue(cards.find(c => c.id === valueHistoryCard.id)?.card_value ?? valueHistoryCard.card_value)}
+                    </td>
+                    <td colSpan={3} />
+                  </tr>
+                </tfoot>
+              </table>
+            )}
+          </div>
         </div>
       )}
       </div>

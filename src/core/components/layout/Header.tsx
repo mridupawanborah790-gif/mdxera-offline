@@ -1,6 +1,7 @@
-﻿import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import type { RegisteredPharmacy, NavItem } from '@core/types';
 import { navigation, settingsNavigation } from '@core/utils/constants';
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 
 interface HeaderProps {
   onNewBillClick: () => void;
@@ -100,6 +101,24 @@ const Header: React.FC<HeaderProps> = ({ onNewBillClick, currentUser, onNavigate
     return () => window.removeEventListener('keydown', handleShortcut);
   }, [onReload]);
 
+  const handleNewWindow = useCallback(async () => {
+    try {
+        const timestamp = Date.now();
+        const webview = new WebviewWindow(`window-${timestamp}`, {
+            url: '/',
+            title: `MDXera ERP - Window ${timestamp}`,
+            minWidth: 1024,
+            minHeight: 768,
+        });
+        
+        webview.once('tauri://error', function (e) {
+            console.error('Error creating new window:', e);
+        });
+    } catch (err) {
+        console.error('Failed to create new window:', err);
+    }
+  }, []);
+
   return (
     <div className="flex flex-col border-b border-gray-400 bg-[#e1e1e1] dark:bg-zinc-900 select-none print:hidden">
       {/* Top Bar - Restored to non-scrollable */}
@@ -158,6 +177,19 @@ const Header: React.FC<HeaderProps> = ({ onNewBillClick, currentUser, onNavigate
                     <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
                 ) : <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>}
                 <span className="whitespace-nowrap font-bold"><u>R</u>eload</span>
+            </button>
+            <button
+                onClick={handleNewWindow}
+                className="h-full px-3 sm:px-4 hover:bg-white/20 transition-colors flex items-center border-r border-white/10 gap-2"
+                title="Open a new independent window"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                    <line x1="9" y1="3" x2="9" y2="21"/>
+                    <path d="M13 8h4"/>
+                    <path d="M15 6v4"/>
+                </svg>
+                <span className="whitespace-nowrap font-bold text-[#4ade80]">New Window</span>
             </button>
             {onResyncAll && (
                 <button

@@ -71,6 +71,7 @@ const BACKGROUND_TABLES: string[] = [
   TABLE.EWAYBILLS,
   TABLE.MBC_CARDS,
   TABLE.MBC_CARD_HISTORY,
+  TABLE.MBC_CARD_VALUE_HISTORY,
   TABLE.PHYSICAL_INVENTORY,
   TABLE.MRP_CHANGE_LOG,
 ];
@@ -259,6 +260,8 @@ async function refreshSnapshot(activePhase: SyncPhase | 'idle' | 'done', current
 const TABLE_FETCH_META: Record<string, { orderCol?: string | null }> = {
   // Server has neither updated_at nor created_at — pull unordered (small table).
   mbc_card_history:    { orderCol: null },
+  // mbc_card_value_history has created_at — order paginated pulls by it.
+  mbc_card_value_history: { orderCol: 'created_at' },
   // These have created_at but no updated_at (on most projects).
   delivery_challans:   { orderCol: 'created_at' },
   sales_challans:      { orderCol: 'created_at' },
@@ -276,6 +279,18 @@ const orderColumn = (table: string): string | null => {
 /** Tables we confirmed don't exist on the server — skip without retries. */
 const _missingOnServer = new Set<string>();
 
+/**
+ * Tables that exist on Supabase but have NO `organization_id` column.
+ * Their rows are scoped by FK (e.g. card_id → mbc_cards.organization_id).
+ * We skip the `.eq('organization_id', orgId)` filter for these tables when
+ * fetching from Supabase — the full table is small enough to pull entirely.
+ * NOTE: mbc_card_value_history was here temporarily; organization_id was added
+ * to that table's Supabase schema and this workaround is no longer needed.
+ */
+const NO_ORG_FILTER_TABLES = new Set<string>([
+  // empty — all current syncable tables have organization_id on the server
+]);
+
 function isSchemaMissingError(message: string): boolean {
   const m = (message || '').toLowerCase();
   return (
@@ -290,11 +305,17 @@ async function fetchTotalCount(tableName: string, orgId: string): Promise<number
   // Some Supabase projects 400 on `select('id', { count: 'exact', head: true })`
   // for tables that have schema quirks (delivery_challans etc.). Try a series
   // of fallbacks instead of hard-failing the whole sync for the table.
-  const attempts: Array<() => ReturnType<typeof supabase.from>['select']> = [
-    () => supabase.from(tableName).select('*', { count: 'exact', head: true }).eq('organization_id', orgId) as any,
-    () => supabase.from(tableName).select('organization_id', { count: 'exact', head: true }).eq('organization_id', orgId) as any,
-    () => supabase.from(tableName).select('*', { count: 'estimated', head: true }).eq('organization_id', orgId) as any,
-  ];
+  const noOrg = NO_ORG_FILTER_TABLES.has(tableName);
+  const attempts: Array<() => ReturnType<typeof supabase.from>['select']> = noOrg
+    ? [
+        () => supabase.from(tableName).select('*', { count: 'exact',     head: true }) as any,
+        () => supabase.from(tableName).select('*', { count: 'estimated', head: true }) as any,
+      ]
+    : [
+        () => supabase.from(tableName).select('*',               { count: 'exact',     head: true }).eq('organization_id', orgId) as any,
+        () => supabase.from(tableName).select('organization_id', { count: 'exact',     head: true }).eq('organization_id', orgId) as any,
+        () => supabase.from(tableName).select('*',               { count: 'estimated', head: true }).eq('organization_id', orgId) as any,
+      ];
 
   let lastError = '';
   for (const make of attempts) {
@@ -322,8 +343,13 @@ async function fetchPage(
 ): Promise<Record<string, unknown>[]> {
   let query = supabase
     .from(tableName)
-    .select('*')
-    .eq('organization_id', orgId);
+    .select('*');
+
+  // Tables without an organization_id column are pulled in full (they are
+  // small and scoped by FK to a card that already belongs to this org).
+  if (!NO_ORG_FILTER_TABLES.has(tableName)) {
+    query = query.eq('organization_id', orgId) as typeof query;
+  }
 
   const orderCol = orderColumn(tableName);
   if (orderCol) {

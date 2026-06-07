@@ -40,6 +40,7 @@ import {
 import { auditSchemas, snapshotSchemaAudit } from '@core/sync/schemaAudit';
 import { warmupAssets } from '@core/utils/assetCache';
 import type { RegisteredPharmacy } from '@core/types';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
 // Brand assets that are always needed offline — cached on every online boot.
 const STATIC_BRAND_ASSETS = [
@@ -214,6 +215,15 @@ export const SyncBootstrap: React.FC<Props> = ({ currentUser }) => {
 
     (async () => {
       try {
+        const isMainWindow = getCurrentWindow().label === 'main';
+        
+        if (!isMainWindow) {
+            console.info('[SyncBootstrap] Child window detected; skipping sync engines and hydrating only.');
+            setPhase('done');
+            hydrateMemoryCacheFromSqlite(currentUser.organization_id);
+            return;
+        }
+
         console.info('[SyncBootstrap] starting for org', currentUser.organization_id, 'online=', isOnline());
 
         // Voucher range warmup (non-blocking, network only).

@@ -32,7 +32,7 @@ import { useAuthStore } from '@core/auth/authStore';
 import InitialSyncModal from '@core/components/feedback/InitialSyncModal';
 import { hydrateMemoryCacheFromSqlite } from '@core/services/storageService';
 import { db } from '@core/db/client';
-import { TABLE } from '@core/db/schema';
+import { TABLE, SYNCABLE_TABLES } from '@core/db/schema';
 import {
   resetSchemaDriftCache,
   snapshotSchemaDrift,
@@ -183,6 +183,21 @@ export const SyncBootstrap: React.FC<Props> = ({ currentUser }) => {
           `DELETE FROM ${TABLE.SYNC_META} WHERE organization_id = ?`,
           [currentUser.organization_id]
         );
+        
+        // Wipe all successfully synced local records so InitialSync re-downloads
+        // them completely fresh, removing any "ghost" records that were deleted
+        // on the server. We safely keep rows with _sync_status = 'pending' or 'failed'
+        // so offline work isn't lost.
+        for (const tableName of SYNCABLE_TABLES) {
+          try {
+            await db.execute(
+              `DELETE FROM ${tableName} WHERE organization_id = ? AND _sync_status NOT IN ('pending', 'failed')`,
+              [currentUser.organization_id]
+            );
+          } catch (delErr) {
+            console.warn(`[SyncBootstrap] Failed to clear table ${tableName}:`, delErr);
+          }
+        }
       } catch (err) {
         console.warn('[SyncBootstrap] Failed to clear sync state:', err);
       }

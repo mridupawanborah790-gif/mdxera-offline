@@ -1719,6 +1719,7 @@ const App: React.FC = () => {
                             // Batch-specific pricing remains untouched
                             packType: updatedPack,
                             unitsPerPack: inferredUnitsPerPack,
+                            is_active: updatedMedicine.is_active,
                         }, currentUser, true)
                     )
                 );
@@ -1738,6 +1739,7 @@ const App: React.FC = () => {
                             gstPercent: Number(updatedMedicine.gstRate ?? 0),
                             packType: updatedPack,
                             unitsPerPack: inferredUnitsPerPack,
+                            is_active: updatedMedicine.is_active,
                         }
                         : item
                 ));

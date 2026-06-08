@@ -1,4 +1,4 @@
-﻿
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Modal from '@core/components/ui/Modal';
 import AddMedicineModal from '@modules/inventory/components/AddMedicineModal';
@@ -267,16 +267,6 @@ const LinkToMasterModal: React.FC<LinkToMasterModalProps> = ({
     const closeBlockedMessage = 'Please map or create all remaining items before closing.';
     const selectSkuWarningMessage = 'Select a SKU or create a new material first.';
 
-    const handleCloseAttempt = () => {
-        if (isComplete || reconciledItems.length === 0) {
-            onClose();
-            return;
-        }
-
-        setCloseWarning(closeBlockedMessage);
-        setStatusToast(closeBlockedMessage);
-    };
-
     const handleLeftListKeyDown = (e: React.KeyboardEvent) => {
         if (isAddMedicineSubModalOpen) return;
         if (e.key === 'ArrowDown') {
@@ -315,7 +305,7 @@ const LinkToMasterModal: React.FC<LinkToMasterModalProps> = ({
             }
         } else if (e.key === 'Escape') {
             e.preventDefault();
-            handleCloseAttempt();
+            onClose();
         }
     };
 
@@ -421,7 +411,7 @@ const LinkToMasterModal: React.FC<LinkToMasterModalProps> = ({
 
     return (
         <>
-            <Modal isOpen={isOpen} onClose={handleCloseAttempt} onCloseBlocked={handleCloseAttempt} disableClose={!isComplete && reconciledItems.length > 0} title="Scanned Bill Reconciliation Worksheet" widthClass="max-w-[95vw]" heightClass="h-[90vh]">
+            <Modal isOpen={isOpen} onClose={onClose} title="Scanned Bill Reconciliation Worksheet" widthClass="max-w-[95vw]" heightClass="h-[90vh]">
                 <div className="flex flex-col h-full bg-slate-100 dark:bg-zinc-950 overflow-hidden">
                     <div className="bg-primary text-white p-3 flex justify-between items-center flex-shrink-0 shadow-lg z-20">
                         <div className="flex items-center gap-4">

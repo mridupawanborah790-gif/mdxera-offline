@@ -1,4 +1,4 @@
-﻿
+
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import Modal from '@core/components/ui/Modal';
 import ConfirmModal from '@core/components/ui/ConfirmModal';
@@ -281,7 +281,7 @@ const AddMedicineModal: React.FC<AddMedicineModalProps> = ({ isOpen, onClose, on
                                     <input 
                                         type="checkbox" 
                                         id="prescReq" 
-                                        checked={formState.isPrescriptionRequired} 
+                                        checked={!!formState.isPrescriptionRequired} 
                                         onChange={e => setFormState(p => ({ ...p, isPrescriptionRequired: e.target.checked }))} 
                                         className="w-4 h-4 text-primary" 
                                     />
@@ -292,7 +292,7 @@ const AddMedicineModal: React.FC<AddMedicineModalProps> = ({ isOpen, onClose, on
                                         type="checkbox" 
                                         id="is_active" 
                                         // Fixed: isActive -> is_active
-                                        checked={formState.is_active} 
+                                        checked={!!formState.is_active} 
                                         onChange={e => setFormState(p => ({ ...p, is_active: e.target.checked }))} 
                                         className="w-4 h-4 text-primary" 
                                     />

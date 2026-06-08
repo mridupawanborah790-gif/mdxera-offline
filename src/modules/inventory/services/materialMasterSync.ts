@@ -26,6 +26,11 @@ async function ensureLiveAuth(): Promise<void> {
   if (error) throw new Error('Could not read auth session. Please log in again.');
   if (data.session) return;
   const refreshed = await supabase.auth.refreshSession();
+
+  if (refreshed.error && refreshed.error.message.includes('LockManager lock')) {
+    throw refreshed.error; // Throw actual transient error so caller can handle it gracefully
+  }
+
   if (refreshed.error || !refreshed.data.session) {
     throw new Error('Your session has expired. Please log out and log in again to continue.');
   }

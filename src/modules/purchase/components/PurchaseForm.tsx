@@ -23,7 +23,7 @@ import ProductInsightsPanel from '@modules/inventory/components/ProductInsightsP
 import { generateNewInvoiceId } from '@core/utils/invoice';
 import { parseNetworkAndApiError } from '@core/utils/error';
 import { prepareCapturedImageForAiExtraction, prepareFilesForAiExtraction } from '@core/utils/aiImagePrep';
-
+import { getInventoryPolicy, getResolvedMedicinePolicy } from '@core/utils/materialType';
 const UploadIcon = (props: React.SVGProps<SVGSVGElement>) => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>;
 const CameraIcon = (props: React.SVGProps<SVGSVGElement>) => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" /><circle cx="12" cy="13" r="4" /></svg>;
 const SmartphoneIcon = (props: React.SVGProps<SVGSVGElement>) => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><rect x="5" y="2" width="14" height="20" rx="2" ry="2" /><line x1="12" ry="18" x2="12.01" y2="18" /></svg>;
@@ -1039,6 +1039,9 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
 
         // 1. First check the inventory
         inventory.forEach(i => {
+            const policy = getInventoryPolicy(i, medicines);
+            if (!policy.purchaseEnabled) return;
+
             const name = i.name.toLowerCase();
             const brand = (i.brand || '').toLowerCase();
             
@@ -1076,6 +1079,9 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
 
         // 2. Then check the material master (medicines)
         medicines.forEach(m => {
+            const medPolicy = getResolvedMedicinePolicy(m);
+            if (!medPolicy.purchaseEnabled) return;
+
             const name = m.name.toLowerCase();
             const materialCode = (m.materialCode || '').toLowerCase();
             const barcode = (m.barcode || '').toLowerCase();

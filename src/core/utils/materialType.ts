@@ -1,4 +1,4 @@
-﻿import type { InventoryItem, Medicine } from '@core/types';
+import type { InventoryItem, Medicine } from '@core/types';
 
 export type MaterialMasterType = NonNullable<Medicine['materialMasterType']>;
 
@@ -63,14 +63,16 @@ export const getMaterialTypeRule = (type?: Medicine['materialMasterType']) => {
 export const getResolvedMedicinePolicy = (medicine?: Partial<Medicine> | null) => {
   const type = (medicine?.materialMasterType || DEFAULT_TYPE) as MaterialMasterType;
   const base = getMaterialTypeRule(type);
+  const isActive = medicine?.is_active === undefined ? true : !!medicine?.is_active;
+
   return {
     type,
     label: base.label,
     inventorised: medicine?.isInventorised ?? base.inventorised,
-    salesEnabled: medicine?.isSalesEnabled ?? base.salesEnabled,
-    purchaseEnabled: medicine?.isPurchaseEnabled ?? base.purchaseEnabled,
-    productionEnabled: medicine?.isProductionEnabled ?? base.productionEnabled,
-    internalIssueEnabled: medicine?.isInternalIssueEnabled ?? base.internalIssueEnabled,
+    salesEnabled: (medicine?.isSalesEnabled ?? base.salesEnabled) && isActive,
+    purchaseEnabled: (medicine?.isPurchaseEnabled ?? base.purchaseEnabled) && isActive,
+    productionEnabled: (medicine?.isProductionEnabled ?? base.productionEnabled) && isActive,
+    internalIssueEnabled: (medicine?.isInternalIssueEnabled ?? base.internalIssueEnabled) && isActive,
   };
 };
 

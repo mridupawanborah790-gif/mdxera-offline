@@ -922,6 +922,11 @@ const normalizeMaterialMasterType = (value: unknown): string | undefined => {
         if (error) throw new Error('Could not read auth session. Please log in again.');
         if (data.session) return;
         const refreshed = await supabase.auth.refreshSession();
+        
+        if (refreshed.error && refreshed.error.message.includes('LockManager lock')) {
+            throw refreshed.error; // Throw actual transient error so caller can enqueue offline
+        }
+        
         if (refreshed.error || !refreshed.data.session) {
             throw new Error('Your session has expired. Please log out and log in again to continue.');
         }
@@ -935,8 +940,12 @@ const normalizeMaterialMasterType = (value: unknown): string | undefined => {
             msg.includes('network') ||
             msg.includes('timeout') ||
             msg.includes('failed to connect') ||
+            msg.includes('session has expired') ||
+            msg.includes('jwt') ||
             error?.code === 'PGRST301' ||
             error?.status === 0 ||
+            error?.status === 401 ||
+            error?.status === 403 ||
             error?.status === 502 ||
             error?.status === 503 ||
             error?.status === 504

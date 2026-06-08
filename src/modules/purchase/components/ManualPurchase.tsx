@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Card from '@core/components/ui/Card';
 import AddMedicineModal from '@modules/inventory/components/AddMedicineModal';
 import { AppConfigurations, InventoryItem, Medicine, Purchase, PurchaseItem, RegisteredPharmacy, Supplier } from '@core/types';
@@ -97,6 +97,7 @@ const ManualPurchase = React.forwardRef<any, ManualPurchaseProps>(({
     const term = searchText.trim();
     if (!term) return [] as InventoryItem[];
     return inventory
+      .filter((item) => item.is_active !== false && String(item.is_active) !== '0')
       .filter((item) => fuzzyMatch(item.name, term) || fuzzyMatch(item.code || '', term) || fuzzyMatch(item.barcode || '', term))
       .slice(0, 12);
   }, [inventory, searchText]);

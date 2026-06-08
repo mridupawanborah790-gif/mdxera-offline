@@ -1,4 +1,4 @@
-﻿import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import Modal from '@core/components/ui/Modal';
 import type { InventoryItem, Medicine } from '@core/types';
 import { getResolvedMedicinePolicy, MATERIAL_TYPE_RULES, type MaterialMasterType } from '@core/utils/materialType';
@@ -68,8 +68,16 @@ const EditMedicineModal: React.FC<EditMedicineModalProps> = ({ isOpen, onClose, 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (formState && validate()) {
-            await onSave(formState);
-            onClose();
+            try {
+                await onSave(formState);
+                onClose();
+            } catch (err: any) {
+                console.error('[EditMedicineModal] onSave failed:', err);
+                // If the error isn't a fatal "session expired" error, we still want to keep the modal open.
+                // It was likely enqueued offline and threw an unhandled lock timeout before we fixed ensureLiveAuth,
+                // or some other validation error occurred.
+                alert(err.message || 'Failed to save medicine');
+            }
         }
     };
     
@@ -211,11 +219,11 @@ const EditMedicineModal: React.FC<EditMedicineModalProps> = ({ isOpen, onClose, 
 
                     <div className="pt-4 border-t border-gray-100 flex gap-4">
                         <div className="flex items-center gap-2 bg-blue-50 p-3 border border-blue-100 flex-1">
-                            <input type="checkbox" id="prescReqEdit" checked={formState.isPrescriptionRequired} onChange={e => setFormState(p => p ? ({ ...p, isPrescriptionRequired: e.target.checked }) : null)} className="w-4 h-4 text-primary" />
+                            <input type="checkbox" id="prescReqEdit" checked={!!formState.isPrescriptionRequired} onChange={e => setFormState(p => p ? ({ ...p, isPrescriptionRequired: e.target.checked }) : null)} className="w-4 h-4 text-primary" />
                             <label htmlFor="prescReqEdit" className="text-xs font-bold text-blue-900 uppercase">Prescription Required</label>
                         </div>
                         <div className="flex items-center gap-2 bg-gray-50 p-3 border border-gray-100 flex-1">
-                            <input type="checkbox" id="isActiveEdit" checked={formState.is_active} onChange={e => setFormState(p => p ? ({ ...p, is_active: e.target.checked }) : null)} className="w-4 h-4 text-primary" />
+                            <input type="checkbox" id="isActiveEdit" checked={!!formState.is_active} onChange={e => setFormState(p => p ? ({ ...p, is_active: e.target.checked }) : null)} className="w-4 h-4 text-primary" />
                             <label htmlFor="isActiveEdit" className="text-xs font-bold text-gray-700 uppercase">Active Record</label>
                         </div>
                     </div>

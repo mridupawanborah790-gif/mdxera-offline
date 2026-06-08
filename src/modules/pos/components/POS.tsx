@@ -25,6 +25,7 @@ import { calculateBillingTotals, resolveBillingSettings, calculateLineNetAmount,
 import { extractPackMultiplier, isLiquidOrWeightPack, resolveUnitsPerStrip } from '@core/utils/pack';
 import { shouldHandleScreenShortcut } from '@core/utils/screenShortcuts';
 import { evaluateCustomerCredit } from '@core/utils/creditControl';
+import { getInventoryPolicy, getResolvedMedicinePolicy } from '@core/utils/materialType';
 
 interface POSProps {
     inventory: InventoryItem[];
@@ -1302,7 +1303,7 @@ const POS = forwardRef<any, POSProps>(({
                     e.preventDefault();
                     if (cartItems.length > 0) {
                         const last = cartItems[cartItems.length - 1];
-                        const batches = inventory.filter(inv => inv.name === last.name).sort((a, b) => parseExpiryForSort(String(a.expiry || '')) - parseExpiryForSort(String(b.expiry || '')));
+                        const batches = inventory.filter(inv => inv.name === last.name && getInventoryPolicy(inv, medicines).salesEnabled).sort((a, b) => parseExpiryForSort(String(a.expiry || '')) - parseExpiryForSort(String(b.expiry || '')));
                         if (batches.length > 0) triggerBatchSelection({ item: batches[0], batches });
                     }
                     return;
@@ -1351,7 +1352,11 @@ const POS = forwardRef<any, POSProps>(({
             if (result.items && result.items.length > 0) {
                 const newBillItems: BillItem[] = [];
                 for (const aiItem of result.items) {
-                    const match = inventory.find(inv => fuzzyMatch(inv.name, aiItem.name));
+                    const match = inventory.find(inv => {
+                        if (!fuzzyMatch(inv.name, aiItem.name)) return false;
+                        const invPolicy = getInventoryPolicy(inv, medicines);
+                        return invPolicy.salesEnabled;
+                    });
                     if (match) {
                         const unitsPerPack = match.unitsPerPack || 1;
                         const qty = Math.floor((aiItem.quantity || 0) / unitsPerPack);
@@ -1442,6 +1447,9 @@ const POS = forwardRef<any, POSProps>(({
 
         // 1. First check the inventory
         inventory.forEach(i => {
+            const policy = getInventoryPolicy(i, medicines);
+            if (!policy.salesEnabled) return;
+
             const name = i.name.toLowerCase();
             const brand = (i.brand || '').toLowerCase();
             
@@ -1480,6 +1488,9 @@ const POS = forwardRef<any, POSProps>(({
 
         // 2. Then check the material master (medicines)
         medicines.forEach(m => {
+            const medPolicy = getResolvedMedicinePolicy(m);
+            if (!medPolicy.salesEnabled) return;
+
             const name = m.name.toLowerCase();
             const materialCode = (m.materialCode || '').toLowerCase();
             const barcode = (m.barcode || '').toLowerCase();
@@ -1794,6 +1805,12 @@ const POS = forwardRef<any, POSProps>(({
     };
 
     const addSelectedBatchToGrid = (batch: InventoryItem) => {
+        const batchPolicy = getInventoryPolicy(batch, medicines);
+        if (!batchPolicy.salesEnabled) {
+            addNotification(`Item ${batch.name} is inactive or not enabled for sales.`, 'error');
+            return;
+        }
+
         if (checkIsExpired(batch.expiry ? String(batch.expiry) : '')) {
             addNotification(`Item ${batch.name} (Batch: ${batch.batch}) is expired and cannot be sold.`, 'error');
             return;

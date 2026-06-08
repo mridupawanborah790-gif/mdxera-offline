@@ -801,6 +801,15 @@ const App: React.FC = () => {
                     const restored = await storage.getCurrentUser();
                     if (restored) {
                         console.warn('[auth] SIGNED_OUT ignored — local persisted session is still valid.');
+                        // Attempt to silently refresh the Supabase session so
+                        // subsequent API calls don't fail with 401. Non-blocking:
+                        // if it fails, the user stays logged in locally and
+                        // writes get queued for offline sync.
+                        supabase.auth.refreshSession().then(({ data }) => {
+                            if (data.session) {
+                                console.info('[auth] Supabase session silently restored after transient SIGNED_OUT.');
+                            }
+                        }).catch(() => { /* offline or truly expired — ignored, local session keeps user in */ });
                         return;
                     }
                 } catch (err) {

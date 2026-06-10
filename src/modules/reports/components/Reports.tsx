@@ -83,7 +83,7 @@ const REPORT_LIST: ReportDefinition[] = [
   { id: 'dayBook', name: 'Day Book', group: 'Accounting Reports' },
   { id: 'outstandingReceivables', name: 'Outstanding Receivables', group: 'Accounting Reports' },
   { id: 'outstandingPayables', name: 'Outstanding Payables', group: 'Accounting Reports' },
-  { id: 'customerPartyWiseFullStatement', name: 'Customer Party-wise Full Statement', group: 'Accounting Reports' },
+  { id: 'customerPartyWiseFullStatement', name: 'Customer Party-wise Payment Statement', group: 'Accounting Reports' },
   { id: 'supplierPartyWiseFullStatement', name: 'Supplier Party-wise Full Statement', group: 'Accounting Reports' },
 ];
 
@@ -957,11 +957,90 @@ const Reports: React.FC<ReportsProps> = ({
           return { 'Supplier': p.supplier, 'Bill No': p.invoiceNumber, 'Bill Date': formatReportDate(p.date), 'Bill Amount': round2(billAmount), 'Paid Amount': round2(paidAmount), 'Balance Outstanding': round2(Math.max(billAmount - paidAmount, 0)), 'Ageing': Math.max(0, Math.ceil((new Date().getTime() - new Date(p.date).getTime()) / (1000 * 60 * 60 * 24))) };
         }).filter(r => r['Balance Outstanding'] > 0);
         break;
-      case 'customerPartyWiseFullStatement':
+      case 'customerPartyWiseFullStatement': {
+        const customer = customers.find(c => c.id === selectedPartyId);
+        const customerName = customer?.name || 'Selected Customer';
+        title = `${title} - ${customerName}`;
+        reportHeaders = ['Invoice Number', 'Invoice Date', 'Opening Outstanding', 'Invoice Amount', 'Payment Received', 'Balance Outstanding', 'Status'];
+
+        const normalizedCustomerName = String(customerName || '').trim().toLowerCase();
+        const customerLedger = Array.isArray(customer?.ledger) ? customer.ledger : [];
+        const adjustmentCategories = new Set([
+          'invoice_payment_adjustment',
+          'down_payment_adjustment',
+          'invoice_payment_adjustment_reversal',
+          'down_payment_adjustment_reversal',
+        ]);
+        const paymentReceivedModes = new Set(['cash', 'card', 'upi', 'bank']);
+
+        const customerInvoices = transactions
+          .filter(tx => tx && tx.status !== 'draft' && tx.status !== 'cancelled')
+          .filter(tx => isDateWithinRange(tx.date, startDate, endDate))
+          .filter(tx => {
+            const txCustomerName = String(tx.customerName || '').trim().toLowerCase();
+            const txCustomerId = String(tx.customerId || '').trim();
+            return txCustomerName === normalizedCustomerName || (selectedPartyId && txCustomerId === selectedPartyId);
+          })
+          .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+        const invoiceIdByNumber = new Map(
+          customerInvoices
+            .filter(tx => String(tx.invoiceNumber || '').trim() !== '')
+            .map(tx => [String(tx.invoiceNumber || '').trim().toLowerCase(), tx.id])
+        );
+        const invoiceAdjustments = new Map<string, { previous: number; current: number }>();
+
+        customerLedger.forEach((entry: any) => {
+          if (!entry || entry.type !== 'payment' || entry.status === 'cancelled') return;
+          const entryCategory = String(entry.entryCategory || '');
+          if (!adjustmentCategories.has(entryCategory)) return;
+
+          const invoiceId = String(
+            entry.referenceInvoiceId
+            || invoiceIdByNumber.get(String(entry.referenceInvoiceNumber || '').trim().toLowerCase())
+            || ''
+          );
+          if (!invoiceId) return;
+
+          const multiplier = entryCategory.endsWith('_reversal') ? -1 : 1;
+          const adjustedAmount = round2(Number(entry.adjustedAmount || 0) * multiplier);
+          const bucket = invoiceAdjustments.get(invoiceId) || { previous: 0, current: 0 };
+          const entryDate = String(entry.date || '');
+          if (entryDate && new Date(entryDate) < new Date(startDate)) {
+            bucket.previous = round2(bucket.previous + adjustedAmount);
+          } else if (entryDate && isDateWithinRange(entryDate, startDate, endDate)) {
+            bucket.current = round2(bucket.current + adjustedAmount);
+          }
+          invoiceAdjustments.set(invoiceId, bucket);
+        });
+
+        rows = customerInvoices.map((tx: any) => {
+          const invoiceAmount = round2(Number(tx.total || 0));
+          const invoiceNo = tx.invoiceNumber || tx.id;
+          const adjustmentTotals = invoiceAdjustments.get(tx.id) || { previous: 0, current: 0 };
+          const isDirectReceipt = paymentReceivedModes.has(String(tx.paymentMode || '').trim().toLowerCase());
+          const directReceipt = isDirectReceipt ? round2(Number(tx.amountReceived || tx.total || 0)) : round2(Number(tx.amountReceived || 0));
+          const directReceiptInPeriod = isDateWithinRange(tx.date, startDate, endDate) ? directReceipt : 0;
+          const openingOutstanding = round2(Math.max(invoiceAmount - Number(adjustmentTotals.previous || 0), 0));
+          const paymentReceived = round2(Math.max(Number(adjustmentTotals.current || 0) + directReceiptInPeriod, 0));
+          const balanceOutstanding = round2(Math.max(openingOutstanding - paymentReceived, 0));
+
+          return {
+            'Invoice Number': invoiceNo,
+            'Invoice Date': new Date(tx.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
+            'Opening Outstanding': openingOutstanding,
+            'Invoice Amount': invoiceAmount,
+            'Payment Received': paymentReceived,
+            'Balance Outstanding': balanceOutstanding,
+            'Status': balanceOutstanding <= 0 ? 'Closed' : 'Pending',
+          };
+        });
+        break;
+      }
       case 'supplierPartyWiseFullStatement':
       case 'accountLedgerCustomer':
       case 'accountLedgerSupplier': {
-        const isCustomer = reportId === 'customerPartyWiseFullStatement' || reportId === 'accountLedgerCustomer';
+        const isCustomer = reportId === 'accountLedgerCustomer';
         const party = isCustomer ? customers.find(c => c.id === selectedPartyId) : distributors.find(d => d.id === selectedPartyId);
         const partyName = party?.name || 'Selected Party';
         title = `${title} - ${partyName}`;
@@ -1359,10 +1438,31 @@ const Reports: React.FC<ReportsProps> = ({
     return row;
   }, [activeReportId, filteredData]);
 
+  const customerPaymentStatementSummary = useMemo(() => {
+    if (activeReportId !== 'customerPartyWiseFullStatement') return null;
+
+    return {
+      totalInvoiceAmount: round2(filteredData.reduce((sum, row) => sum + Number(row['Invoice Amount'] || 0), 0)),
+      totalPaymentReceived: round2(filteredData.reduce((sum, row) => sum + Number(row['Payment Received'] || 0), 0)),
+      totalOutstandingBalance: round2(filteredData.reduce((sum, row) => sum + Number(row['Balance Outstanding'] || 0), 0)),
+    };
+  }, [activeReportId, filteredData]);
+
+  const customerPaymentStatementSummaryRows = useMemo(() => {
+    if (!customerPaymentStatementSummary) return [];
+
+    return [
+      { 'Invoice Number': 'Total Invoice Amount', 'Invoice Date': '-', 'Opening Outstanding': '', 'Invoice Amount': customerPaymentStatementSummary.totalInvoiceAmount, 'Payment Received': '', 'Balance Outstanding': '', 'Status': 'Summary' },
+      { 'Invoice Number': 'Total Payment Received', 'Invoice Date': '-', 'Opening Outstanding': '', 'Invoice Amount': '', 'Payment Received': customerPaymentStatementSummary.totalPaymentReceived, 'Balance Outstanding': '', 'Status': 'Summary' },
+      { 'Invoice Number': 'Total Outstanding', 'Invoice Date': '-', 'Opening Outstanding': '', 'Invoice Amount': '', 'Payment Received': '', 'Balance Outstanding': customerPaymentStatementSummary.totalOutstandingBalance, 'Status': 'Summary' },
+    ];
+  }, [customerPaymentStatementSummary]);
+
   const reportDataWithTotalRow = useMemo(() => {
-    if (activeReportId !== 'stockMovementSummary' || !stockMovementTotalRow) return filteredData;
-    return [...filteredData, stockMovementTotalRow];
-  }, [activeReportId, filteredData, stockMovementTotalRow]);
+    if (activeReportId === 'stockMovementSummary' && stockMovementTotalRow) return [...filteredData, stockMovementTotalRow];
+    if (activeReportId === 'customerPartyWiseFullStatement') return [...filteredData, ...customerPaymentStatementSummaryRows];
+    return filteredData;
+  }, [activeReportId, filteredData, stockMovementTotalRow, customerPaymentStatementSummaryRows]);
 
   // Reset to page 1 when the underlying data, sort, or filters change.
   useEffect(() => { setCurrentReportPage(1); }, [activeReportId, filteredData.length, reportPageSize]);
@@ -1652,6 +1752,17 @@ const Reports: React.FC<ReportsProps> = ({
                     </tr>
                   </tfoot>
                 )}
+                {activeReportId === 'customerPartyWiseFullStatement' && customerPaymentStatementSummaryRows.length > 0 && (
+                  <tfoot>
+                    {customerPaymentStatementSummaryRows.map((summaryRow: any, summaryIdx) => (
+                      <tr key={`customer-payment-summary-${summaryIdx}`} className="bg-gray-200 font-bold">
+                        {visibleColumns.map(col => (
+                          <td key={`customer-payment-summary-${summaryIdx}-${col}`} className={`px-2 py-1 border-t border-r whitespace-nowrap ${typeof summaryRow[col] === 'number' ? 'text-right' : 'text-left'}`}>{String(summaryRow[col] ?? '-')}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tfoot>
+                )}
               </table>
             )}
           </div>
@@ -1708,6 +1819,13 @@ const Reports: React.FC<ReportsProps> = ({
                 <span><strong>Total Stock:</strong> {`${Math.round(stockSummaryTotals.packQty).toLocaleString('en-IN')} / ${Math.round(stockSummaryTotals.looseQty).toLocaleString('en-IN')} / ${Math.round(stockSummaryTotals.totalQty).toLocaleString('en-IN')}`}</span>
                 <span><strong>MRP Amount:</strong> {formatInrAmount(totals.sums['MRP Amount'] || 0)}</span>
                 <span><strong>PTR Amount:</strong> {formatInrAmount(totals.sums['PTR Amount'] || 0)}</span>
+              </>
+            ) : activeReportId === 'customerPartyWiseFullStatement' && customerPaymentStatementSummary ? (
+              <>
+                <span><strong>Total Records:</strong> {totals.recordCount}</span>
+                <span><strong>Total Invoice Amount:</strong> {formatInrAmount(customerPaymentStatementSummary.totalInvoiceAmount)}</span>
+                <span><strong>Total Payment Received:</strong> {formatInrAmount(customerPaymentStatementSummary.totalPaymentReceived)}</span>
+                <span><strong>Total Outstanding:</strong> {formatInrAmount(customerPaymentStatementSummary.totalOutstandingBalance)}</span>
               </>
             ) : (
               <>

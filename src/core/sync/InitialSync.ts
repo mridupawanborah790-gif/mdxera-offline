@@ -54,10 +54,7 @@ const FOREGROUND_TABLES: string[] = [
   TABLE.CUSTOMER_PRICE_LIST,
   TABLE.MBC_CARD_TYPES,
   TABLE.MBC_CARD_TEMPLATES,
-];
-
-/** Tables that download in the background (transactions). */
-const BACKGROUND_TABLES: string[] = [
+  // Moved from background to block UI until all history is present:
   TABLE.PURCHASES,
   TABLE.PURCHASE_ORDERS,
   TABLE.SALES_BILL,
@@ -75,6 +72,9 @@ const BACKGROUND_TABLES: string[] = [
   TABLE.PHYSICAL_INVENTORY,
   TABLE.MRP_CHANGE_LOG,
 ];
+
+/** Tables that download in the background (transactions). Currently empty as everything is moved to foreground. */
+const BACKGROUND_TABLES: string[] = [];
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -168,11 +168,22 @@ async function ensureStateRow(tableName: string, phase: SyncPhase): Promise<Tabl
       is_complete: r.is_complete === 1,
     };
   }
-  await db.execute(
-    `INSERT INTO _initial_sync_state (organization_id, table_name, phase, started_at)
-     VALUES (?, ?, ?, ?)`,
-    [orgId, tableName, phase, Date.now()]
-  );
+  
+  try {
+    await db.execute(
+      `INSERT INTO _initial_sync_state (organization_id, table_name, phase, started_at)
+       VALUES (?, ?, ?, ?)`,
+      [orgId, tableName, phase, Date.now()]
+    );
+  } catch (err: any) {
+    // If a concurrent sync attempt inserted it just now, that's fine. Ignore the unique constraint error.
+    if (String(err).includes('UNIQUE constraint failed')) {
+      console.warn(`[InitialSync] Concurrent insert for ${tableName}, ignoring unique constraint error.`);
+    } else {
+      throw err;
+    }
+  }
+  
   return {
     table_name: tableName, phase, total_rows: null, synced_rows: 0,
     is_complete: false, last_error: null, retry_count: 0,
@@ -515,7 +526,10 @@ export async function isFullyInitialized(orgId: string): Promise<boolean> {
  * Safe to call repeatedly — already-complete tables are skipped.
  */
 export async function runForegroundSync(user: RegisteredPharmacy): Promise<void> {
-  if (_running) return;
+  // If a previous sync was cancelled but hasn't fully shut down yet, wait for it.
+  while (_running) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
   _running = true;
   _cancelled = false;
   _activeOrgId = user.organization_id;
@@ -546,6 +560,8 @@ export async function runForegroundSync(user: RegisteredPharmacy): Promise<void>
  * progress is delivered via listeners. Safe to call repeatedly.
  */
 export function startBackgroundSync(user: RegisteredPharmacy): void {
+  // Background sync is fire-and-forget, but if the engine is already running,
+  // we shouldn't start another one.
   if (_running) return;
   _running = true;
   _cancelled = false;
@@ -571,10 +587,16 @@ export function startBackgroundSync(user: RegisteredPharmacy): void {
   })();
 }
 
-/** Cancel current sync (e.g., user is forcing offline mode). */
+/** Cancel current sync (e.g., user is forcing offline mode or logging out). */
 export function cancelInitialSync(): void {
   _cancelled = true;
   _running = false;
+}
+
+/** Forcibly reset running state (useful on fresh login). */
+export function resetRunningState(): void {
+  _running = false;
+  _cancelled = false;
 }
 
 /** For the StatusBar background badge — count of background-phase rows pending. */

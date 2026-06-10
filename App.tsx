@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import Sidebar from '@core/components/layout/Sidebar';
 import Header from '@core/components/layout/Header';
 import StatusBar from '@core/components/layout/StatusBar';
@@ -69,7 +70,8 @@ import { useModuleVisibilityStore } from '@core/visibility/moduleVisibilityStore
 import { filterNavByVisibility } from '@core/visibility/useModuleVisibility';
 import ModuleVisibility from '@modules/configuration/components/ModuleVisibility';
 import { normalizeStockHandlingConfig, resolveStockHandlingConfig, logStockMovement } from '@core/utils/stockHandling';
-import SyncBootstrap, { triggerFullResync } from '@core/sync/SyncBootstrap';
+import SyncBootstrap, { triggerFullResync, triggerFreshInstallSync } from '@core/sync/SyncBootstrap';
+import FreshInstallSyncDialog from '@core/components/feedback/FreshInstallSyncDialog';
 import { resolveAsset } from '@core/utils/assetCache';
 
 const DATA_ENTRY_SCREENS = [
@@ -100,6 +102,7 @@ type PersistedScreenState = {
 
 const App: React.FC = () => {
     const [currentUser, setCurrentUser] = useState<RegisteredPharmacy | null>(null);
+    const [showFreshInstallSyncDialog, setShowFreshInstallSyncDialog] = useState(false);
     const loadVisibilityForUser = useModuleVisibilityStore((s) => s.loadForUser);
     const hiddenScreens = useModuleVisibilityStore((s) => s.hiddenScreens);
     useEffect(() => {
@@ -141,6 +144,17 @@ const App: React.FC = () => {
             window.removeEventListener('offline', handleOffline);
         };
     }, []);
+
+    useEffect(() => {
+        const handleHydrateComplete = () => {
+            if (currentUser) {
+                console.info('[App] Received hydrate-complete event, reloading data from cache');
+                loadData(currentUser, 'background');
+            }
+        };
+        window.addEventListener(storage.HYDRATE_COMPLETE_EVENT, handleHydrateComplete);
+        return () => window.removeEventListener(storage.HYDRATE_COMPLETE_EVENT, handleHydrateComplete);
+    }, [currentUser]);
 
     const [inventory, setInventory] = useState<InventoryItem[]>([]);
     const [medicines, setMedicines] = useState<Medicine[]>([]);
@@ -248,7 +262,15 @@ const App: React.FC = () => {
     const previousPageRef = useRef('dashboard');
 
     const getScreenStateStorageKey = useCallback((user: RegisteredPharmacy) => {
-        return `${APP_SCREEN_STATE_STORAGE_PREFIX}:${user.organization_id}:${user.user_id}`;
+        let windowLabel = 'main';
+        try {
+            if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
+                windowLabel = getCurrentWindow().label;
+            }
+        } catch (e) {
+            // fallback
+        }
+        return `${APP_SCREEN_STATE_STORAGE_PREFIX}:${user.organization_id}:${user.user_id}:${windowLabel}`;
     }, []);
 
     const readPersistedScreenState = useCallback((user: RegisteredPharmacy): PersistedScreenState | null => {
@@ -3324,6 +3346,7 @@ const App: React.FC = () => {
                         if (currentUser) loadData(currentUser, 'sync');
                     }, 5000);
                 }}
+                onFreshInstallSync={() => setShowFreshInstallSyncDialog(true)}
                 onToggleSidebar={toggleSidebar}
             />
             <div className="flex-1 flex overflow-hidden">
@@ -3363,6 +3386,14 @@ const App: React.FC = () => {
                 />
             </div>
             <NotificationSystem notifications={notifications} removeNotification={removeNotification} />
+            <FreshInstallSyncDialog 
+                isOpen={showFreshInstallSyncDialog} 
+                onCancel={() => setShowFreshInstallSyncDialog(false)} 
+                onConfirm={() => {
+                    setShowFreshInstallSyncDialog(false);
+                    triggerFreshInstallSync();
+                }} 
+            />
             {isMigrationLocked && migrationUiState.active && migrationUiState.minimized && (
                 <div className="fixed bottom-4 right-4 z-[310] px-4 py-2 bg-yellow-100 border-2 border-yellow-500 text-yellow-900 text-xs font-black uppercase tracking-wider shadow-xl flex items-center gap-3">
                     <span>

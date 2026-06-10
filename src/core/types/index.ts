@@ -445,6 +445,8 @@ export interface Purchase {
     organization_id: string;
     user_id?: string; 
     supplier: string;
+    supplier_id?: string;
+    supplierId?: string;
     invoiceNumber: string;
     date: string;
     items: PurchaseItem[];

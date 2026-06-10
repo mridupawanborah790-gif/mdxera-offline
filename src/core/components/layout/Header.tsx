@@ -17,10 +17,11 @@ interface HeaderProps {
   onReload: () => void;
   isReloading?: boolean;
   onResyncAll?: () => void;
+  onFreshInstallSync?: () => void;
   onToggleSidebar: () => void;
 }
 
-const Header: React.FC<HeaderProps> = ({ onNewBillClick, currentUser, onNavigate, onBack, canGoBack, onLogout, isFullScreen, onToggleFullScreen, brandName, currentPage, onReload, isReloading, onResyncAll, onToggleSidebar }) => {
+const Header: React.FC<HeaderProps> = ({ onNewBillClick, currentUser, onNavigate, onBack, canGoBack, onLogout, isFullScreen, onToggleFullScreen, brandName, currentPage, onReload, isReloading, onResyncAll, onFreshInstallSync, onToggleSidebar }) => {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -191,19 +192,45 @@ const Header: React.FC<HeaderProps> = ({ onNewBillClick, currentUser, onNavigate
                 </svg>
                 <span className="whitespace-nowrap font-bold text-[#4ade80]">New Window</span>
             </button>
-            {onResyncAll && (
-                <button
-                    onClick={onResyncAll}
-                    className="h-full px-3 sm:px-4 hover:bg-white/20 transition-colors flex items-center border-r border-white/10 gap-2"
-                    title="Re-download every table from the server into local storage"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                        <polyline points="7 10 12 15 17 10"/>
-                        <line x1="12" y1="15" x2="12" y2="3"/>
-                    </svg>
-                    <span className="whitespace-nowrap font-bold">Sync All</span>
-                </button>
+            {(onResyncAll || onFreshInstallSync) && (
+                <div className="relative h-full">
+                    <button
+                        onClick={() => setActiveMenu(activeMenu === 'syncMenu' ? null : 'syncMenu')}
+                        className={`h-full px-3 sm:px-4 hover:bg-white/20 transition-colors flex items-center border-r border-white/10 gap-2 ${activeMenu === 'syncMenu' ? 'bg-white/20' : ''}`}
+                        title="Sync Options"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="7 10 12 15 17 10"/>
+                            <line x1="12" y1="15" x2="12" y2="3"/>
+                        </svg>
+                        <span className="whitespace-nowrap font-bold">Sync All</span>
+                        <span className="text-[10px] ml-1">▼</span>
+                    </button>
+                    {activeMenu === 'syncMenu' && (
+                        <div className="absolute top-full left-0 w-48 bg-white dark:bg-zinc-800 border border-gray-400 shadow-xl z-[100] py-1">
+                            {onResyncAll && (
+                                <button
+                                    onClick={() => { onResyncAll(); setActiveMenu(null); }}
+                                    className="w-full text-left px-4 py-2 hover:bg-primary hover:text-white text-gray-800 dark:text-gray-200 text-[11px] sm:text-[12px] font-bold"
+                                    title="Re-download every table from the server into local storage"
+                                >
+                                    Sync All (Resume)
+                                </button>
+                            )}
+                            {onFreshInstallSync && (
+                                <button
+                                    onClick={() => { onFreshInstallSync(); setActiveMenu(null); }}
+                                    className="w-full text-left px-4 py-2 hover:bg-red-600 hover:text-white text-red-600 dark:text-red-400 text-[11px] sm:text-[12px] font-bold border-t border-gray-100 flex items-center gap-2"
+                                    title="Wipe local database and start fresh from Supabase"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+                                    Fresh Install Sync
+                                </button>
+                            )}
+                        </div>
+                    )}
+                </div>
             )}
             <div className="relative h-full">
                 <button

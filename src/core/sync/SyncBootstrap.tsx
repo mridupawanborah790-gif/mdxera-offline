@@ -18,6 +18,9 @@ import {
   isForegroundComplete,
   runForegroundSync,
   startBackgroundSync,
+  cancelInitialSync,
+  resetRunningState,
+  onInitialSyncProgress,
 } from '@core/sync/InitialSync';
 import { SyncEngine } from '@core/sync/SyncEngine';
 import {
@@ -55,11 +58,19 @@ const STATIC_BRAND_ASSETS = [
  * listens for this and re-runs the foreground + background phases.
  */
 export const RESYNC_EVENT = 'mdxera:resync-all';
+export const FRESH_INSTALL_SYNC_EVENT = 'mdxera:fresh-install-sync';
 
 /** Fire from anywhere to ask SyncBootstrap to perform a full resync. */
 export function triggerFullResync(): void {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event(RESYNC_EVENT));
+  }
+}
+
+/** Fire to completely wipe local data and start fresh from Supabase. */
+export function triggerFreshInstallSync(): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(FRESH_INSTALL_SYNC_EVENT));
   }
 }
 
@@ -75,6 +86,11 @@ interface Props {
 
 export const SyncBootstrap: React.FC<Props> = ({ currentUser }) => {
   const [phase, setPhase] = useState<Phase>('unchecked');
+  const [bootNonce, setBootNonce] = useState(0);
+
+  // We keep a ref of phase so the event listener doesn't need to depend on it
+  const phaseRef = useRef(phase);
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
   const setAuthUser = useAuthStore((s) => s.setUser);
   const orgId = currentUser?.organization_id;
 
@@ -140,6 +156,7 @@ export const SyncBootstrap: React.FC<Props> = ({ currentUser }) => {
       runForegroundSync,
       startBackgroundSync,
       triggerFullResync,
+      triggerFreshInstallSync,
       isOnline,
       resetFailedQueueItems,
       // Voucher cursor recovery — for when "Next Sequence No" drifts.
@@ -214,15 +231,63 @@ export const SyncBootstrap: React.FC<Props> = ({ currentUser }) => {
       }
       // Force the boot effect to run again from scratch.
       setPhase('unchecked');
+      setBootNonce(n => n + 1);
     };
+
+    const onFreshInstall = async () => {
+      console.warn('[SyncBootstrap] FRESH INSTALL requested for org', currentUser.organization_id);
+      try {
+        SyncEngine.stop();
+        cancelInitialSync();
+        
+        await db.execute(
+          `DELETE FROM ${TABLE.INITIAL_SYNC_STATE} WHERE organization_id = ?`,
+          [currentUser.organization_id]
+        );
+        await db.execute(
+          `DELETE FROM ${TABLE.SYNC_META} WHERE organization_id = ?`,
+          [currentUser.organization_id]
+        );
+        
+        for (const tableName of SYNCABLE_TABLES) {
+          try {
+            await db.execute(
+              `DELETE FROM ${tableName} WHERE organization_id = ? AND _sync_status NOT IN ('pending', 'failed')`,
+              [currentUser.organization_id]
+            );
+          } catch (delErr) {
+            console.warn(`[SyncBootstrap] Failed to wipe table ${tableName}:`, delErr);
+          }
+        }
+      } catch (err) {
+        console.warn('[SyncBootstrap] Failed to wipe for fresh install:', err);
+      }
+      
+      try {
+        resetSchemaDriftCache();
+      } catch (err) {
+        console.warn('[SyncBootstrap] Failed to reset schema drift cache:', err);
+      }
+      
+      resetRunningState();
+      setPhase('unchecked');
+      setBootNonce(n => n + 1);
+    };
+
     window.addEventListener(RESYNC_EVENT, onResync);
-    return () => window.removeEventListener(RESYNC_EVENT, onResync);
+    window.addEventListener(FRESH_INSTALL_SYNC_EVENT, onFreshInstall);
+    return () => {
+      window.removeEventListener(RESYNC_EVENT, onResync);
+      window.removeEventListener(FRESH_INSTALL_SYNC_EVENT, onFreshInstall);
+    };
   }, [currentUser]);
 
   useEffect(() => {
     if (!orgId || !currentUser) {
       setPhase('unchecked');
       SyncEngine.stop();
+      cancelInitialSync();
+      resetRunningState();
       return;
     }
 
@@ -321,10 +386,20 @@ export const SyncBootstrap: React.FC<Props> = ({ currentUser }) => {
       }
     })();
 
+    // Listen to background sync progress to re-hydrate the cache as tables finish
+    const unsubProgress = onInitialSyncProgress((prog) => {
+      if (prog.phase === 'done' || prog.currentTable) {
+        // Debounced or direct call to hydrate ensures the UI sees new data
+        hydrateMemoryCacheFromSqlite(orgId);
+      }
+    });
+
     return () => {
       cancelled = true;
+      cancelInitialSync();
+      unsubProgress();
     };
-  }, [orgId, phase]); // Re-run if phase is explicitly reset to 'unchecked' via RESYNC_EVENT
+  }, [orgId, bootNonce]); // We do NOT depend on 'phase' to prevent infinite loops from our own setPhase calls.
 
   if (phase === 'running' || phase === 'error') {
     return (

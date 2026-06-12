@@ -1,4 +1,4 @@
-﻿import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import type { Customer, DeliveryChallan, InventoryItem, Purchase, SalesChallan, Transaction } from '@core/types';
 import { SalesChallanStatus } from '@core/types';
 
@@ -103,6 +103,7 @@ const DailyReports: React.FC<DailyReportsProps> = ({
   const [selectedRow, setSelectedRow] = useState(0);
   const [fromDate, setFromDate] = useState(getPeriodDefaults().from);
   const [toDate, setToDate] = useState(getPeriodDefaults().to);
+  const [scrollMode, setScrollMode] = useState<'fit' | 'scroll'>('scroll');
   const fromDateRef = useRef<HTMLInputElement>(null);
   const toDateRef = useRef<HTMLInputElement>(null);
   const generateButtonRef = useRef<HTMLButtonElement>(null);
@@ -476,12 +477,20 @@ const DailyReports: React.FC<DailyReportsProps> = ({
       <section className="flex-1 flex flex-col overflow-hidden">
         <div className="h-10 bg-[#335f59] text-white px-4 flex items-center justify-between border-b-2 border-[#233f3a]">
           <h1 className="text-lg font-bold tracking-wide">{reportNameMap.get(activeReportId) || 'Daily Reports'} - MDXERA ERP</h1>
-          <span className="text-xs uppercase tracking-widest text-[#e4f2ee]">Period: {formatDate(fromDate)} to {formatDate(toDate)} · ↑↓ Move · Home/End Jump</span>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setScrollMode(prev => prev === 'fit' ? 'scroll' : 'fit')}
+              className="px-2.5 py-1 bg-white/10 hover:bg-white/20 active:bg-white/30 border border-white/20 text-xs font-bold uppercase tracking-wider transition-colors flex items-center gap-1.5 focus:outline-none"
+            >
+              {scrollMode === 'fit' ? '↔ Enable Scroll' : '⊙ Fit Columns'}
+            </button>
+            <span className="text-xs uppercase tracking-widest text-[#e4f2ee]">Period: {formatDate(fromDate)} to {formatDate(toDate)} · ↑↓ Move · Home/End Jump</span>
+          </div>
         </div>
 
         <div className="flex-1 flex overflow-hidden">
-          <div className="flex-1 overflow-auto bg-[#f5f6f3]">
-            <table className="w-full text-[13px] leading-tight min-w-[980px]">
+          <div className="flex-1 overflow-auto bg-[#f5f6f3] min-w-0">
+            <table className={`${scrollMode === 'scroll' ? 'w-max min-w-full md:min-w-[1200px]' : 'w-full'} text-[13px] leading-tight`}>
               <thead className="sticky top-0 bg-[#d5dfdb] border-b-2 border-[#83918e] text-[#1c3531]">
                 <tr>
                   <th className="px-2 py-1 text-left">Date</th>

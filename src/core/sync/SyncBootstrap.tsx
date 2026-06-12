@@ -33,7 +33,7 @@ import {
 import { isOnline } from '@core/sync/networkMonitor';
 import { useAuthStore } from '@core/auth/authStore';
 import InitialSyncModal from '@core/components/feedback/InitialSyncModal';
-import { hydrateMemoryCacheFromSqlite } from '@core/services/storageService';
+import { hydrateMemoryCacheFromSqlite, resetHydrationState } from '@core/services/storageService';
 import { db } from '@core/db/client';
 import { TABLE, SYNCABLE_TABLES } from '@core/db/schema';
 import {
@@ -192,6 +192,7 @@ export const SyncBootstrap: React.FC<Props> = ({ currentUser }) => {
     const onResync = async () => {
       console.info('[SyncBootstrap] Full resync requested for org', currentUser.organization_id);
       try {
+        resetHydrationState();
         await db.execute(
           `DELETE FROM ${TABLE.INITIAL_SYNC_STATE} WHERE organization_id = ?`,
           [currentUser.organization_id]
@@ -239,6 +240,7 @@ export const SyncBootstrap: React.FC<Props> = ({ currentUser }) => {
       try {
         SyncEngine.stop();
         cancelInitialSync();
+        resetHydrationState();
         
         await db.execute(
           `DELETE FROM ${TABLE.INITIAL_SYNC_STATE} WHERE organization_id = ?`,

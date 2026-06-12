@@ -1,4 +1,7 @@
 import { supabase } from './supabaseClient';
+import { db } from '../src/core/db/client';
+import { TABLE } from '../src/core/db/schema';
+
 
 export const DEFAULT_CONFIG_MISSING_MESSAGE = 'Default Company / Default Set of Books not configured. Please update Company Configuration.';
 
@@ -39,9 +42,40 @@ const loadLegacyFallbackPostingContext = async (organizationId: string): Promise
 };
 
 export const loadDefaultPostingContext = async (organizationId: string): Promise<DefaultPostingContext> => {
+  // Primary: Always query SQLite directly so we get the latest synced data
+  // without relying on UI-driven localStorage updates.
+  try {
+    const companies = await db.select<CompanyCodeRow>(
+      `SELECT * FROM ${TABLE.COMPANY_CODES} WHERE organization_id = ? AND is_default = 1 AND status = 'Active'`,
+      [organizationId]
+    );
+      
+    if (companies && companies.length > 0) {
+      const defaultCompany = companies[0];
+      if (defaultCompany.default_set_of_books_id) {
+        const books = await db.select<SetOfBooksRow>(
+          `SELECT * FROM ${TABLE.SET_OF_BOOKS} WHERE organization_id = ? AND company_code_id = ? AND set_of_books_id = ? AND active_status = 'Active'`,
+          [organizationId, defaultCompany.id, defaultCompany.default_set_of_books_id]
+        );
+          
+        if (books && books.length > 0) {
+          const defaultBook = books[0];
+          return {
+            companyCodeId: defaultCompany.id,
+            companyCode: defaultCompany.code,
+            setOfBooksId: defaultBook.id,
+          };
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[loadDefaultPostingContext] SQLite query failed, falling back to localStorage:', e);
+  }
+
+  // Fallback: Use localStorage if SQLite didn't return anything (e.g. migration pending)
   try {
     const raw = localStorage.getItem(`mdxera_company_configuration_v2_${organizationId}`);
-    if (!raw) throw new Error(DEFAULT_CONFIG_MISSING_MESSAGE);
+    if (!raw) throw new Error('NO_LOCAL_STORAGE');
     const store = JSON.parse(raw);
     
     const defaultCompany = store.companies?.find((c: any) => c.isDefault && c.status === 'Active');
@@ -65,7 +99,6 @@ export const loadDefaultPostingContext = async (organizationId: string): Promise
       setOfBooksId: defaultBook.id,
     };
   } catch (err: any) {
-    if (err.message === DEFAULT_CONFIG_MISSING_MESSAGE) throw err;
     throw new Error(DEFAULT_CONFIG_MISSING_MESSAGE);
   }
 };

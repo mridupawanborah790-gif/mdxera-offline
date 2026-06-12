@@ -1,4 +1,7 @@
-    import { supabase } from './supabaseClient';
+    
+import { db as sqliteDb } from '../src/core/db/client';
+import { TABLE as SCHEMA_TABLE } from '../src/core/db/schema';
+import { supabase } from './supabaseClient';
     import { idb, STORES } from './indexedDbService';
     import {
         RegisteredPharmacy, InventoryItem, Transaction, BillItem, Purchase, PurchaseItem, Supplier,
@@ -142,6 +145,7 @@ function decodeSqliteRow(tableName: string, row: Record<string, any>): Record<st
 // queuing up redundant ones (App.tsx boot + SyncBootstrap + getData fallback
 // were all triggering separately and saturating the SQL connection).
 const _hydrateInFlight = new Map<string, Promise<void>>();
+const _hydratedOrgs = new Set<string>();
 
 /** Fired when hydration finishes (success or failure). Listeners can refresh React state. */
 export const HYDRATE_COMPLETE_EVENT = 'mdxera:hydrate-complete';
@@ -157,19 +161,11 @@ export const HYDRATE_COMPLETE_EVENT = 'mdxera:hydrate-complete';
  */
 export const hydrateMemoryCacheFromSqlite = async (organizationId: string): Promise<void> => {
     if (!organizationId) return;
+    if (_hydratedOrgs.has(organizationId)) return;
     const cached = _hydrateInFlight.get(organizationId);
     if (cached) return cached;
 
     const work = async (): Promise<void> => {
-        let sqliteDb: typeof import('../src/core/db/client').db | null = null;
-        try {
-            const mod = await import('../src/core/db/client');
-            sqliteDb = mod.db;
-        } catch (err) {
-            console.warn('[storage] SQLite client unavailable, skipping hydration:', err);
-            return;
-        }
-        if (!sqliteDb) return;
         const db = sqliteDb;
 
         const TABLES_TO_HYDRATE = Object.values(STORES);
@@ -212,6 +208,7 @@ export const hydrateMemoryCacheFromSqlite = async (organizationId: string): Prom
             console.warn('[storage] hydrateMemoryCacheFromSqlite failed:', err);
         } finally {
             _hydrateInFlight.delete(organizationId);
+            _hydratedOrgs.add(organizationId);
             if (typeof window !== 'undefined') {
                 window.dispatchEvent(new CustomEvent(HYDRATE_COMPLETE_EVENT, { detail: { organizationId } }));
             }
@@ -942,7 +939,9 @@ const normalizeMaterialMasterType = (value: unknown): string | undefined => {
             msg.includes('failed to connect') ||
             msg.includes('session has expired') ||
             msg.includes('jwt') ||
+            msg.includes('row-level security') ||
             error?.code === 'PGRST301' ||
+            error?.code === '42501' ||
             error?.status === 0 ||
             error?.status === 401 ||
             error?.status === 403 ||
@@ -1373,24 +1372,24 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
         }
     };
 
-    export const fetchInventory = (user: RegisteredPharmacy) => getData('inventory', [], user);
-    export const fetchMedicineMaster = (user: RegisteredPharmacy) => getData('material_master', [], user);
-    export const fetchTransactions = (user: RegisteredPharmacy) => getData('sales_bill', [], user);
-    export const fetchPurchases = (user: RegisteredPharmacy) => getData('purchases', [], user);
-    export const fetchSuppliers = (user: RegisteredPharmacy) => getData('suppliers', [], user);
-    export const fetchCustomers = (user: RegisteredPharmacy) => getData('customers', [], user);
-    export const fetchPurchaseOrders = (user: RegisteredPharmacy) => getData('purchase_orders', [], user);
-    export const fetchTeamMembers = (user: RegisteredPharmacy) => getData('team_members', [], user);
-    export const fetchSupplierProductMaps = (user: RegisteredPharmacy) => getData('supplier_product_map', [], user);
-    export const fetchCustomerPriceList = (user: RegisteredPharmacy) => getData('customer_price_list', [], user);
+    export const fetchInventory = (user: RegisteredPharmacy, forceSync = false) => getData('inventory', [], user, forceSync);
+    export const fetchMedicineMaster = (user: RegisteredPharmacy, forceSync = false) => getData('material_master', [], user, forceSync);
+    export const fetchTransactions = (user: RegisteredPharmacy, forceSync = false) => getData('sales_bill', [], user, forceSync);
+    export const fetchPurchases = (user: RegisteredPharmacy, forceSync = false) => getData('purchases', [], user, forceSync);
+    export const fetchSuppliers = (user: RegisteredPharmacy, forceSync = false) => getData('suppliers', [], user, forceSync);
+    export const fetchCustomers = (user: RegisteredPharmacy, forceSync = false) => getData('customers', [], user, forceSync);
+    export const fetchPurchaseOrders = (user: RegisteredPharmacy, forceSync = false) => getData('purchase_orders', [], user, forceSync);
+    export const fetchTeamMembers = (user: RegisteredPharmacy, forceSync = false) => getData('team_members', [], user, forceSync);
+    export const fetchSupplierProductMaps = (user: RegisteredPharmacy, forceSync = false) => getData('supplier_product_map', [], user, forceSync);
+    export const fetchCustomerPriceList = (user: RegisteredPharmacy, forceSync = false) => getData('customer_price_list', [], user, forceSync);
 
-    export const fetchDoctors = async (user: RegisteredPharmacy): Promise<DoctorMaster[]> => {
-        const data = await getData('doctor_master', [], user);
+    export const fetchDoctors = async (user: RegisteredPharmacy, forceSync = false): Promise<DoctorMaster[]> => {
+        const data = await getData('doctor_master', [], user, forceSync);
         return (data || []).sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
     };
 
     // Added missing fetchPhysicalInventory function
-    export const fetchPhysicalInventory = (user: RegisteredPharmacy) => getData('physical_inventory', [], user);
+    export const fetchPhysicalInventory = (user: RegisteredPharmacy, forceSync = false) => getData('physical_inventory', [], user, forceSync);
 
     // Added missing fetchEWayBills function
     export const fetchEWayBills = (user: RegisteredPharmacy) => getData('ewaybills', [], user);
@@ -1435,15 +1434,16 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
         return allData;
     };
 
-    export const getData = async (tableName: string, defaultValue: any[] = [], user: RegisteredPharmacy | null): Promise<any[]> => {
+                export const getData = async (tableName: string, defaultValue: any[] = [], user: RegisteredPharmacy | null, forceSync = false): Promise<any[]> => {
         if (!user) return defaultValue;
         const storeKey = tableName.toUpperCase() as keyof typeof STORES;
 
-        // Priority 1: Check Memory Cache (for when IDB is disabled or during same session).
-        // Return a shallow copy: saveData/updateMemoryCacheBulk mutate the cache
-        // array in place, so handing out the same reference makes React's
-        // setState bail out (Object.is identical) and screens fail to refresh
-        // after offline writes until the user manually reloads.
+        if (forceSync && navigator.onLine) {
+            delete memoryCache[storeKey];
+            delete memoryCacheOrgScope[storeKey];
+            syncChannel.postMessage({ action: 'pull_now' });
+        }
+
         if (
             memoryCacheOrgScope[storeKey] === user.organization_id &&
             memoryCache[storeKey] &&
@@ -1452,41 +1452,30 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
             return [...memoryCache[storeKey]];
         }
 
-        // Priority 1.5: If we are offline and SQLite has data populated by
-        // InitialSync, hydrate the memoryCache on-demand so we don't return
-        // empty arrays (which would wipe app state).
-        if (!navigator.onLine) {
-            try {
-                await hydrateMemoryCacheFromSqlite(user.organization_id);
-                if (memoryCache[storeKey] && memoryCache[storeKey].length > 0) {
-                    return [...memoryCache[storeKey]];
-                }
-            } catch {
-                /* fall through */
+        try {
+            await hydrateMemoryCacheFromSqlite(user.organization_id);
+            if (memoryCache[storeKey] && memoryCache[storeKey].length > 0) {
+                return [...memoryCache[storeKey]];
             }
+        } catch {
+            /* fall through */
         }
 
-        // Priority 2: Local IndexedDB for instant UI
         const cached = await idb.getAll(STORES[storeKey]);
 
-        // If we found data in IDB, populate memory cache to keep them in sync
         if (cached && cached.length > 0) {
             memoryCache[storeKey] = [...cached];
             memoryCacheOrgScope[storeKey] = user.organization_id;
         }
 
-        // Priority 2: Fetch updates in background if online
         if (navigator.onLine) {
-            if (cached.length === 0) {
+            if ((memoryCache[storeKey] == null || memoryCache[storeKey].length === 0) && cached.length === 0) {
                 try {
                     const allData = await fetchAllPagesFromSupabase(tableName, user.organization_id);
                     if (allData.length > 0) {
                         const normalized = allData.map(d => fromSupabase(tableName, d));
-                        
-                        // Always update memory cache so the session stays consistent
                         memoryCache[storeKey] = [...normalized];
                         memoryCacheOrgScope[storeKey] = user.organization_id;
-                        
                         await idb.putBulk(STORES[storeKey], normalized);
                         return normalized;
                     }
@@ -1494,10 +1483,12 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
                     console.error(`Initial fetch failed for ${tableName}:`, e);
                 }
             }
-            // Note: The else block with setTimeout(fetchAllPagesFromSupabase) was removed.
-            // Background polling is now handled correctly by SyncEngine/SyncPuller.
-            // Overwriting memoryCache/IDB directly here destroyed local pending changes.
         }
+        
+        if (memoryCache[storeKey] && memoryCache[storeKey].length > 0) {
+            return [...memoryCache[storeKey]];
+        }
+
         return cached.length > 0 ? cached : defaultValue;
     };
 
@@ -1522,8 +1513,43 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
         // either fails silently offline or wastes a network round-trip online.
         if (!forceRefresh) {
             const scopedCache = memoryCacheOrgScope[storeKey] === user.organization_id ? memoryCache[storeKey] : undefined;
-            const localHit = scopedCache?.find((row: any) => row?.id === id);
+            const localHit = scopedCache?.find((row: any) => {
+                if (!row || !row.id) return false;
+                return String(row.id).trim().toLowerCase() === String(id).trim().toLowerCase();
+            });
             if (localHit) return localHit as T;
+        }
+
+        // Fallback to SQLite (Offline App)
+        try {
+            const rows = await sqliteDb.select<Record<string, any>>(
+                `SELECT * FROM ${tableName} WHERE id = ? LIMIT 1`,
+                [id]
+            );
+            if (rows && rows.length > 0) {
+                const decoded = decodeSqliteRow(tableName, rows[0]);
+                const normalized = fromSupabase(tableName, decoded);
+                // Verify organization scope
+                if (normalized && normalized.organizationId && normalized.organizationId !== user.organization_id) {
+                    console.warn(`[getDataById] SQLite hit found for table ${tableName} with ID ${id} but organizationId mismatch`);
+                    return null;
+                }
+                // Warm cache
+                if (!memoryCache[storeKey]) {
+                    memoryCache[storeKey] = [];
+                }
+                const index = memoryCache[storeKey].findIndex((item: any) => 
+                    item && item.id && String(item.id).trim().toLowerCase() === String(id).trim().toLowerCase()
+                );
+                if (index >= 0) {
+                    memoryCache[storeKey][index] = normalized;
+                } else {
+                    memoryCache[storeKey].push(normalized);
+                }
+                return normalized as T;
+            }
+        } catch (err) {
+            console.warn(`[getDataById] SQLite fallback query failed for table ${tableName}:`, err);
         }
 
         if (!navigator.onLine) {
@@ -1572,13 +1598,45 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
             ? ['400100', '210110', '210120', '210130', '510000']
             : ['510000']; // Purchase validation happens line-by-line later but we check round-off here
 
-        const { data: glRows } = await supabase
-            .from('gl_master')
-            .select('gl_code')
-            .eq('organization_id', organizationId)
-            .eq('set_of_books_id', setOfBooksId)
-            .in('gl_code', requiredCodes);
-        const foundCodes = new Set((glRows || []).map(r => String(r.gl_code)));
+        let glRows: { gl_code: string }[] = [];
+        try {
+            const placeholders = requiredCodes.map(() => '?').join(',');
+            const rows = await sqliteDb.select<{ gl_code: string }>(
+                `SELECT gl_code FROM ${SCHEMA_TABLE.GL_MASTER} WHERE organization_id = ? AND set_of_books_id = ? AND gl_code IN (${placeholders})`,
+                [organizationId, setOfBooksId, ...requiredCodes]
+            );
+            if (rows && rows.length > 0) {
+                glRows = rows;
+            }
+        } catch (err) {
+            console.warn('[validateGLMappings] SQLite query failed, trying Supabase:', err);
+        }
+
+        const foundCodesLocal = new Set(glRows.map(r => String(r.gl_code)));
+        const missingLocal = requiredCodes.filter(c => !foundCodesLocal.has(c));
+        if (missingLocal.length > 0 && navigator.onLine) {
+            try {
+                const { data: remoteRows } = await supabase
+                    .from('gl_master')
+                    .select('gl_code')
+                    .eq('organization_id', organizationId)
+                    .eq('set_of_books_id', setOfBooksId)
+                    .in('gl_code', requiredCodes);
+                if (remoteRows && remoteRows.length > 0) {
+                    const combined = [...glRows];
+                    for (const r of remoteRows) {
+                        if (!combined.some(c => String(c.gl_code) === String(r.gl_code))) {
+                            combined.push({ gl_code: r.gl_code });
+                        }
+                    }
+                    glRows = combined;
+                }
+            } catch (err) {
+                console.warn('[validateGLMappings] Supabase query failed:', err);
+            }
+        }
+
+        const foundCodes = new Set(glRows.map(r => String(r.gl_code)));
         const missing = requiredCodes.filter(c => !foundCodes.has(c));
         
         if (missing.length > 0) {
@@ -2009,7 +2067,11 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
                 await saveData('inventory', newInv, user);
             }
         }
-        await syncPurchaseLedger(p, user);
+        try {
+            await syncPurchaseLedger(p, user);
+        } catch (e) {
+            console.warn('[storage:addPurchase] Purchase ledger/journal sync deferred:', e);
+        }
         return res;
     };
 
@@ -2093,7 +2155,11 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
                     await saveData('inventory', newInv, user);
                 }
             }
-            await syncPurchaseLedger(p, user);
+            try {
+                await syncPurchaseLedger(p, user);
+            } catch (e) {
+                console.warn('[storage:updatePurchase] Finalize purchase ledger/journal sync deferred:', e);
+            }
             return { ...p, ...res };
         }
 
@@ -2197,7 +2263,11 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
             }
         }
 
-        await syncPurchaseLedger(p, user);
+        try {
+            await syncPurchaseLedger(p, user);
+        } catch (e) {
+            console.warn('[storage:updatePurchase] Purchase ledger/journal sync deferred:', e);
+        }
         return res;
     };
     export const saveCustomerPriceList = (entry: CustomerPriceListEntry, user: RegisteredPharmacy) => saveData('customer_price_list', entry, user);
@@ -2240,6 +2310,11 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
     export const clearCurrentUser = async () => {
         await _logoutImpl();
         await idb.clearAllStores();
+        _hydratedOrgs.clear();
+    };
+
+    export const resetHydrationState = () => {
+        _hydratedOrgs.clear();
     };
 
     export const requestPasswordReset = _requestPasswordResetImpl;
@@ -2350,26 +2425,47 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
 
 
 export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<{ id: string; bankName: string; accountName: string; accountNumber: string; accountType?: string; linkedBankGlId?: string; defaultBank?: boolean; activeStatus?: string }>> => {
-        if (!navigator.onLine) return [];
-        const { data, error } = await supabase
-            .from('bank_master')
-            .select('*')
-            .eq('organization_id', user.organization_id)
-            .order('created_at', { ascending: true });
-        if (error) throw error;
+        const cacheKey = `mdxera_bank_masters_${user.organization_id}`;
+        
+        if (navigator.onLine) {
+            try {
+                const { data, error } = await supabase
+                    .from('bank_master')
+                    .select('*')
+                    .eq('organization_id', user.organization_id)
+                    .order('created_at', { ascending: true });
+                if (error) throw error;
 
-        return (data || [])
-            .filter((b) => b.activeStatus === 'Active' || b.active_status === 'Active' || b.activeStatus === undefined)
-            .map((b) => ({
-                id: String(b.id),
-                bankName: String(b.bankName || b.bank_name || ''),
-                accountName: String(b.accountName || b.account_name || ''),
-                accountNumber: String(b.accountNumber || b.account_number || ''),
-                accountType: String(b.accountType || b.account_type || ''),
-                linkedBankGlId: b.linkedBankGlId || b.linked_bank_gl_id || undefined,
-                defaultBank: !!(b.defaultBank || b.default_bank),
-                activeStatus: b.activeStatus || b.active_status,
-            }));
+                const result = (data || [])
+                    .filter((b) => b.activeStatus === 'Active' || b.active_status === 'Active' || b.activeStatus === undefined)
+                    .map((b) => ({
+                        id: String(b.id),
+                        bankName: String(b.bankName || b.bank_name || ''),
+                        accountName: String(b.accountName || b.account_name || ''),
+                        accountNumber: String(b.accountNumber || b.account_number || ''),
+                        accountType: String(b.accountType || b.account_type || ''),
+                        linkedBankGlId: b.linkedBankGlId || b.linked_bank_gl_id || undefined,
+                        defaultBank: !!(b.defaultBank || b.default_bank),
+                        activeStatus: b.activeStatus || b.active_status,
+                    }));
+                
+                localStorage.setItem(cacheKey, JSON.stringify(result));
+                return result;
+            } catch (e) {
+                console.warn('[fetchBankMasters] Supabase fetch failed, falling back to cache:', e);
+            }
+        }
+
+        try {
+            const cached = localStorage.getItem(cacheKey);
+            if (cached) {
+                return JSON.parse(cached);
+            }
+        } catch (cacheErr) {
+            console.warn('[fetchBankMasters] Cache read failed:', cacheErr);
+        }
+
+        return [];
     };
 
     export const recordCustomerPaymentWithAccounting = async (
@@ -2387,36 +2483,40 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
         },
         user: RegisteredPharmacy
     ): Promise<{ journalEntryId?: string; journalEntryNumber?: string; ledgerEntryId: string }> => {
-        let customer = await idb.get(STORES.CUSTOMERS, args.customerId) as Customer | undefined;
-
-        // Fallback to Supabase if local fetch fails (e.g. IndexedDB disabled)
-        if (!customer && navigator.onLine) {
-            const { data, error } = await supabase
-                .from('customers')
-                .select('*')
-                .eq('organization_id', user.organization_id)
-                .eq('id', args.customerId)
-                .maybeSingle();
-            if (data) {
-                customer = fromSupabase('customers', data) as Customer;
-            }
-        }
-
+        const customer = await getDataById<Customer>('customers', args.customerId, user);
         if (!customer) throw new Error('Customer not found');
 
-        if (!navigator.onLine) throw new Error('Payment posting with accounting requires online mode.');
         const isCashMode = String(args.paymentMode || '').trim().toLowerCase() === 'cash';
+        
+        // Resolve bank locally or online
+        const cacheKey = `mdxera_bank_masters_${user.organization_id}`;
         let bank: any = null;
         if (args.bankAccountId) {
-            const { data: bankRow, error: bankErr } = await supabase
-                .from('bank_master')
-                .select('*')
-                .eq('organization_id', user.organization_id)
-                .eq('id', args.bankAccountId)
-                .maybeSingle();
-            if (bankErr) throw bankErr;
-            if (!bankRow) throw new Error('Selected bank / cash account not found');
-            bank = bankRow;
+            if (navigator.onLine) {
+                try {
+                    const { data: bankRow, error: bankErr } = await supabase
+                        .from('bank_master')
+                        .select('*')
+                        .eq('organization_id', user.organization_id)
+                        .eq('id', args.bankAccountId)
+                        .maybeSingle();
+                    if (bankErr) throw bankErr;
+                    bank = bankRow;
+                } catch (e) {
+                    console.warn('[recordCustomerPayment] Supabase bank fetch failed, using local cache:', e);
+                }
+            }
+            
+            if (!bank) {
+                try {
+                    const cached = localStorage.getItem(cacheKey);
+                    if (cached) {
+                        const list = JSON.parse(cached);
+                        bank = list.find((b: any) => b && b.id && String(b.id).trim().toLowerCase() === String(args.bankAccountId).trim().toLowerCase());
+                    }
+                } catch {}
+            }
+            if (!bank) throw new Error('Selected bank / cash account not found');
         }
         if (!isCashMode && !bank) throw new Error('Selected bank / cash account not found');
 
@@ -2429,122 +2529,126 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
         let receiptAccountName = bank?.bankName || bank?.bank_name || (isCashMode ? 'Cash Account' : 'Bank Account');
 
         if (navigator.onLine) {
-            const { data: books, error: bookErr } = await supabase
-                .from('set_of_books')
-                .select('default_customer_gl_id')
-                .eq('organization_id', user.organization_id)
-                .eq('id', setOfBooksId)
-                .single();
-            if (bookErr) throw bookErr;
-            const customerControlGlId = books?.default_customer_gl_id;
-            const bankGlId = bank?.linkedBankGlId || bank?.linked_bank_gl_id;
-            if (!customerControlGlId) throw new Error('Customer/Receivable GL is not configured for default set of books.');
-            let receiptGl: any = null;
-            if (isCashMode) {
-                if (bankGlId) {
-                    const { data: cashBankGl, error: cashBankGlError } = await supabase
+            try {
+                const { data: books, error: bookErr } = await supabase
+                    .from('set_of_books')
+                    .select('default_customer_gl_id')
+                    .eq('organization_id', user.organization_id)
+                    .eq('id', setOfBooksId)
+                    .single();
+                if (bookErr) throw bookErr;
+                const customerControlGlId = books?.default_customer_gl_id;
+                const bankGlId = bank?.linkedBankGlId || bank?.linked_bank_gl_id;
+                if (!customerControlGlId) throw new Error('Customer/Receivable GL is not configured for default set of books.');
+                let receiptGl: any = null;
+                if (isCashMode) {
+                    if (bankGlId) {
+                        const { data: cashBankGl, error: cashBankGlError } = await supabase
+                            .from('gl_master')
+                            .select('id, gl_code, gl_name')
+                            .eq('organization_id', user.organization_id)
+                            .eq('set_of_books_id', setOfBooksId)
+                            .eq('id', bankGlId)
+                            .maybeSingle();
+                        if (cashBankGlError) throw cashBankGlError;
+                        receiptGl = cashBankGl;
+                        receiptAccountName = bank?.bankName || bank?.bank_name || 'Cash Account';
+                    }
+                    if (!receiptGl) {
+                        const { data: cashGl, error: cashGlError } = await supabase
+                            .from('gl_master')
+                            .select('id, gl_code, gl_name')
+                            .eq('organization_id', user.organization_id)
+                            .eq('set_of_books_id', setOfBooksId)
+                            .eq('gl_code', '100001')
+                            .maybeSingle();
+                        if (cashGlError) throw cashGlError;
+                        if (!cashGl) throw new Error('No default cash account is configured. Please select or configure a cash account before posting cash receipt.');
+                        receiptGl = cashGl;
+                        receiptAccountName = 'Cash Account';
+                    }
+                } else {
+                    if (!bankGlId) throw new Error('Selected bank has no linked bank GL. Configure in Bank Master.');
+                    const { data: bankGl, error: bankGlErr } = await supabase
                         .from('gl_master')
                         .select('id, gl_code, gl_name')
                         .eq('organization_id', user.organization_id)
                         .eq('set_of_books_id', setOfBooksId)
                         .eq('id', bankGlId)
                         .maybeSingle();
-                    if (cashBankGlError) throw cashBankGlError;
-                    receiptGl = cashBankGl;
-                    receiptAccountName = bank?.bankName || bank?.bank_name || 'Cash Account';
+                    if (bankGlErr) throw bankGlErr;
+                    if (!bankGl) throw new Error('GL Assignment missing for selected bank in active Set of Books.');
+                    receiptGl = bankGl;
                 }
-                if (!receiptGl) {
-                    const { data: cashGl, error: cashGlError } = await supabase
-                        .from('gl_master')
-                        .select('id, gl_code, gl_name')
-                        .eq('organization_id', user.organization_id)
-                        .eq('set_of_books_id', setOfBooksId)
-                        .eq('gl_code', '100001')
-                        .maybeSingle();
-                    if (cashGlError) throw cashGlError;
-                    if (!cashGl) throw new Error('No default cash account is configured. Please select or configure a cash account before posting cash receipt.');
-                    receiptGl = cashGl;
-                    receiptAccountName = 'Cash Account';
-                }
-            } else {
-                if (!bankGlId) throw new Error('Selected bank has no linked bank GL. Configure in Bank Master.');
-                const { data: bankGl, error: bankGlErr } = await supabase
+
+                const { data: receivableGl, error: receivableErr } = await supabase
                     .from('gl_master')
                     .select('id, gl_code, gl_name')
                     .eq('organization_id', user.organization_id)
                     .eq('set_of_books_id', setOfBooksId)
-                    .eq('id', bankGlId)
+                    .eq('id', customerControlGlId)
                     .maybeSingle();
-                if (bankGlErr) throw bankGlErr;
-                if (!bankGl) throw new Error('GL Assignment missing for selected bank in active Set of Books.');
-                receiptGl = bankGl;
+                if (receivableErr) throw receivableErr;
+                if (!receivableGl) throw new Error('GL Assignment missing for customer control in active Set of Books.');
+
+                const { data: header, error: headerError } = await supabase
+                    .from('journal_entry_header')
+                    .insert({
+                        organization_id: user.organization_id,
+                        journal_entry_number: `RCPT-${Date.now()}`,
+                        posting_date: args.date,
+                        status: 'Posted',
+                        reference_type: args.entryCategory === 'down_payment' ? 'CUSTOMER_ADVANCE' : 'CUSTOMER_PAYMENT',
+                        reference_id: args.referenceInvoiceId || args.customerId,
+                        reference_document_id: args.referenceInvoiceId || args.customerId,
+                        document_type: 'RECEIPT',
+                        document_reference: args.referenceInvoiceNumber || args.customerId,
+                        company: companyCodeId,
+                        company_code_id: companyCodeId,
+                        set_of_books: setOfBooksId,
+                        set_of_books_id: setOfBooksId,
+                        total_debit: Number(args.amount.toFixed(2)),
+                        total_credit: Number(args.amount.toFixed(2)),
+                    })
+                    .select('id, journal_entry_number')
+                    .single();
+                if (headerError) throw headerError;
+
+                journalEntryId = header?.id;
+                journalEntryNumber = header?.journal_entry_number;
+
+                const { error: lineError } = await supabase
+                    .from('journal_entry_lines')
+                    .insert([
+                        {
+                            organization_id: user.organization_id,
+                            journal_entry_id: header.id,
+                            reference_document_id: args.referenceInvoiceId || args.customerId,
+                            document_type: 'RECEIPT',
+                            line_number: 1,
+                            gl_code: String(receiptGl.gl_code),
+                            gl_name: String(receiptGl.gl_name),
+                            debit: Number(args.amount.toFixed(2)),
+                            credit: 0,
+                            line_memo: isCashMode ? 'Payment received in cash' : 'Payment received in bank',
+                        },
+                        {
+                            organization_id: user.organization_id,
+                            journal_entry_id: header.id,
+                            reference_document_id: args.referenceInvoiceId || args.customerId,
+                            document_type: 'RECEIPT',
+                            line_number: 2,
+                            gl_code: String(receivableGl.gl_code),
+                            gl_name: String(receivableGl.gl_name),
+                            debit: 0,
+                            credit: Number(args.amount.toFixed(2)),
+                            line_memo: 'Customer receivable adjusted',
+                        },
+                    ]);
+                if (lineError) throw lineError;
+            } catch (err) {
+                console.warn('[recordCustomerPayment] Failed to post online journal entries:', err);
             }
-
-            const { data: receivableGl, error: receivableErr } = await supabase
-                .from('gl_master')
-                .select('id, gl_code, gl_name')
-                .eq('organization_id', user.organization_id)
-                .eq('set_of_books_id', setOfBooksId)
-                .eq('id', customerControlGlId)
-                .maybeSingle();
-            if (receivableErr) throw receivableErr;
-            if (!receivableGl) throw new Error('GL Assignment missing for customer control in active Set of Books.');
-
-            const { data: header, error: headerError } = await supabase
-                .from('journal_entry_header')
-                .insert({
-                    organization_id: user.organization_id,
-                    journal_entry_number: `RCPT-${Date.now()}`,
-                    posting_date: args.date,
-                    status: 'Posted',
-                    reference_type: args.entryCategory === 'down_payment' ? 'CUSTOMER_ADVANCE' : 'CUSTOMER_PAYMENT',
-                    reference_id: args.referenceInvoiceId || args.customerId,
-                    reference_document_id: args.referenceInvoiceId || args.customerId,
-                    document_type: 'RECEIPT',
-                    document_reference: args.referenceInvoiceNumber || args.customerId,
-                    company: companyCodeId,
-                    company_code_id: companyCodeId,
-                    set_of_books: setOfBooksId,
-                    set_of_books_id: setOfBooksId,
-                    total_debit: Number(args.amount.toFixed(2)),
-                    total_credit: Number(args.amount.toFixed(2)),
-                })
-                .select('id, journal_entry_number')
-                .single();
-            if (headerError) throw headerError;
-
-            journalEntryId = header?.id;
-            journalEntryNumber = header?.journal_entry_number;
-
-            const { error: lineError } = await supabase
-                .from('journal_entry_lines')
-                .insert([
-                    {
-                        organization_id: user.organization_id,
-                        journal_entry_id: header.id,
-                        reference_document_id: args.referenceInvoiceId || args.customerId,
-                        document_type: 'RECEIPT',
-                        line_number: 1,
-                        gl_code: String(receiptGl.gl_code),
-                        gl_name: String(receiptGl.gl_name),
-                        debit: Number(args.amount.toFixed(2)),
-                        credit: 0,
-                        line_memo: isCashMode ? 'Payment received in cash' : 'Payment received in bank',
-                    },
-                    {
-                        organization_id: user.organization_id,
-                        journal_entry_id: header.id,
-                        reference_document_id: args.referenceInvoiceId || args.customerId,
-                        document_type: 'RECEIPT',
-                        line_number: 2,
-                        gl_code: String(receivableGl.gl_code),
-                        gl_name: String(receivableGl.gl_name),
-                        debit: 0,
-                        credit: Number(args.amount.toFixed(2)),
-                        line_memo: 'Customer receivable adjusted',
-                    },
-                ]);
-            if (lineError) throw lineError;
         }
 
         const ledgerEntryId = args.ledgerEntryId || generateUUID();
@@ -2574,165 +2678,176 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
     };
 
     export const recordSupplierPaymentWithAccounting = async (
-            args: {
-                supplierId: string;
-                amount: number;
-                date: string;
-                description: string;
-                paymentMode: string;
-                bankAccountId: string;
-                referenceInvoiceId?: string;
-                referenceInvoiceNumber?: string;
-                entryCategory?: 'invoice_payment' | 'down_payment';
-            },
-            user: RegisteredPharmacy
+        args: {
+            supplierId: string;
+            amount: number;
+            date: string;
+            description: string;
+            paymentMode: string;
+            bankAccountId: string;
+            referenceInvoiceId?: string;
+            referenceInvoiceNumber?: string;
+            entryCategory?: 'invoice_payment' | 'down_payment';
+        },
+        user: RegisteredPharmacy
     ): Promise<{ journalEntryId?: string; journalEntryNumber?: string; ledgerEntryId: string }> => {
-            let supplier = await idb.get(STORES.SUPPLIERS, args.supplierId as any) as Supplier | undefined;
-
-            // Fallback to Supabase if local fetch fails (e.g. IndexedDB disabled)
-            if (!supplier && navigator.onLine) {
-                const { data, error } = await supabase
-                    .from('suppliers')
-                    .select('*')
-                    .eq('organization_id', user.organization_id)
-                    .eq('id', args.supplierId)
-                    .maybeSingle();
-                if (data) {
-                    supplier = fromSupabase('suppliers', data) as Supplier;
-                }
-            }
-
-            if (!supplier) {
-                const allSuppliers = await idb.getAll(STORES.SUPPLIERS) as Supplier[];
-                const targetSupplierId = String(args.supplierId || '').trim().toLowerCase();
-                supplier = allSuppliers.find((row) => String(row?.id || '').trim().toLowerCase() === targetSupplierId);
-            }
-            if (!supplier) throw new Error('Supplier not found');
-            const resolvedSupplierId = String(supplier.id);
-        if (!navigator.onLine) throw new Error('Payment posting with accounting requires online mode.');
+        const supplier = await getDataById<Supplier>('suppliers', args.supplierId, user);
+        if (!supplier) throw new Error('Supplier not found');
+        const resolvedSupplierId = String(supplier.id);
         const isCashMode = String(args.paymentMode || '').trim().toLowerCase() === 'cash';
+        
+        // Resolve bank locally or online
+        const cacheKey = `mdxera_bank_masters_${user.organization_id}`;
         let bank: any = null;
         if (!isCashMode) {
             if (!args.bankAccountId) throw new Error('Bank account is required for selected payment mode.');
-            const { data: bankRow, error: bankErr } = await supabase
-                .from('bank_master')
-                .select('*')
-                .eq('organization_id', user.organization_id)
-                .eq('id', args.bankAccountId)
-                .maybeSingle();
-            if (bankErr) throw bankErr;
-            if (!bankRow) throw new Error('Selected bank account not found');
-            bank = bankRow;
+            if (navigator.onLine) {
+                try {
+                    const { data: bankRow, error: bankErr } = await supabase
+                        .from('bank_master')
+                        .select('*')
+                        .eq('organization_id', user.organization_id)
+                        .eq('id', args.bankAccountId)
+                        .maybeSingle();
+                    if (bankErr) throw bankErr;
+                    bank = bankRow;
+                } catch (e) {
+                    console.warn('[recordSupplierPayment] Supabase bank fetch failed, using local cache:', e);
+                }
+            }
+            
+            if (!bank) {
+                try {
+                    const cached = localStorage.getItem(cacheKey);
+                    if (cached) {
+                        const list = JSON.parse(cached);
+                        bank = list.find((b: any) => b && b.id && String(b.id).trim().toLowerCase() === String(args.bankAccountId).trim().toLowerCase());
+                    }
+                } catch {}
+            }
+            if (!bank) throw new Error('Selected bank account not found');
         }
 
         const postingContext = await loadDefaultPostingContext(user.organization_id);
         const companyCodeId = postingContext.companyCodeId;
         const setOfBooksId = postingContext.setOfBooksId;
 
-        const { data: books, error: bookErr } = await supabase
-            .from('set_of_books')
-            .select('default_supplier_gl_id')
-            .eq('organization_id', user.organization_id)
-            .eq('id', setOfBooksId)
-            .single();
-        if (bookErr) throw bookErr;
-        const supplierControlGlId = books?.default_supplier_gl_id;
-        if (!supplierControlGlId) throw new Error('Supplier/Payable GL is not configured for default set of books.');
-
-        const { data: payableGl, error: payableGlErr } = await supabase
-            .from('gl_master')
-            .select('id, gl_code, gl_name')
-            .eq('organization_id', user.organization_id)
-            .eq('set_of_books_id', setOfBooksId)
-            .eq('id', supplierControlGlId)
-            .maybeSingle();
-        if (payableGlErr) throw payableGlErr;
-        if (!payableGl) throw new Error('Supplier control GL missing in active Set of Books.');
-
-        let payoutGl: any;
+        let journalEntryId: string | undefined;
+        let journalEntryNumber: string | undefined;
         let payoutAccountName = 'Cash Account';
-        if (isCashMode) {
-            const { data: cashGl, error: cashGlErr } = await supabase
-                .from('gl_master')
-                .select('id, gl_code, gl_name')
-                .eq('organization_id', user.organization_id)
-                .eq('set_of_books_id', setOfBooksId)
-                .eq('gl_code', '100001')
-                .maybeSingle();
-            if (cashGlErr) throw cashGlErr;
-            if (!cashGl) throw new Error('Cash GL (100001) is not configured in active Set of Books.');
-            payoutGl = cashGl;
-        } else {
-            const bankGlId = bank.linkedBankGlId || bank.linked_bank_gl_id;
-            if (!bankGlId) throw new Error('Selected bank has no linked bank GL. Configure in Bank Master.');
 
-            const { data: bankGl, error: bankGlErr } = await supabase
-                .from('gl_master')
-                .select('id, gl_code, gl_name')
-                .eq('organization_id', user.organization_id)
-                .eq('set_of_books_id', setOfBooksId)
-                .eq('id', bankGlId)
-                .maybeSingle();
-            if (bankGlErr) throw bankGlErr;
-            if (!bankGl) throw new Error('GL Assignment missing for selected bank in active Set of Books.');
-            payoutGl = bankGl;
-            payoutAccountName = bank.bankName || bank.bank_name || 'Bank Account';
+        if (navigator.onLine) {
+            try {
+                const { data: books, error: bookErr } = await supabase
+                    .from('set_of_books')
+                    .select('default_supplier_gl_id')
+                    .eq('organization_id', user.organization_id)
+                    .eq('id', setOfBooksId)
+                    .single();
+                if (bookErr) throw bookErr;
+                const supplierControlGlId = books?.default_supplier_gl_id;
+                if (!supplierControlGlId) throw new Error('Supplier/Payable GL is not configured for default set of books.');
+
+                const { data: payableGl, error: payableGlErr } = await supabase
+                    .from('gl_master')
+                    .select('id, gl_code, gl_name')
+                    .eq('organization_id', user.organization_id)
+                    .eq('set_of_books_id', setOfBooksId)
+                    .eq('id', supplierControlGlId)
+                    .maybeSingle();
+                if (payableGlErr) throw payableGlErr;
+                if (!payableGl) throw new Error('Supplier control GL missing in active Set of Books.');
+
+                let payoutGl: any;
+                if (isCashMode) {
+                    const { data: cashGl, error: cashGlErr } = await supabase
+                        .from('gl_master')
+                        .select('id, gl_code, gl_name')
+                        .eq('organization_id', user.organization_id)
+                        .eq('set_of_books_id', setOfBooksId)
+                        .eq('gl_code', '100001')
+                        .maybeSingle();
+                    if (cashGlErr) throw cashGlErr;
+                    if (!cashGl) throw new Error('Cash GL (100001) is not configured in active Set of Books.');
+                    payoutGl = cashGl;
+                } else {
+                    const bankGlId = bank.linkedBankGlId || bank.linked_bank_gl_id;
+                    if (!bankGlId) throw new Error('Selected bank has no linked bank GL. Configure in Bank Master.');
+
+                    const { data: bankGl, error: bankGlErr } = await supabase
+                        .from('gl_master')
+                        .select('id, gl_code, gl_name')
+                        .eq('organization_id', user.organization_id)
+                        .eq('set_of_books_id', setOfBooksId)
+                        .eq('id', bankGlId)
+                        .maybeSingle();
+                    if (bankGlErr) throw bankGlErr;
+                    if (!bankGl) throw new Error('GL Assignment missing for selected bank in active Set of Books.');
+                    payoutGl = bankGl;
+                    payoutAccountName = bank.bankName || bank.bank_name || 'Bank Account';
+                }
+
+                const supplierPaymentVoucherNumber = `PMT-${Date.now()}`;
+
+                const { data: header, error: headerError } = await supabase
+                    .from('journal_entry_header')
+                    .insert({
+                        organization_id: user.organization_id,
+                        journal_entry_number: supplierPaymentVoucherNumber,
+                        posting_date: args.date,
+                        status: 'Posted',
+                        reference_type: args.entryCategory === 'down_payment' ? 'SUPPLIER_ADVANCE' : 'SUPPLIER_PAYMENT',
+                        reference_id: args.referenceInvoiceId || resolvedSupplierId,
+                        reference_document_id: args.referenceInvoiceId || resolvedSupplierId,
+                        document_type: 'PAYMENT',
+                        document_reference: args.referenceInvoiceNumber || resolvedSupplierId,
+                        company: companyCodeId,
+                        company_code_id: companyCodeId,
+                        set_of_books: setOfBooksId,
+                        set_of_books_id: setOfBooksId,
+                        total_debit: Number(args.amount.toFixed(2)),
+                        total_credit: Number(args.amount.toFixed(2)),
+                    })
+                    .select('id, journal_entry_number')
+                    .single();
+                if (headerError) throw headerError;
+
+                journalEntryId = header?.id;
+                journalEntryNumber = header?.journal_entry_number;
+
+                const { error: lineError } = await supabase
+                    .from('journal_entry_lines')
+                    .insert([
+                        {
+                            organization_id: user.organization_id,
+                            journal_entry_id: header.id,
+                            reference_document_id: args.referenceInvoiceId || resolvedSupplierId,
+                            document_type: 'PAYMENT',
+                            line_number: 1,
+                            gl_code: String(payableGl.gl_code),
+                            gl_name: String(payableGl.gl_name),
+                            debit: Number(args.amount.toFixed(2)),
+                            credit: 0,
+                            line_memo: 'Supplier payable adjusted',
+                        },
+                        {
+                            organization_id: user.organization_id,
+                            journal_entry_id: header.id,
+                            reference_document_id: args.referenceInvoiceId || resolvedSupplierId,
+                            document_type: 'PAYMENT',
+                            line_number: 2,
+                            gl_code: String(payoutGl.gl_code),
+                            gl_name: String(payoutGl.gl_name),
+                            debit: 0,
+                            credit: Number(args.amount.toFixed(2)),
+                            line_memo: isCashMode ? 'Payment made from cash account' : 'Payment made from bank account',
+                        },
+                    ]);
+                if (lineError) throw lineError;
+            } catch (err) {
+                console.warn('[recordSupplierPayment] Failed to post online journal entries:', err);
+            }
         }
-
-        const supplierPaymentVoucherNumber = `PMT-${Date.now()}`;
-
-        const { data: header, error: headerError } = await supabase
-            .from('journal_entry_header')
-            .insert({
-                organization_id: user.organization_id,
-                journal_entry_number: supplierPaymentVoucherNumber,
-                posting_date: args.date,
-                status: 'Posted',
-                reference_type: args.entryCategory === 'down_payment' ? 'SUPPLIER_ADVANCE' : 'SUPPLIER_PAYMENT',
-                reference_id: args.referenceInvoiceId || resolvedSupplierId,
-                reference_document_id: args.referenceInvoiceId || resolvedSupplierId,
-                document_type: 'PAYMENT',
-                document_reference: args.referenceInvoiceNumber || resolvedSupplierId,
-                company: companyCodeId,
-                company_code_id: companyCodeId,
-                set_of_books: setOfBooksId,
-                set_of_books_id: setOfBooksId,
-                total_debit: Number(args.amount.toFixed(2)),
-                total_credit: Number(args.amount.toFixed(2)),
-            })
-            .select('id, journal_entry_number')
-            .single();
-        if (headerError) throw headerError;
-
-        const { error: lineError } = await supabase
-            .from('journal_entry_lines')
-            .insert([
-                {
-                    organization_id: user.organization_id,
-                    journal_entry_id: header.id,
-                    reference_document_id: args.referenceInvoiceId || resolvedSupplierId,
-                    document_type: 'PAYMENT',
-                    line_number: 1,
-                    gl_code: String(payableGl.gl_code),
-                    gl_name: String(payableGl.gl_name),
-                    debit: Number(args.amount.toFixed(2)),
-                    credit: 0,
-                    line_memo: 'Supplier payable adjusted',
-                },
-                {
-                    organization_id: user.organization_id,
-                    journal_entry_id: header.id,
-                    reference_document_id: args.referenceInvoiceId || resolvedSupplierId,
-                    document_type: 'PAYMENT',
-                    line_number: 2,
-                    gl_code: String(payoutGl.gl_code),
-                    gl_name: String(payoutGl.gl_name),
-                    debit: 0,
-                    credit: Number(args.amount.toFixed(2)),
-                    line_memo: isCashMode ? 'Payment made from cash account' : 'Payment made from bank account',
-                },
-            ]);
-        if (lineError) throw lineError;
 
         const ledgerEntryId = generateUUID();
         await addLedgerEntry({
@@ -2749,15 +2864,11 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
             bankName: payoutAccountName,
             referenceInvoiceId: args.referenceInvoiceId,
             referenceInvoiceNumber: args.referenceInvoiceNumber,
-            journalEntryId: header.id,
-            journalEntryNumber: header.journal_entry_number,
+            journalEntryId,
+            journalEntryNumber,
         }, { type: 'supplier', id: resolvedSupplierId }, user);
 
-        return {
-            journalEntryId: header.id,
-            journalEntryNumber: header.journal_entry_number,
-            ledgerEntryId,
-        };
+        return { journalEntryId, journalEntryNumber, ledgerEntryId };
     };
 
     export const recordCustomerDownPaymentAdjustment = async (
@@ -2854,16 +2965,41 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
             }, 0);
         };
         const resolveLocalInvoice = async (): Promise<number | null> => {
+            // Legacy IndexedDB check
             const localTxns = await idb.getAll(STORES.SALES_BILL) as Transaction[];
-            const localMatch = localTxns.find((row) => {
+            let match = localTxns.find((row) => {
                 if (!row || row.status === 'cancelled') return false;
                 const belongsToCustomer = row.customerId === customer.id || String(row.customerName || '').trim().toLowerCase() === normalizedCustomerName;
                 if (!belongsToCustomer) return false;
                 return row.id === normalizedInvoiceRef || String(row.invoiceNumber || '').trim().toLowerCase() === normalizedInvoiceRefLower;
             });
-            if (!localMatch) return null;
-            const invoiceTotal = Number(localMatch.total || 0);
-            const adjustedAmount = resolveAdjustedAmountFromLedger(localMatch.id, localMatch.invoiceNumber);
+
+            // Modern SQLite check (Offline App)
+            if (!match) {
+                try {
+                    const rows = await sqliteDb.select<Transaction>(`SELECT * FROM ${SCHEMA_TABLE.SALES_BILL} WHERE organization_id = ?`, [user.organization_id]);
+                    let decodedMatch = undefined;
+                    for (const rawRow of rows) {
+                        const row = fromSupabase('sales_bill', decodeSqliteRow('sales_bill', rawRow));
+                        if (!row || row.status === 'cancelled') continue;
+                        const belongsToCustomer = row.customerId === customer.id || String(row.customerName || '').trim().toLowerCase() === normalizedCustomerName;
+                        if (!belongsToCustomer) continue;
+                        if (row.id === normalizedInvoiceRef || String(row.invoiceNumber || '').trim().toLowerCase() === normalizedInvoiceRefLower) {
+                            decodedMatch = row;
+                            break;
+                        }
+                    }
+                    if (decodedMatch) {
+                        match = decodedMatch;
+                    }
+                } catch (err) {
+                    console.warn('[getCustomerInvoiceTotal] SQLite query failed:', err);
+                }
+            }
+
+            if (!match) return null;
+            const invoiceTotal = Number(match.total || 0);
+            const adjustedAmount = resolveAdjustedAmountFromLedger(match.id, match.invoiceNumber);
             const pendingBalance = Number((invoiceTotal - adjustedAmount).toFixed(2));
             if (pendingBalance <= 0) throw new Error('Invoice is already fully settled and cannot receive duplicate payment.');
             return invoiceTotal;
@@ -2873,13 +3009,15 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
         if (localTotal !== null) return localTotal;
 
         if (navigator.onLine) {
-            const { data: invoices } = await supabase
+            const { data: rawInvoices, error } = await supabase
                 .from('sales_bill')
-                .select('id, invoiceNumber, customerId, customerName, total, status')
+                .select('*')
                 .eq('organization_id', user.organization_id)
-                .or(`id.eq.${normalizedInvoiceRef},invoiceNumber.eq.${normalizedInvoiceRef}`);
-
-            const remoteMatch = (invoices || []).find((row: { id?: string; invoiceNumber?: string; customerId?: string; customerName?: string; total?: number; status?: string; }) => {
+                .or(`id.ilike.${invoiceRef.trim()},invoice_number.ilike.${invoiceRef.trim()}`);
+            if (error) console.warn('[getCustomerInvoiceTotal] Supabase error:', error);
+            
+            const invoices = (rawInvoices || []).map(r => fromSupabase('sales_bill', r));
+            const remoteMatch = invoices.find((row: any) => {
                 if (!row || row.status === 'cancelled') return false;
                 const belongsToCustomer = row.customerId === customer.id || String(row.customerName || '').trim().toLowerCase() === normalizedCustomerName;
                 if (!belongsToCustomer) return false;
@@ -2899,8 +3037,30 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
     };
 
     const getSupplierInvoiceTotal = async (supplier: Supplier, invoiceId: string, user: RegisteredPharmacy): Promise<number> => {
+        // Legacy IndexedDB check
         const localPurchases = await idb.getAll(STORES.PURCHASES) as Purchase[];
-        const localMatch = localPurchases.find((row) => row?.id === invoiceId && row?.status !== 'cancelled' && String(row?.supplier || '').trim().toLowerCase() === String(supplier.name || '').trim().toLowerCase());
+        let localMatch = localPurchases.find((row) => row?.id === invoiceId && row?.status !== 'cancelled' && String(row?.supplier || '').trim().toLowerCase() === String(supplier.name || '').trim().toLowerCase());
+
+        // Modern SQLite check (Offline App)
+        if (!localMatch) {
+            try {
+                const rows = await sqliteDb.select<Purchase>(`SELECT * FROM ${SCHEMA_TABLE.PURCHASES} WHERE organization_id = ?`, [user.organization_id]);
+                let decodedMatch = undefined;
+                for (const rawRow of rows) {
+                    const row = fromSupabase('purchases', decodeSqliteRow('purchases', rawRow));
+                    if (row?.id === invoiceId && row?.status !== 'cancelled' && String(row?.supplier || '').trim().toLowerCase() === String(supplier.name || '').trim().toLowerCase()) {
+                        decodedMatch = row;
+                        break;
+                    }
+                }
+                if (decodedMatch) {
+                    localMatch = decodedMatch;
+                }
+            } catch (err) {
+                console.warn('[getSupplierInvoiceTotal] SQLite query failed:', err);
+            }
+        }
+
         if (localMatch) return Number(localMatch.totalAmount || 0);
 
         if (navigator.onLine) {
@@ -3195,24 +3355,70 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
             return;
         }
 
-        const { data: setOfBooks, error: sobError } = await supabase
-            .from('set_of_books')
-            .select('id, set_of_books_id, company_code_id, default_customer_gl_id, default_supplier_gl_id')
-            .eq('organization_id', user.organization_id)
-            .eq('id', args.setOfBooksId)
-            .single();
-        if (sobError || !setOfBooks || setOfBooks.company_code_id !== args.companyCodeId) {
+        let setOfBooks: any = null;
+        try {
+            const sobRows = await sqliteDb.select<{ id: string; set_of_books_id: string; company_code_id: string; default_customer_gl_id: string; default_supplier_gl_id: string }>(
+                `SELECT id, set_of_books_id, company_code_id, default_customer_gl_id, default_supplier_gl_id FROM ${SCHEMA_TABLE.SET_OF_BOOKS} WHERE organization_id = ? AND id = ? LIMIT 1`,
+                [user.organization_id, args.setOfBooksId]
+            );
+            if (sobRows && sobRows.length > 0) {
+                setOfBooks = sobRows[0];
+            }
+        } catch (err) {
+            console.warn('[postJournal] SQLite query for set_of_books failed:', err);
+        }
+
+        if (!setOfBooks && navigator.onLine) {
+            try {
+                const { data } = await supabase
+                    .from('set_of_books')
+                    .select('id, set_of_books_id, company_code_id, default_customer_gl_id, default_supplier_gl_id')
+                    .eq('organization_id', user.organization_id)
+                    .eq('id', args.setOfBooksId)
+                    .single();
+                setOfBooks = data;
+            } catch (err) {
+                console.warn('[postJournal] Supabase query for set_of_books failed:', err);
+            }
+        }
+
+        if (!setOfBooks || setOfBooks.company_code_id !== args.companyCodeId) {
             throw new Error(DEFAULT_CONFIG_MISSING_MESSAGE);
         }
 
         const glIds = Array.from(new Set(args.lines.map(l => l.glId)));
-        const { data: glRows, error: glError } = await supabase
-            .from('gl_master')
-            .select('id, gl_code, gl_name, set_of_books_id')
-            .eq('organization_id', user.organization_id)
-            .eq('set_of_books_id', args.setOfBooksId)
-            .in('id', glIds);
-        if (glError) throw glError;
+        let glRows: any[] = [];
+        try {
+            const placeholders = glIds.map(() => '?').join(',');
+            const rows = await sqliteDb.select<any>(
+                `SELECT id, gl_code, gl_name, set_of_books_id FROM ${SCHEMA_TABLE.GL_MASTER} WHERE organization_id = ? AND set_of_books_id = ? AND id IN (${placeholders})`,
+                [user.organization_id, args.setOfBooksId, ...glIds]
+            );
+            if (rows) {
+                glRows = rows;
+            }
+        } catch (err) {
+            console.warn('[postJournal] SQLite query for gl_master failed:', err);
+        }
+
+        const foundIds = new Set(glRows.map(r => String(r.id)));
+        const missingIds = glIds.filter(id => !foundIds.has(id));
+        if (missingIds.length > 0 && navigator.onLine) {
+            try {
+                const { data: remoteRows } = await supabase
+                    .from('gl_master')
+                    .select('id, gl_code, gl_name, set_of_books_id')
+                    .eq('organization_id', user.organization_id)
+                    .eq('set_of_books_id', args.setOfBooksId)
+                    .in('id', missingIds);
+                if (remoteRows) {
+                    glRows = [...glRows, ...remoteRows];
+                }
+            } catch (err) {
+                console.warn('[postJournal] Supabase query for gl_master failed:', err);
+            }
+        }
+
         const glById = new Map((glRows || []).map((g: any) => [g.id, g]));
 
         const enrichedLines = args.lines.map((line) => {
@@ -3385,23 +3591,75 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
         tx.companyCodeId = postingContext.companyCodeId;
         tx.setOfBooksId = postingContext.setOfBooksId;
 
-        const { data: books } = await supabase
-            .from('set_of_books')
-            .select('default_customer_gl_id')
-            .eq('organization_id', user.organization_id)
-            .eq('id', tx.setOfBooksId)
-            .single();
-        const customerControlGl = books?.default_customer_gl_id;
+        let customerControlGl: string | undefined;
+        try {
+            const sobRows = await sqliteDb.select<{ default_customer_gl_id: string }>(
+                `SELECT default_customer_gl_id FROM ${SCHEMA_TABLE.SET_OF_BOOKS} WHERE organization_id = ? AND id = ? LIMIT 1`,
+                [user.organization_id, tx.setOfBooksId]
+            );
+            if (sobRows && sobRows.length > 0) {
+                customerControlGl = sobRows[0].default_customer_gl_id;
+            }
+        } catch (err) {
+            console.warn('[syncSalesLedger] SQLite query for set_of_books failed:', err);
+        }
+
+        if (!customerControlGl && navigator.onLine) {
+            try {
+                const { data: books } = await supabase
+                    .from('set_of_books')
+                    .select('default_customer_gl_id')
+                    .eq('organization_id', user.organization_id)
+                    .eq('id', tx.setOfBooksId)
+                    .single();
+                customerControlGl = books?.default_customer_gl_id;
+            } catch (err) {
+                console.warn('[syncSalesLedger] Supabase query for set_of_books failed:', err);
+            }
+        }
+
         if (!customerControlGl) throw new Error('GL Assignment missing for Material Type under selected Set of Books. Please configure in Utilities & Setup.');
 
-        const { data: glRows, error: glError } = await supabase
-            .from('gl_master')
-            .select('id, gl_code')
-            .eq('organization_id', user.organization_id)
-            .eq('set_of_books_id', tx.setOfBooksId)
-            .in('gl_code', ['100001', '400100', '210110', '210120', '210130', '510000']);
-        if (glError) throw glError;
-        const glByCode = new Map((glRows || []).map((row: any) => [String(row.gl_code), String(row.id)]));
+        let glRows: { id: string; gl_code: string }[] = [];
+        const requiredCodes = ['100001', '400100', '210110', '210120', '210130', '510000'];
+        try {
+            const placeholders = requiredCodes.map(() => '?').join(',');
+            const rows = await sqliteDb.select<{ id: string; gl_code: string }>(
+                `SELECT id, gl_code FROM ${SCHEMA_TABLE.GL_MASTER} WHERE organization_id = ? AND set_of_books_id = ? AND gl_code IN (${placeholders})`,
+                [user.organization_id, tx.setOfBooksId, ...requiredCodes]
+            );
+            if (rows) {
+                glRows = rows;
+            }
+        } catch (err) {
+            console.warn('[syncSalesLedger] SQLite query for gl_master failed:', err);
+        }
+
+        const foundCodes = new Set(glRows.map(r => String(r.gl_code)));
+        const missingCodes = requiredCodes.filter(c => !foundCodes.has(c));
+        if (missingCodes.length > 0 && navigator.onLine) {
+            try {
+                const { data: remoteRows } = await supabase
+                    .from('gl_master')
+                    .select('id, gl_code')
+                    .eq('organization_id', user.organization_id)
+                    .eq('set_of_books_id', tx.setOfBooksId)
+                    .in('gl_code', requiredCodes);
+                if (remoteRows) {
+                    const combined = [...glRows];
+                    for (const r of remoteRows) {
+                        if (!combined.some(c => String(c.gl_code) === String(r.gl_code))) {
+                            combined.push({ id: r.id, gl_code: r.gl_code });
+                        }
+                    }
+                    glRows = combined;
+                }
+            } catch (err) {
+                console.warn('[syncSalesLedger] Supabase query for gl_master failed:', err);
+            }
+        }
+
+        const glByCode = new Map(glRows.map((row) => [String(row.gl_code), String(row.id)]));
 
         const salesGl = glByCode.get('400100');
         const outputCgstGl = glByCode.get('210110');
@@ -3592,30 +3850,94 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
             return;
         }
 
-        const { data: assignments, error: assignmentError } = await supabase
-            .from('gl_assignments')
-            .select('material_master_type, purchase_gl, tax_gl')
-            .eq('organization_id', user.organization_id)
-            .eq('set_of_books_id', purchase.setOfBooksId);
-        if (assignmentError) throw assignmentError;
+        let assignments: { material_master_type: string; purchase_gl: string; tax_gl: string }[] = [];
+        try {
+            const rows = await sqliteDb.select<{ material_master_type: string; purchase_gl: string; tax_gl: string }>(
+                `SELECT material_master_type, purchase_gl, tax_gl FROM ${SCHEMA_TABLE.GL_ASSIGNMENTS} WHERE organization_id = ? AND set_of_books_id = ?`,
+                [user.organization_id, purchase.setOfBooksId]
+            );
+            if (rows) {
+                assignments = rows;
+            }
+        } catch (err) {
+            console.warn('[syncPurchaseLedger] SQLite query for gl_assignments failed:', err);
+        }
+
+        if (assignments.length === 0 && navigator.onLine) {
+            try {
+                const { data: remoteAssignments } = await supabase
+                    .from('gl_assignments')
+                    .select('material_master_type, purchase_gl, tax_gl')
+                    .eq('organization_id', user.organization_id)
+                    .eq('set_of_books_id', purchase.setOfBooksId);
+                if (remoteAssignments) {
+                    assignments = remoteAssignments;
+                }
+            } catch (err) {
+                console.warn('[syncPurchaseLedger] Supabase query for gl_assignments failed:', err);
+            }
+        }
 
         const assignmentByType = new Map((assignments || []).map((a: any) => [a.material_master_type, a]));
-        const { data: books } = await supabase
-            .from('set_of_books')
-            .select('default_supplier_gl_id')
-            .eq('organization_id', user.organization_id)
-            .eq('id', purchase.setOfBooksId)
-            .single();
-        const supplierControlGl = books?.default_supplier_gl_id;
+
+        let supplierControlGl: string | undefined;
+        try {
+            const sobRows = await sqliteDb.select<{ default_supplier_gl_id: string }>(
+                `SELECT default_supplier_gl_id FROM ${SCHEMA_TABLE.SET_OF_BOOKS} WHERE organization_id = ? AND id = ? LIMIT 1`,
+                [user.organization_id, purchase.setOfBooksId]
+            );
+            if (sobRows && sobRows.length > 0) {
+                supplierControlGl = sobRows[0].default_supplier_gl_id;
+            }
+        } catch (err) {
+            console.warn('[syncPurchaseLedger] SQLite query for set_of_books failed:', err);
+        }
+
+        if (!supplierControlGl && navigator.onLine) {
+            try {
+                const { data: books } = await supabase
+                    .from('set_of_books')
+                    .select('default_supplier_gl_id')
+                    .eq('organization_id', user.organization_id)
+                    .eq('id', purchase.setOfBooksId)
+                    .single();
+                supplierControlGl = books?.default_supplier_gl_id;
+            } catch (err) {
+                console.warn('[syncPurchaseLedger] Supabase query for set_of_books failed:', err);
+            }
+        }
+
         if (!supplierControlGl) throw new Error('GL Assignment missing for Material Type under selected Set of Books. Please configure in Utilities & Setup.');
 
-        const { data: glRows, error: glError } = await supabase
-            .from('gl_master')
-            .select('id, gl_code')
-            .eq('organization_id', user.organization_id)
-            .eq('set_of_books_id', purchase.setOfBooksId)
-            .in('gl_code', ['510000']);
-        if (glError) throw glError;
+        let glRows: { id: string; gl_code: string }[] = [];
+        try {
+            const rows = await sqliteDb.select<{ id: string; gl_code: string }>(
+                `SELECT id, gl_code FROM ${SCHEMA_TABLE.GL_MASTER} WHERE organization_id = ? AND set_of_books_id = ? AND gl_code = ? LIMIT 1`,
+                [user.organization_id, purchase.setOfBooksId, '510000']
+            );
+            if (rows) {
+                glRows = rows;
+            }
+        } catch (err) {
+            console.warn('[syncPurchaseLedger] SQLite query for gl_master failed:', err);
+        }
+
+        if (glRows.length === 0 && navigator.onLine) {
+            try {
+                const { data: remoteRows } = await supabase
+                    .from('gl_master')
+                    .select('id, gl_code')
+                    .eq('organization_id', user.organization_id)
+                    .eq('set_of_books_id', purchase.setOfBooksId)
+                    .in('gl_code', ['510000']);
+                if (remoteRows) {
+                    glRows = remoteRows;
+                }
+            } catch (err) {
+                console.warn('[syncPurchaseLedger] Supabase query for gl_master failed:', err);
+            }
+        }
+
         const roundOffGl = (glRows || []).find((row: any) => String(row.gl_code) === '510000')?.id;
 
         const lineAcc = new Map<string, { debit: number; credit: number; memo: string }>();
@@ -3824,26 +4146,67 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
     export const postManualSalesVoucher = async (args: ManualSalesPostingInput, user: RegisteredPharmacy): Promise<void> => {
         const postingContext = await ensurePostingContext({}, user);
 
-        const { data: books } = await supabase
-            .from('set_of_books')
-            .select('default_customer_gl_id')
-            .eq('organization_id', user.organization_id)
-            .eq('id', postingContext.setOfBooksId)
-            .single();
+        let defaultCustomerGlId: string | undefined;
+        try {
+            const sobRows = await sqliteDb.select<{ default_customer_gl_id: string }>(
+                `SELECT default_customer_gl_id FROM ${SCHEMA_TABLE.SET_OF_BOOKS} WHERE organization_id = ? AND id = ? LIMIT 1`,
+                [user.organization_id, postingContext.setOfBooksId]
+            );
+            if (sobRows && sobRows.length > 0) {
+                defaultCustomerGlId = sobRows[0].default_customer_gl_id;
+            }
+        } catch (err) {
+            console.warn('[postManualSalesVoucher] SQLite query for set_of_books failed:', err);
+        }
 
-        const receivableGl = args.customerControlGlId || books?.default_customer_gl_id;
+        if (!defaultCustomerGlId && navigator.onLine) {
+            try {
+                const { data } = await supabase
+                    .from('set_of_books')
+                    .select('default_customer_gl_id')
+                    .eq('organization_id', user.organization_id)
+                    .eq('id', postingContext.setOfBooksId)
+                    .single();
+                defaultCustomerGlId = data?.default_customer_gl_id;
+            } catch (err) {
+                console.warn('[postManualSalesVoucher] Supabase query for set_of_books failed:', err);
+            }
+        }
+
+        const receivableGl = args.customerControlGlId || defaultCustomerGlId;
         if (!receivableGl) {
             throw new Error('Customer/Receivable GL is not configured for default set of books.');
         }
 
-        const { data: cashGlRows, error: cashGlError } = await supabase
-            .from('gl_master')
-            .select('id, gl_code')
-            .eq('organization_id', user.organization_id)
-            .eq('set_of_books_id', postingContext.setOfBooksId)
-            .eq('gl_code', '100001')
-            .limit(1);
-        if (cashGlError) throw cashGlError;
+        let cashGlId: string | undefined;
+        try {
+            const rows = await sqliteDb.select<{ id: string }>(
+                `SELECT id FROM ${SCHEMA_TABLE.GL_MASTER} WHERE organization_id = ? AND set_of_books_id = ? AND gl_code = ? LIMIT 1`,
+                [user.organization_id, postingContext.setOfBooksId, '100001']
+            );
+            if (rows && rows.length > 0) {
+                cashGlId = rows[0].id;
+            }
+        } catch (err) {
+            console.warn('[postManualSalesVoucher] SQLite query for gl_master failed:', err);
+        }
+
+        if (!cashGlId && navigator.onLine) {
+            try {
+                const { data } = await supabase
+                    .from('gl_master')
+                    .select('id, gl_code')
+                    .eq('organization_id', user.organization_id)
+                    .eq('set_of_books_id', postingContext.setOfBooksId)
+                    .eq('gl_code', '100001')
+                    .limit(1);
+                cashGlId = data?.[0]?.id;
+            } catch (err) {
+                console.warn('[postManualSalesVoucher] Supabase query for gl_master failed:', err);
+            }
+        }
+
+        const cashGlRows = cashGlId ? [{ id: cashGlId }] : [];
 
         const isImmediatePayment = ['cash', 'card', 'upi', 'bank'].includes(String(args.paymentMode || '').toLowerCase());
         const linkedBankGlId = isImmediatePayment ? await resolveLinkedBankGlId(user, postingContext.companyCodeId) : null;

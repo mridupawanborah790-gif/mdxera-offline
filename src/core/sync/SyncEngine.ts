@@ -4,6 +4,8 @@ import { processSyncQueue } from './SyncWorker';
 import { pullDeltaFromSupabase } from './SyncPuller';
 import { warmupVoucherSeries } from '@core/voucher/voucherService';
 
+const syncChannel = new BroadcastChannel('mdxera-sync-channel');
+
 export type SyncStatus = 'idle' | 'syncing' | 'offline' | 'error';
 
 type StatusListener = (status: SyncStatus, details?: string) => void;
@@ -47,7 +49,17 @@ async function runSyncCycle(skipConnectivityCheck = false): Promise<void> {
       return;
     }
 
-    setStatus('syncing');
+    const pendingCount = await SyncQueue.pendingCount();
+    const shouldShowSyncing = skipConnectivityCheck || pendingCount > 0;
+    if (shouldShowSyncing) {
+      setStatus('syncing');
+    }
+
+    try {
+      await pullDeltaFromSupabase(_organizationId);
+    } catch (pullErr) {
+      console.warn('[SyncEngine] pull failed during sync cycle:', pullErr);
+    }
 
     // Push local pending changes first
     const result = await processSyncQueue();
@@ -88,6 +100,11 @@ function scheduleSyncCycle() {
 export const SyncEngine = {
   /** Initialize and start the sync engine. Call once after auth. */
   start(organizationId: string, supabaseUrl: string): void {
+    syncChannel.onmessage = (event) => {
+        if (event.data?.action === 'pull_now') {
+            this.forceSync().catch(console.warn);
+        }
+    };
     _organizationId = organizationId;
     _supabaseUrl = supabaseUrl;
     _running = true;

@@ -1,4 +1,4 @@
-﻿import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import Card from '@core/components/ui/Card';
 import Modal from '@core/components/ui/Modal';
 import { Customer, RegisteredPharmacy, Transaction, TransactionLedgerItem } from '@core/types';
@@ -549,7 +549,7 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
             setIsAmountManuallyEdited(false);
             setSubmitError('');
         } catch (error) {
-            const message = error instanceof Error ? error.message : 'Unable to post customer receipt. Please try again.';
+            const message = error instanceof Error ? error.message : ((error as any)?.message || JSON.stringify(error) || 'Unable to post customer receipt. Please try again.');
             setSubmitError(message);
         } finally {
             setIsSubmitting(false);

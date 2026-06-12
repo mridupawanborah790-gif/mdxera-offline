@@ -71,6 +71,7 @@ import { filterNavByVisibility } from '@core/visibility/useModuleVisibility';
 import ModuleVisibility from '@modules/configuration/components/ModuleVisibility';
 import { normalizeStockHandlingConfig, resolveStockHandlingConfig, logStockMovement } from '@core/utils/stockHandling';
 import SyncBootstrap, { triggerFullResync, triggerFreshInstallSync } from '@core/sync/SyncBootstrap';
+import { SyncEngine } from '@core/sync/SyncEngine';
 import FreshInstallSyncDialog from '@core/components/feedback/FreshInstallSyncDialog';
 import { resolveAsset } from '@core/utils/assetCache';
 
@@ -112,6 +113,14 @@ const App: React.FC = () => {
     const [currentDailyReportId, setCurrentDailyReportId] = useState('dispatchSummary');
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [isAppLoading, setIsAppLoading] = useState(true);
+    const [loadingProgress, setLoadingProgress] = useState(0);
+    useEffect(() => {
+        if (!isAppLoading) return;
+        const interval = setInterval(() => {
+            setLoadingProgress((prev) => (prev >= 10 ? 0 : prev + 1));
+        }, 300);
+        return () => clearInterval(interval);
+    }, [isAppLoading]);
     const [appLoadError, setAppLoadError] = useState<string | null>(null);
     const [isReloading, setIsReloading] = useState(false);
     const [isMigrationLocked, setIsMigrationLocked] = useState(false);
@@ -119,6 +128,13 @@ const App: React.FC = () => {
     const [migrationPopupToken, setMigrationPopupToken] = useState(0);
     const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
     const [isRealtimeActive, setIsRealtimeActive] = useState(false);
+    const [syncStatus, setSyncStatus] = useState<string>('idle');
+    useEffect(() => {
+        const unsub = SyncEngine.on((status) => {
+            setSyncStatus(status);
+        });
+        return unsub;
+    }, []);
     const [isOperationLoading, setIsOperationLoading] = useState(false);
 
     const [showLogoutPrompt, setShowLogoutPrompt] = useState(false);
@@ -461,26 +477,26 @@ const App: React.FC = () => {
             if (mode === 'targeted' && specificTable) {
                 switch (specificTable) {
                     case 'inventory': {
-                        const latestInventory = await storage.fetchInventory(user);
+                        const latestInventory = await storage.fetchInventory(user, true);
                         setInventory(syncInventoryFromMaterialMaster(latestInventory, medicinesRef.current));
                         break;
                     }
                     case 'material_master': {
-                        const latestMedicines = await storage.fetchMedicineMaster(user);
+                        const latestMedicines = await storage.fetchMedicineMaster(user, true);
                         setMedicines(latestMedicines);
                         setInventory(prev => syncInventoryFromMaterialMaster(prev, latestMedicines));
                         break;
                     }
                     case 'sales_bill':
                     case 'transactions':
-                        setTransactions(await storage.fetchTransactions(user));
+                        setTransactions(await storage.fetchTransactions(user, true));
                         break;
-                    case 'purchases': setPurchases(await storage.fetchPurchases(user)); break;
-                    case 'suppliers': setSuppliers(await storage.fetchSuppliers(user)); break;
-                    case 'customers': setCustomers(await storage.fetchCustomers(user)); break;
-                    case 'doctor_master': setDoctors(await storage.fetchDoctors(user)); break;
+                    case 'purchases': setPurchases(await storage.fetchPurchases(user, true)); break;
+                    case 'suppliers': setSuppliers(await storage.fetchSuppliers(user, true)); break;
+                    case 'customers': setCustomers(await storage.fetchCustomers(user, true)); break;
+                    case 'doctor_master': setDoctors(await storage.fetchDoctors(user, true)); break;
                     case 'configurations':
-                        const cfg = await storage.getData('configurations', [], user);
+                        const cfg = await storage.getData('configurations', [], user, true);
                         if (cfg && cfg.length > 0) {
                             const normalizedConfig = normalizeStockHandlingConfig(cfg[0]);
                             setConfigurations(normalizedConfig);
@@ -488,16 +504,16 @@ const App: React.FC = () => {
                                 (cfg[0].displayOptions?.strictStock ?? true) &&
                                 (cfg[0].displayOptions?.enableNegativeStock ?? false)
                             ) {
-                                await storage.saveData('configurations', normalizedConfig, user);
+                                storage.saveData('configurations', normalizedConfig, user).catch(console.error);
                             }
                         }
                         break;
-                    case 'delivery_challans': setDeliveryChallans(await storage.getData('delivery_challans', [], user)); break;
-                    case 'sales_challans': setSalesChallans(await storage.getData('sales_challans', [], user)); break;
-                    case 'sales_returns': setSalesReturns(await storage.getData('sales_returns', [], user)); break;
-                    case 'purchase_returns': setPurchaseReturns(await storage.getData('purchase_returns', [], user)); break;
-                    case 'purchase_orders': setPurchaseOrders(await storage.fetchPurchaseOrders(user)); break;
-                    case 'physical_inventory': setPhysicalInventory(await storage.fetchPhysicalInventory(user)); break;
+                    case 'delivery_challans': setDeliveryChallans(await storage.getData('delivery_challans', [], user, true)); break;
+                    case 'sales_challans': setSalesChallans(await storage.getData('sales_challans', [], user, true)); break;
+                    case 'sales_returns': setSalesReturns(await storage.getData('sales_returns', [], user, true)); break;
+                    case 'purchase_returns': setPurchaseReturns(await storage.getData('purchase_returns', [], user, true)); break;
+                    case 'purchase_orders': setPurchaseOrders(await storage.fetchPurchaseOrders(user, true)); break;
+                    case 'physical_inventory': setPhysicalInventory(await storage.fetchPhysicalInventory(user, true)); break;
                     case 'categories': setCategories(await storage.getData('categories', [], user)); break;
                     case 'sub_categories': setSubCategories(await storage.getData('sub_categories', [], user)); break;
                     case 'supplier_product_map': setMappings(await storage.fetchSupplierProductMaps(user)); break;
@@ -549,6 +565,7 @@ const App: React.FC = () => {
                 ['team members', withTimeout('Team Members', storage.fetchTeamMembers(user))],
                 ['business roles', withTimeout('Business Roles', storage.getData('business_roles', [], user))],
                 ['configurations', withTimeout('Configurations', storage.getData('configurations', [{ organization_id: orgId }], user))],
+                ['bank masters', withTimeout('Bank Masters', storage.fetchBankMasters(user))],
                 ['mrp logs', withTimeout('MRP Logs', storage.getData('mrp_change_log', [], user))]
             ];
 
@@ -578,7 +595,8 @@ const App: React.FC = () => {
             const team = readSettled<OrganizationMember[]>(19, []);
             const roleData = readSettled<BusinessRole[]>(20, []);
             const configData = readSettled<AppConfigurations[]>(21, [{ organization_id: orgId } as AppConfigurations]);
-            const mrpLogs = readSettled<MrpChangeLogEntry[]>(22, []);
+            const bankMastersData = readSettled<any[]>(22, []);
+            const mrpLogs = readSettled<MrpChangeLogEntry[]>(23, []);
 
             const failedLoads = settled
                 .map((result, index) => ({ result, label: loadJobs[index][0] }))
@@ -606,7 +624,8 @@ const App: React.FC = () => {
             setDeliveryChallans(dc || []);
             setSalesChallans(sc || []);
             setPurchaseOrders(po || []);
-            setBankOptions(await storage.fetchBankMasters(user));
+            setBankOptions(bankMastersData || []);
+            // setBankOptions replaced by loadJobs
             setSalesReturns(sr || []);
             setPurchaseReturns(pr || []);
             setCategories(cert || []);
@@ -623,7 +642,7 @@ const App: React.FC = () => {
                     (configData[0].displayOptions?.strictStock ?? true) &&
                     (configData[0].displayOptions?.enableNegativeStock ?? false)
                 ) {
-                    await storage.saveData('configurations', normalizedConfig, user);
+                    storage.saveData('configurations', normalizedConfig, user).catch(console.error);
                 }
             } else {
                 setConfigurations(normalizeStockHandlingConfig({ organization_id: orgId }));
@@ -3380,7 +3399,7 @@ const App: React.FC = () => {
                     userName={currentUser?.full_name || 'Admin'}
                     isOnline={isOnline}
                     pharmacyName={currentUser?.pharmacy_name || 'MDXERA'}
-                    isSyncing={isReloading || !isRealtimeActive}
+                    isSyncing={isReloading || syncStatus === 'syncing'}
                     appEdition={isRealtimeActive ? "Enterprise Edition [Live]" : "Enterprise Edition"}
                     configurations={configurations}
                 />
@@ -3474,10 +3493,34 @@ const App: React.FC = () => {
             )}
 
             {isOperationLoading && (
-                <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 backdrop-blur-[2px]">
-                    <div className="flex flex-col items-center gap-4">
-                        <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin shadow-lg"></div>
-                        <p className="text-[11px] font-black uppercase tracking-[0.2em] text-primary drop-shadow-md">Processing Transaction...</p>
+                <div className="fixed inset-0 z-[1000] flex flex-col items-center justify-center bg-[#004242] font-sans select-none">
+                    <div className="flex flex-col items-center gap-8">
+                        {/* The 10 loading blocks */}
+                        <div className="flex gap-2.5">
+                            {[...Array(10)].map((_, i) => {
+                                const isFilled = i < loadingProgress;
+                                return (
+                                    <div
+                                        key={i}
+                                        className={`w-[18px] h-[52px] rounded-[1px] transition-all duration-300 ${
+                                            isFilled 
+                                                ? 'bg-white shadow-[0_6px_12px_rgba(0,0,0,0.25),0_0_2px_rgba(255,255,255,0.4)] translate-y-[-2px]' 
+                                                : 'bg-[#002222]/45 shadow-[inset_0_2px_4px_rgba(0,0,0,0.2)] border border-[#ffffff]/5'
+                                        }`}
+                                    />
+                                );
+                            })}
+                        </div>
+                        {/* The loading... text */}
+                        <div 
+                            className="text-white text-3xl font-extrabold tracking-wider select-none opacity-95 animate-pulse"
+                            style={{
+                                fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                                textShadow: '0 2px 4px rgba(0,0,0,0.25)',
+                            }}
+                        >
+                            loading...
+                        </div>
                     </div>
                 </div>
             )}

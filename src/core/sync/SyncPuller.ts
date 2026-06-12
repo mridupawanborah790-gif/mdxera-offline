@@ -4,6 +4,8 @@ import { SYNCABLE_TABLES, TABLE } from '@core/db/schema';
 import { resolveConflict } from './conflictResolver';
 import { adaptRowForSqlite } from './columnFilter';
 
+const syncChannel = new BroadcastChannel('mdxera-sync-channel');
+
 interface SyncMeta {
   table_name: string;
   last_pulled_at: number | null;
@@ -128,11 +130,13 @@ async function pullTable(
     }
 
     // For each remote row, compare with local and apply if remote wins.
+    let didUpdate = false;
     for (const remote of remoteRows) {
       const remoteKey = remote[pk];
       if (remoteKey === undefined || remoteKey === null) {
         // Server row missing its primary-key column — can't reconcile, just insert.
         await upsertLocalRow(tableName, remote);
+        didUpdate = true;
         continue;
       }
 
@@ -151,6 +155,7 @@ async function pullTable(
 
       if (localRows.length === 0) {
         await upsertLocalRow(tableName, remote);
+        didUpdate = true;
         continue;
       }
 
@@ -161,14 +166,20 @@ async function pullTable(
         const winner = resolveConflict(local.updated_at, remote.updated_at as string);
         if (winner === 'remote') {
           await upsertLocalRow(tableName, remote);
+          didUpdate = true;
         }
       } else {
         // No reliable timestamp on the local row — server always wins.
         await upsertLocalRow(tableName, remote);
+        didUpdate = true;
       }
     }
 
     await updatePullTimestamp(tableName, organizationId);
+    
+    if (didUpdate) {
+      syncChannel.postMessage({ action: 'invalidate', table: tableName });
+    }
   } catch (err) {
     // Log but don't crash — partial sync is acceptable
     console.warn(`[SyncPuller] Failed to pull table ${tableName}:`, err);

@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Modal from '@core/components/ui/Modal';
 import type { InventoryItem, Transaction, Purchase, Distributor, Customer, SalesReturn, PurchaseReturn, ModuleConfig, DoctorMaster } from '@core/types';
 import { calculateCustomerReceivableBreakdown, calculateSupplierPayableBreakdown, getCustomerInvoiceOutstandingTotalFromTransactions, getOutstandingBalance, getSupplierInvoiceOutstandingTotalFromPurchases } from '@core/utils/helpers';
@@ -143,6 +143,7 @@ const Reports: React.FC<ReportsProps> = ({
   const [globalFilterSearch, setGlobalFilterSearch] = useState('');
   const [currentReportPage, setCurrentReportPage] = useState(1);
   const [reportPageSize, setReportPageSize] = useState(50);
+  const [scrollMode, setScrollMode] = useState<'fit' | 'scroll'>('scroll');
   const [mfrSalesViewMode, setMfrSalesViewMode] = useState<MfrSalesViewMode>('detailed');
   const [stockMovementViewMode, setStockMovementViewMode] = useState<StockMovementViewMode>('detailed');
   const [inventoryValueViewMode, setInventoryValueViewMode] = useState<InventoryValueViewMode>('batchWise');
@@ -1758,7 +1759,7 @@ const Reports: React.FC<ReportsProps> = ({
           </div>
         </section>
 
-        <section className="border border-gray-300 bg-white min-h-0 flex flex-col">
+        <section className="border border-gray-300 bg-white min-h-0 min-w-0 flex flex-col">
           <div className="px-2 py-1 border-b bg-gray-100 flex items-center justify-between gap-2">
             <div>
               <div className="text-[11px] font-bold">{activeReportTitle}</div>
@@ -1788,6 +1789,12 @@ const Reports: React.FC<ReportsProps> = ({
               )}
               <button onClick={() => setFilterModalOpen(true)} className="px-2 py-1 border border-gray-300 hover:bg-gray-100">Filter</button>
               <button onClick={() => setColumnModalOpen(true)} className="px-2 py-1 border border-gray-300 hover:bg-gray-100">Columns</button>
+              <button
+                onClick={() => setScrollMode(prev => prev === 'fit' ? 'scroll' : 'fit')}
+                className={`px-2 py-1 border font-bold ${scrollMode === 'scroll' ? 'bg-primary text-white border-primary hover:bg-primary-dark' : 'border-gray-300 hover:bg-gray-100 text-gray-700'}`}
+              >
+                {scrollMode === 'fit' ? '↔ Enable Scroll' : '⊙ Fit Columns'}
+              </button>
               <button onClick={handlePreview} className="px-2 py-1 border border-gray-300 hover:bg-gray-100">Preview</button>
               <button onClick={exportCsv} className="px-2 py-1 border border-gray-300 hover:bg-gray-100">CSV</button>
               <button onClick={exportXlsx} className="px-2 py-1 border border-gray-300 hover:bg-gray-100">XLSX</button>
@@ -1812,7 +1819,7 @@ const Reports: React.FC<ReportsProps> = ({
                 {activeReportId === 'rxMedicineSalesReport' ? 'No Prescription Medicine Sales Found For Selected Period' : 'No records found for selected period'}
               </div>
             ) : (
-              <table className="w-full text-[11px] border-collapse">
+              <table className={`${scrollMode === 'scroll' ? 'w-max min-w-full md:min-w-[1200px]' : 'w-full'} text-[11px] border-collapse`}>
                 <thead className="sticky top-0 bg-gray-100 z-10">
                   <tr>
                     {visibleColumns.map(col => (

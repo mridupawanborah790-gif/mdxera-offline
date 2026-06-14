@@ -365,6 +365,9 @@ async function fetchPage(
   const orderCol = orderColumn(tableName);
   if (orderCol) {
     query = query.order(orderCol, { ascending: true, nullsFirst: true });
+    // Add deterministic tie-breaker to prevent pagination data loss
+    const pk = tableName === 'profiles' ? 'user_id' : 'id';
+    query = query.order(pk, { ascending: true });
   }
 
   const { data, error } = await query.range(from, to);

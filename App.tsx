@@ -934,15 +934,6 @@ const App: React.FC = () => {
 
             setCurrentUser(user);
 
-            if (navigator.onLine) {
-                try {
-                    const fresh = await storage.fetchProfile(user.user_id);
-                    if (!cancelled && fresh) setCurrentUser(fresh);
-                } catch (err) {
-                    console.warn('[App] fetchProfile failed:', err);
-                }
-            }
-
             if (cancelled) return;
             loadData(user, 'initial');
         };
@@ -1190,24 +1181,21 @@ const App: React.FC = () => {
         // Mark this signOut as intentional so the auth listener doesn't try to
         // "heal" the session and keep the user logged in.
         window.localStorage.setItem('MDXERA_MANUAL_LOGOUT', 'true');
+        
+        // Clear local storage IMMEDIATELY so reload won't log back in
+        if (persistedStateKey) {
+            window.localStorage.removeItem(persistedStateKey);
+        }
+
         try {
             await storage.clearCurrentUser();
-            if (persistedStateKey) {
-                window.localStorage.removeItem(persistedStateKey);
-            }
-            setCurrentUser(null);
-            setCurrentPage('dashboard');
-            setAuthView('auth');
-            window.history.replaceState({}, '', '/');
         } catch (e) {
-            if (persistedStateKey) {
-                window.localStorage.removeItem(persistedStateKey);
-            }
+            console.error('[Logout] storage clear failed:', e);
+        } finally {
             setCurrentUser(null);
             setCurrentPage('dashboard');
             setAuthView('auth');
             window.history.replaceState({}, '', '/');
-        } finally {
             setIsAppLoading(false);
         }
     }, [currentUser, getScreenStateStorageKey]);

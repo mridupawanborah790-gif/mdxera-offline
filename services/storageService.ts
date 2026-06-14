@@ -2338,8 +2338,19 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
     export const signup = _signupImpl;
 
     export const clearCurrentUser = async () => {
-        await _logoutImpl();
-        await idb.clearAllStores();
+        try {
+            await _logoutImpl();
+        } catch (e) {
+            console.error('[storage] logout failed during clearCurrentUser:', e);
+        }
+        try {
+            await Promise.race([
+                idb.clearAllStores(),
+                new Promise<any>((_, reject) => setTimeout(() => reject(new Error('IndexedDB clear timed out')), 3000))
+            ]);
+        } catch (e) {
+            console.error('[storage] IndexedDB clear failed or timed out:', e);
+        }
         _hydratedOrgs.clear();
     };
 

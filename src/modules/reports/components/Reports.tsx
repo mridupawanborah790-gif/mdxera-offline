@@ -197,6 +197,48 @@ const Reports: React.FC<ReportsProps> = ({
     const doctorById = new Map(doctors.map(d => [d.id, d]));
     const doctorByName = new Map(doctors.filter(d => (d.name || '').trim()).map(d => [(d.name || '').trim().toLowerCase(), d] as const));
 
+    const inventoryById = new Map<string, any>();
+    const inventoryByName = new Map<string, any>();
+    const inventoryByNameList = new Map<string, any[]>();
+
+    (inventory || []).forEach(item => {
+      if (item.id && !inventoryById.has(item.id)) {
+        inventoryById.set(item.id, item);
+      }
+      if (item.name) {
+        if (!inventoryByName.has(item.name)) {
+          inventoryByName.set(item.name, item);
+        }
+        let list = inventoryByNameList.get(item.name);
+        if (!list) {
+          list = [];
+          inventoryByNameList.set(item.name, list);
+        }
+        list.push(item);
+      }
+    });
+
+    const getInv = (inventoryItemId?: string, name?: string) => {
+      if (inventoryItemId) {
+        const inv = inventoryById.get(inventoryItemId);
+        if (inv) return inv;
+      }
+      if (name) {
+        return inventoryByName.get(name);
+      }
+      return undefined;
+    };
+
+    const getInvByNameAndBatch = (name?: string, batch?: string) => {
+      if (!name) return undefined;
+      const list = inventoryByNameList.get(name);
+      if (!list || list.length === 0) return undefined;
+      if (!batch) {
+        return list[0];
+      }
+      return list.find(i => !i.batch || i.batch === batch);
+    };
+
     const sales = transactions.filter(tx => tx.status !== 'draft' && isDateWithinRange(tx.date, startDate, endDate));
     const completedSales = sales.filter(tx => tx.status !== 'cancelled');
     const completedOnlySales = sales.filter(tx => String(tx.status || '').toLowerCase() === 'completed');
@@ -392,7 +434,7 @@ const Reports: React.FC<ReportsProps> = ({
             const sgst = Number(item.sgstAmount || 0);
             const cgst = Number(item.cgstAmount || 0);
             const gstAmount = (sgst + cgst) || (lineTaxableAmount * (Number(item.gstPercent || 0) / 100));
-            const inv = inventory.find(invItem => invItem.id === item.inventoryItemId || invItem.name === item.name);
+            const inv = getInv(item.inventoryItemId, item.name);
             const purchaseRate = Number(item.ptr ?? inv?.purchasePrice ?? inv?.ptr ?? 0);
             const profit = purchaseRate > 0 ? (salesRate - purchaseRate) * qty : 0;
 
@@ -439,7 +481,7 @@ const Reports: React.FC<ReportsProps> = ({
               + (qty * salesRate * (Number(item.discountPercent || 0) / 100))
               + Number(item.schemeDiscountAmount || 0);
             const amount = (qty * salesRate) - lineDiscount;
-            const inv = inventory.find(invItem => invItem.id === item.inventoryItemId || invItem.name === item.name);
+            const inv = getInv(item.inventoryItemId, item.name);
             const purchaseRate = Number(item.ptr ?? inv?.purchasePrice ?? inv?.ptr ?? 0);
             const marginPerUnit = purchaseRate > 0 ? (salesRate - purchaseRate) : 0;
             const totalProfitMargin = qty > 1 ? (marginPerUnit * qty) : marginPerUnit;
@@ -479,7 +521,7 @@ const Reports: React.FC<ReportsProps> = ({
               const lineDiscount = Number(item.itemFlatDiscount || 0)
                 + (qty * salesRate * (Number(item.discountPercent || 0) / 100))
                 + Number(item.schemeDiscountAmount || 0);
-              const inv = inventory.find(invItem => invItem.id === item.inventoryItemId || invItem.name === item.name);
+              const inv = getInv(item.inventoryItemId, item.name);
               const purchaseRate = Number(item.ptr ?? inv?.purchasePrice ?? inv?.ptr ?? 0);
               const taxableAmount = (qty * salesRate) - lineDiscount;
               const sgst = Number(item.sgstAmount || 0);
@@ -533,7 +575,7 @@ const Reports: React.FC<ReportsProps> = ({
             const lineDiscount = Number(item.itemFlatDiscount || 0)
               + (qty * salesRate * (Number(item.discountPercent || 0) / 100))
               + Number(item.schemeDiscountAmount || 0);
-            const inv = inventory.find(invItem => invItem.id === item.inventoryItemId || invItem.name === item.name);
+            const inv = getInv(item.inventoryItemId, item.name);
             const purchaseRate = Number(item.ptr ?? inv?.purchasePrice ?? inv?.ptr ?? 0);
             const taxableAmount = (qty * salesRate) - lineDiscount;
             const gstAmount = taxableAmount * (Number(item.gstPercent || 0) / 100);
@@ -575,7 +617,7 @@ const Reports: React.FC<ReportsProps> = ({
             const qty = Number(item.quantity || 0);
             const freeQty = Number(item.freeQuantity || 0);
             const salesRate = Number(item.rate ?? item.mrp ?? 0);
-            const inv = inventory.find(invItem => invItem.id === item.inventoryItemId || invItem.name === item.name);
+            const inv = getInv(item.inventoryItemId, item.name);
             const mfrName = item.manufacturer || inv?.manufacturer || 'N/A';
             const purchaseRate = Number(item.ptr ?? inv?.purchasePrice ?? inv?.ptr ?? 0);
             const lineDiscount = Number(item.itemFlatDiscount || 0)
@@ -679,7 +721,7 @@ const Reports: React.FC<ReportsProps> = ({
       case 'marginAnalysis':
         reportHeaders = reportId === 'profitOnSales' ? ['Bill No / Item', 'Sales Value', 'Cost Value', 'Gross Profit', 'Profit %'] : ['Item Name', 'Sales Rate', 'Cost Rate', 'Margin Amount', 'Margin %'];
         rows = completedSales.flatMap(tx => tx.items.map((i: any) => {
-          const inv = inventory.find(item => item.id === i.inventoryItemId || item.name === i.name);
+          const inv = getInv(i.inventoryItemId, i.name);
           const salesRate = Number(i.rate ?? i.mrp ?? 0);
           const costRate = Number(inv?.purchasePrice || inv?.ptr || 0);
           const salesValue = Number(i.quantity || 0) * salesRate;
@@ -875,7 +917,7 @@ const Reports: React.FC<ReportsProps> = ({
         });
         transactions.filter(tx => tx.status !== 'draft' && tx.status !== 'cancelled' && new Date(tx.date) < new Date(startDate)).forEach(tx => {
           (tx.items || []).forEach((item: any) => {
-            const inv = inventory.find(i => i.name === item.name && (!item.batch || !i.batch || i.batch === item.batch));
+            const inv = getInvByNameAndBatch(item.name, item.batch);
             const qty = Number(item.quantity || 0) + Number(item.freeQuantity || 0);
             addDetailedRow({ name: item.name, manufacturer: item.manufacturer || inv?.manufacturer || item.brand || '', batch: item.batch || inv?.batch, rate: Number(item.rate ?? item.ptr ?? item.purchasePrice ?? inv?.ptr ?? inv?.purchasePrice ?? 0), movementType: 'Opening Adjustment', referenceNo: tx.invoiceNumber || tx.id, openingQty: -qty });
           });
@@ -888,7 +930,7 @@ const Reports: React.FC<ReportsProps> = ({
         });
         transactions.filter(tx => tx.status !== 'draft' && tx.status !== 'cancelled' && isDateWithinRange(tx.date, startDate, endDate)).forEach(tx => {
           (tx.items || []).forEach((item: any) => {
-            const inv = inventory.find(i => i.name === item.name && (!item.batch || !i.batch || i.batch === item.batch));
+            const inv = getInvByNameAndBatch(item.name, item.batch);
             const qty = Number(item.quantity || 0) + Number(item.freeQuantity || 0);
             addDetailedRow({ name: item.name, manufacturer: item.manufacturer || inv?.manufacturer || item.brand || '', batch: item.batch || inv?.batch, rate: Number(item.rate ?? item.ptr ?? item.purchasePrice ?? inv?.ptr ?? inv?.purchasePrice ?? 0), movementType: 'Issue', referenceNo: tx.invoiceNumber || tx.id, issueQty: qty });
           });

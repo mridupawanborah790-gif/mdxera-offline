@@ -1,4 +1,4 @@
-﻿import React, { useState, useRef, useEffect, useMemo, useImperativeHandle, forwardRef, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useImperativeHandle, forwardRef, useCallback } from 'react';
 import Card from '@core/components/ui/Card';
 import SchemeModal from '../components/SchemeModal';
 import Modal from '@core/components/ui/Modal';
@@ -122,6 +122,37 @@ const recalculateSchemeFields = (item: BillItem): BillItem => {
         schemeDiscountAmount,
         schemeDiscountPercent,
     };
+};
+
+const inventoryMapCache = new WeakMap<InventoryItem[], {
+    byId: Map<string, InventoryItem>;
+    byNameAndBrand: Map<string, InventoryItem>;
+}>();
+
+const getInventoryByIdOrNameBrand = (inventory: InventoryItem[], id?: string, name?: string, brand?: string): InventoryItem | undefined => {
+    let cached = inventoryMapCache.get(inventory);
+    if (!cached) {
+        const byId = new Map<string, InventoryItem>();
+        const byNameAndBrand = new Map<string, InventoryItem>();
+        (inventory || []).forEach(i => {
+            if (i.id) byId.set(i.id, i);
+            const key = `${(i.name || '').trim().toLowerCase()}|${(i.brand || '').trim().toLowerCase()}`;
+            if (!byNameAndBrand.has(key)) {
+                byNameAndBrand.set(key, i);
+            }
+        });
+        cached = { byId, byNameAndBrand };
+        inventoryMapCache.set(inventory, cached);
+    }
+    if (id) {
+        const item = cached.byId.get(id);
+        if (item) return item;
+    }
+    if (name) {
+        const key = `${name.trim().toLowerCase()}|${(brand || '').trim().toLowerCase()}`;
+        return cached.byNameAndBrand.get(key);
+    }
+    return undefined;
 };
 
 const POS = forwardRef<any, POSProps>(({
@@ -415,7 +446,7 @@ const POS = forwardRef<any, POSProps>(({
 
         if (shouldPreventNegativeStock) {
             for (const item of cartItems) {
-                const invItem = inventory.find(i => i.id === item.inventoryItemId);
+                const invItem = item.inventoryItemId ? getInventoryByIdOrNameBrand(inventory, item.inventoryItemId) : undefined;
                 if (invItem) {
                     const policy = getInventoryPolicy(invItem, medicines);
                     if (!policy.inventorised) continue;
@@ -774,10 +805,7 @@ const POS = forwardRef<any, POSProps>(({
         if (targetId) {
             const cartItem = cartItems.find(i => i.id === targetId);
             if (cartItem) {
-                let found = inventory.find(i => i.id === cartItem.inventoryItemId);
-                if (!found && cartItem.name) {
-                    found = inventory.find(i => i.name.toLowerCase() === cartItem.name.toLowerCase() && (i.brand || '').toLowerCase() === (cartItem.brand || '').toLowerCase());
-                }
+                const found = getInventoryByIdOrNameBrand(inventory, cartItem.inventoryItemId, cartItem.name, cartItem.brand);
                 return found || null;
             }
         }

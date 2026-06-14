@@ -1,4 +1,4 @@
-﻿import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import type { Customer, InventoryItem, Medicine, RegisteredPharmacy, Supplier } from '@core/types';
 
 type MasterType = 'supplier' | 'customer' | 'material' | 'inventory';
@@ -96,38 +96,88 @@ const MasterDataMigrationWizard: React.FC<Props> = ({ currentUser, suppliers, cu
 
     if (selected.supplier) {
       const local = new Set<string>();
+      const targetSupplierGsts = new Set<string>();
+      const targetSupplierPhones = new Set<string>();
+      const targetSupplierNames = new Set<string>();
+      
+      (targetData.suppliers || []).forEach(t => {
+        if (t.gst_number) targetSupplierGsts.add(t.gst_number);
+        if (t.phone) targetSupplierPhones.add(t.phone);
+        if (t.mobile) targetSupplierPhones.add(t.mobile);
+        if (t.name) targetSupplierNames.add(t.name.toLowerCase());
+      });
+
       filteredSuppliers.forEach(s => {
         if (!s.name || (!s.gst_number && !(s.phone || s.mobile))) issues.push({ type: 'supplier', id: s.id, level: 'Error', message: 'Mandatory fields missing (Name, GSTIN/Phone).' });
         if (!isValidGstin(s.gst_number)) issues.push({ type: 'supplier', id: s.id, level: 'Warning', message: 'Invalid GSTIN format.' });
         const key = `${s.gst_number || ''}|${s.phone || s.mobile || ''}|${s.name.toLowerCase()}`;
         if (local.has(key)) { duplicates++; issues.push({ type: 'supplier', id: s.id, level: 'Warning', message: 'Duplicate in source organization.' }); }
         local.add(key);
-        if (targetData.suppliers.some(t => (t.gst_number && t.gst_number === s.gst_number) || ((t.phone || t.mobile) && (t.phone === s.phone || t.mobile === s.mobile)) || t.name.toLowerCase() === s.name.toLowerCase())) duplicates++;
+        
+        const matchesGst = s.gst_number && targetSupplierGsts.has(s.gst_number);
+        const matchesPhone = (s.phone && targetSupplierPhones.has(s.phone)) || (s.mobile && targetSupplierPhones.has(s.mobile));
+        const matchesName = s.name && targetSupplierNames.has(s.name.toLowerCase());
+        if (matchesGst || matchesPhone || matchesName) duplicates++;
       });
     }
 
     if (selected.customer) {
+      const targetCustomerPhones = new Set<string>();
+      const targetCustomerNames = new Set<string>();
+      
+      (targetData.customers || []).forEach(t => {
+        if (t.phone) targetCustomerPhones.add(t.phone);
+        if (t.name) targetCustomerNames.add(t.name.toLowerCase());
+      });
+
       filteredCustomers.forEach(c => {
         if (!c.name || !c.phone) issues.push({ type: 'customer', id: c.id, level: 'Error', message: 'Mandatory fields missing (Name/Phone).' });
-        if (targetData.customers.some(t => t.phone === c.phone || t.name.toLowerCase() === c.name.toLowerCase())) duplicates++;
+        const matchesPhone = c.phone && targetCustomerPhones.has(c.phone);
+        const matchesName = c.name && targetCustomerNames.has(c.name.toLowerCase());
+        if (matchesPhone || matchesName) duplicates++;
       });
     }
 
     if (selected.material) {
+      const targetMaterialCodes = new Set<string>();
+      const targetMaterialBarcodes = new Set<string>();
+      const targetMaterialNames = new Set<string>();
+      
+      (targetData.materials || []).forEach(t => {
+        if (t.materialCode) targetMaterialCodes.add(t.materialCode);
+        if (t.barcode) targetMaterialBarcodes.add(t.barcode);
+        if (t.name) targetMaterialNames.add(t.name.toLowerCase());
+      });
+
       filteredMaterials.forEach(m => {
         if (!m.materialCode || !m.pack || !m.hsnCode) issues.push({ type: 'material', id: m.id, level: 'Error', message: 'Mandatory fields missing (Item Code, Pack Size, HSN).' });
         if (!isValidHsn(m.hsnCode)) issues.push({ type: 'material', id: m.id, level: 'Warning', message: 'Invalid HSN format.' });
-        if (targetData.materials.some(t => t.materialCode === m.materialCode || (t.barcode && t.barcode === m.barcode) || t.name.toLowerCase() === m.name.toLowerCase())) duplicates++;
+        
+        const matchesCode = m.materialCode && targetMaterialCodes.has(m.materialCode);
+        const matchesBarcode = m.barcode && targetMaterialBarcodes.has(m.barcode);
+        const matchesName = m.name && targetMaterialNames.has(m.name.toLowerCase());
+        if (matchesCode || matchesBarcode || matchesName) duplicates++;
       });
     }
 
     if (selected.inventory) {
+      const sourceMaterialNames = new Set((sourceData.materials || []).map(m => (m.name || '').toLowerCase()));
+      const targetInventoryKeys = new Set<string>();
+      
+      (targetData.inventory || []).forEach(t => {
+        const key = `${(t.name || '').toLowerCase()}|${t.batch || ''}|${t.expiry || ''}`;
+        targetInventoryKeys.add(key);
+      });
+
       filteredInventory.forEach(i => {
         if (!i.batch || !i.expiry || i.stock === undefined) issues.push({ type: 'inventory', id: i.id, level: 'Error', message: 'Mandatory fields missing (Batch, Expiry, Quantity).' });
         if (i.stock < 0) issues.push({ type: 'inventory', id: i.id, level: 'Error', message: 'Negative stock found.' });
         if (new Date(i.expiry) < new Date()) issues.push({ type: 'inventory', id: i.id, level: 'Warning', message: 'Expired inventory found.' });
-        if (!sourceData.materials.some(m => m.name.toLowerCase() === i.name.toLowerCase())) issues.push({ type: 'inventory', id: i.id, level: 'Error', message: 'Dependency failed: material missing.' });
-        if (targetData.inventory.some(t => t.name.toLowerCase() === i.name.toLowerCase() && t.batch === i.batch && t.expiry === i.expiry)) duplicates++;
+        
+        if (!i.name || !sourceMaterialNames.has(i.name.toLowerCase())) issues.push({ type: 'inventory', id: i.id, level: 'Error', message: 'Dependency failed: material missing.' });
+        
+        const key = `${(i.name || '').toLowerCase()}|${i.batch || ''}|${i.expiry || ''}`;
+        if (targetInventoryKeys.has(key)) duplicates++;
       });
     }
 

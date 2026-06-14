@@ -297,7 +297,12 @@ export async function signup(
 
 export async function logout(): Promise<void> {
   if (isOnline()) {
-    try { await supabaseLogout(); } catch { /* ignore */ }
+    try {
+      await Promise.race([
+        supabaseLogout(),
+        new Promise<void>((_, reject) => setTimeout(() => reject(new Error('Logout request timed out')), 3000))
+      ]);
+    } catch { /* ignore */ }
   }
   await clearPersistedSession();
 }
@@ -358,7 +363,10 @@ export async function restoreSession(): Promise<RegisteredPharmacy | null> {
   // Try to silently refresh the Supabase token if online
   if (isOnline()) {
     try {
-      const refreshed = await supabaseRefreshSession();
+      const refreshed = await Promise.race([
+        supabaseRefreshSession(),
+        new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Session refresh timed out')), 4000))
+      ]);
       if (refreshed) {
         await persistSession({ supabaseSession: refreshed });
         await refreshCachedUserData(user.id, user);

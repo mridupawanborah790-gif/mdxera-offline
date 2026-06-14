@@ -194,8 +194,7 @@ phase).
    - `setCurrentUser(user)` — triggers `<SyncBootstrap>` to mount.
    - `useModuleVisibilityStore.loadForUser(user.user_id)` loads per-user
      module-visibility from `localStorage`.
-   - `storage.fetchProfile()` to get the freshest profile.
-   - `loadData(user, 'initial')` — pulls from Supabase, hydrates React.
+   - `loadData(user, 'initial')` — pulls from Supabase (including the profile), hydrates React in parallel.
 5. `SyncBootstrap`'s effect:
    - Warms up voucher ranges.
    - Checks `isForegroundComplete()` from `_initial_sync_state`.
@@ -542,6 +541,13 @@ direct-online path and SyncWorker both retry with the server's live max.
 Result: offline saves are fully local + queued. SyncEngine pushes them
 when online.
 
+### 9.1 POS Performance & Caching
+
+The POS interface (`POS.tsx` and `POSPage.tsx`) performs real-time stock checks, cart validation, pricing lookups, and AI-driven prescription parsing. To prevent UI lag on large inventories (10k+ items), the following performance designs are implemented:
+- **`WeakMap` Lookup Caches**: Caches medicine lookup Maps (`getMedicineByIdOrCode`, `getMedicinesByName`) and inventory lookup Maps (`getInventoryItemById` / `getInventoryByIdOrNameBrand`) keyed by array references. This reduces nested lookup scans from $O(N)$ to $O(1)$.
+- **Stock Validation Pre-grouping**: During stock checks or checkout saves, the inventory array is pre-grouped by item name once per validation block, reducing related-batch verification loops to $O(1)$ on average.
+- **AI Cart Mapping**: Pre-filters inventory arrays before performing fuzzy match iterations to avoid evaluating inventory policies inside hot loops.
+
 ---
 
 ## 10. Auth and persistent login
@@ -566,6 +572,10 @@ Once logged in, the user stays logged in across app close/reopen
 - The `SIGNED_OUT` handler ignores transient events when either
   `supabase.auth.getSession()` returns a session OR
   `storage.getCurrentUser()` still resolves to a persisted user.
+- `authService.logout` wraps the Supabase signOut request in a 3-second timeout (`Promise.race`) to avoid getting stuck during connection failures.
+- `authService.restoreSession` wraps the online session refresh in a 4-second timeout to prevent boot hangs on slow networks.
+- `storageService.clearCurrentUser` wraps the SQLite logout and IndexedDB clear operations in try-catch blocks, with a 3-second timeout for the IndexedDB clearing request.
+- `App.tsx:handleLogout` deletes the session key from `localStorage` immediately upon logout initiation so that manual reloads during logout will not keep the user logged in. All UI route resets are executed in a `finally` block to guarantee redirection to the login screen.
 
 ### 10.3 Failure mode — expired Supabase refresh token
 
@@ -802,6 +812,7 @@ Reports, ~50+ entries listed in `REPORT_LIST`).
   `Ctrl/Cmd + C` opens the Column pop-up. Both yield to the browser
   when focus is in an input/textarea/select. Ctrl+C also yields when
   text is selected so normal copy still works.
+- **$O(1)$ Cache Map Lookups.** Report generation case branches (e.g. Doctor-wise Sales Summary, Manufacturer-wise Sales Summary) previously performed nested `inventory.find` scans for every transaction item. These have been optimized by building `inventoryById` and `inventoryByName` Maps at the start of `loadReportData`, reducing report generation complexity from $O(N \times M)$ to $O(N + M)$ and eliminating browser thread freezes.
 
 ### 13.2 Adding a new report
 

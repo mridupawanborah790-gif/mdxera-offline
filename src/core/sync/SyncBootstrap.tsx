@@ -351,6 +351,7 @@ export const SyncBootstrap: React.FC<Props> = ({ currentUser }) => {
           setPhase('done');
           // Hydrate now (no active InitialSync to contend with writes).
           // Fire-and-forget; the HYDRATE_COMPLETE_EVENT will trigger React state refresh.
+          resetHydrationState();
           hydrateMemoryCacheFromSqlite(currentUser.organization_id);
           // Safe to start the recurring SyncEngine now — no concurrent writer.
           SyncEngine.start(currentUser.organization_id, SUPABASE_URL);
@@ -365,6 +366,7 @@ export const SyncBootstrap: React.FC<Props> = ({ currentUser }) => {
           if (cancelled) return;
           console.warn('[SyncBootstrap] offline — skipping initial sync; user will see empty data until next online login');
           setPhase('skipped');
+          resetHydrationState();
           hydrateMemoryCacheFromSqlite(currentUser.organization_id);
           SyncEngine.start(currentUser.organization_id, SUPABASE_URL);
           return;
@@ -380,6 +382,7 @@ export const SyncBootstrap: React.FC<Props> = ({ currentUser }) => {
         // SyncEngine MUST start after foreground sync — otherwise its pulls
         // race with InitialSync's writes and SQLite returns "database is locked".
         SyncEngine.start(currentUser.organization_id, SUPABASE_URL);
+        resetHydrationState();
         hydrateMemoryCacheFromSqlite(currentUser.organization_id);
         startBackgroundSync(currentUser);
       } catch (err) {

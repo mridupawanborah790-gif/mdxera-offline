@@ -161,16 +161,8 @@ const App: React.FC = () => {
         };
     }, []);
 
-    useEffect(() => {
-        const handleHydrateComplete = () => {
-            if (currentUser) {
-                console.info('[App] Received hydrate-complete event, reloading data from cache');
-                loadData(currentUser, 'background');
-            }
-        };
-        window.addEventListener(storage.HYDRATE_COMPLETE_EVENT, handleHydrateComplete);
-        return () => window.removeEventListener(storage.HYDRATE_COMPLETE_EVENT, handleHydrateComplete);
-    }, [currentUser]);
+    // Redundant handleHydrateComplete listener removed to prevent double re-renders.
+    // The debounced listener below handles this safely.
 
     const [inventory, setInventory] = useState<InventoryItem[]>([]);
     const [medicines, setMedicines] = useState<Medicine[]>([]);
@@ -980,10 +972,12 @@ const App: React.FC = () => {
             if (debounceTimer) clearTimeout(debounceTimer);
             debounceTimer = setTimeout(() => {
                 debounceTimer = null;
-                // Skip network calls entirely when offline — the cache is
-                // already populated by hydration and getData() reads from it.
+                // If offline, refresh legacy React state using 'background' mode (no network queries)
                 if (!navigator.onLine) {
-                    console.info('[App] hydrate complete (offline) — skipping loadData, cache is warm');
+                    console.info('[App] hydrate complete (offline) — refreshing loadData (background)');
+                    loadData(currentUser, 'background').catch((err) =>
+                        console.warn('[App] post-hydrate offline reload failed:', err),
+                    );
                     return;
                 }
                 console.info('[App] hydrate complete — refreshing loadData');

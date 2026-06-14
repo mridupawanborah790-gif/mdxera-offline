@@ -224,20 +224,50 @@ export const hydrateMemoryCacheFromSqlite = async (organizationId: string): Prom
     const memoryCache: Record<string, any[]> = {};
     const memoryCacheOrgScope: Record<string, string> = {};
 
+    export const hydrateTableFromSqlite = async (organizationId: string, table: string): Promise<void> => {
+        try {
+            const rows = await sqliteDb.select<Record<string, any>>(
+                `SELECT * FROM ${table} WHERE organization_id = ?`,
+                [organizationId],
+            );
+            const storeKey = table.toUpperCase();
+            if (!rows || rows.length === 0) {
+                memoryCache[storeKey] = [];
+                memoryCacheOrgScope[storeKey] = organizationId;
+                return;
+            }
+            const normalized = rows
+                .map(r => decodeSqliteRow(table, r))
+                .map(r => fromSupabase(table, r));
+
+            memoryCache[storeKey] = normalized;
+            memoryCacheOrgScope[storeKey] = organizationId;
+        } catch (err) {
+            console.warn(`[storage] hydrateTableFromSqlite(${table}) failed:`, err);
+        }
+    };
+
     // Cross-window synchronization
     const syncChannel = new BroadcastChannel('mdxera-sync-channel');
-    syncChannel.onmessage = (event) => {
+    syncChannel.onmessage = async (event) => {
         if (event.data?.action === 'invalidate' && event.data?.table) {
-            const storeKey = event.data.table.toUpperCase();
+            const tableName = event.data.table;
+            const storeKey = tableName.toUpperCase();
             if (memoryCache[storeKey]) {
-                delete memoryCache[storeKey];
-                delete memoryCacheOrgScope[storeKey];
+                const orgId = memoryCacheOrgScope[storeKey];
+                if (orgId) {
+                    await hydrateTableFromSqlite(orgId, tableName);
+                } else {
+                    delete memoryCache[storeKey];
+                    delete memoryCacheOrgScope[storeKey];
+                }
                 if (typeof window !== 'undefined') {
-                    window.dispatchEvent(new CustomEvent('mdxera-cache-invalidated', { detail: { table: event.data.table } }));
+                    window.dispatchEvent(new CustomEvent('mdxera-cache-invalidated', { detail: { table: tableName } }));
                 }
             }
         }
     };
+
 
     const updateMemoryCacheBulk = (tableName: string, dataArray: any[], organizationId: string) => {
         const storeKey = tableName.toUpperCase();

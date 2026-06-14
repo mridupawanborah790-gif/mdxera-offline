@@ -76,20 +76,50 @@ export const getResolvedMedicinePolicy = (medicine?: Partial<Medicine> | null) =
   };
 };
 
+const policyCache = new WeakMap<
+  Medicine[],
+  {
+    byCode: Map<string, Medicine>;
+    byNameBrand: Map<string, Medicine>;
+  }
+>();
+
 export const getInventoryPolicy = (item: InventoryItem, medicines: Medicine[]) => {
+  if (!medicines || !Array.isArray(medicines)) {
+    return getResolvedMedicinePolicy(null);
+  }
+
+  let cache = policyCache.get(medicines);
+  if (!cache) {
+    const byCode = new Map<string, Medicine>();
+    const byNameBrand = new Map<string, Medicine>();
+
+    medicines.forEach(m => {
+      const code = (m.materialCode || '').toLowerCase().trim();
+      const name = (m.name || '').toLowerCase().trim();
+      const brand = (m.brand || '').toLowerCase().trim();
+
+      if (code) {
+        byCode.set(code, m);
+      }
+      byNameBrand.set(`${name}|${brand}`, m);
+    });
+
+    cache = { byCode, byNameBrand };
+    policyCache.set(medicines, cache);
+  }
+
   const normalizedCode = (item.code || '').toLowerCase().trim();
   const normalizedName = (item.name || '').toLowerCase().trim();
   const normalizedBrand = (item.brand || '').toLowerCase().trim();
 
-  const linkedMedicine = medicines.find(m => {
-    const medCode = (m.materialCode || '').toLowerCase().trim();
-    const medName = (m.name || '').toLowerCase().trim();
-    const medBrand = (m.brand || '').toLowerCase().trim();
-
-    const codeMatch = !!normalizedCode && !!medCode && normalizedCode === medCode;
-    const nameBrandMatch = medName === normalizedName && medBrand === normalizedBrand;
-    return codeMatch || nameBrandMatch;
-  });
+  let linkedMedicine: Medicine | undefined = undefined;
+  if (normalizedCode) {
+    linkedMedicine = cache.byCode.get(normalizedCode);
+  }
+  if (!linkedMedicine) {
+    linkedMedicine = cache.byNameBrand.get(`${normalizedName}|${normalizedBrand}`);
+  }
 
   return getResolvedMedicinePolicy(linkedMedicine);
 };

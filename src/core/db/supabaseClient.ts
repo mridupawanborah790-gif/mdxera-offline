@@ -14,7 +14,7 @@ export const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KE
 // for 10s and then throws. We work around this by providing a simple in-memory
 // mutex. We CANNOT use a no-op lock, because concurrent refresh attempts will
 // trigger Supabase's token reuse detection and revoke the user's session.
-const isTauri = typeof (window as any).__TAURI_INTERNALS__ !== 'undefined';
+const isTauri = typeof window !== 'undefined' && typeof (window as any).__TAURI_INTERNALS__ !== 'undefined';
 
 class InMemoryMutex {
   private queue: Array<() => void> = [];

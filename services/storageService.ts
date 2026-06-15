@@ -176,23 +176,29 @@ export const hydrateMemoryCacheFromSqlite = async (organizationId: string): Prom
         // launch.
         await Promise.all(
             TABLES_TO_HYDRATE.map(async (table) => {
+                const storeKey = table.toUpperCase();
                 try {
                     const rows = await db.select<Record<string, any>>(
                         `SELECT * FROM ${table} WHERE organization_id = ?`,
                         [organizationId],
                     );
-                    if (!rows || rows.length === 0) return;
+                    if (!rows || rows.length === 0) {
+                        memoryCache[storeKey] = [];
+                        memoryCacheOrgScope[storeKey] = organizationId;
+                        return;
+                    }
 
                     const normalized = rows
                         .map(r => decodeSqliteRow(table, r))
                         .map(r => fromSupabase(table, r));
 
-                    const storeKey = table.toUpperCase();
                     memoryCache[storeKey] = normalized;
                     memoryCacheOrgScope[storeKey] = organizationId;
                 } catch (err) {
                     // Most likely: table doesn't exist locally yet. Safe to skip.
                     console.debug(`[storage] hydrate(${table}) skipped:`, (err as Error)?.message);
+                    memoryCache[storeKey] = [];
+                    memoryCacheOrgScope[storeKey] = organizationId;
                 }
             }),
         );
@@ -2338,6 +2344,14 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
     export const signup = _signupImpl;
 
     export const clearCurrentUser = async () => {
+        // Clear in-memory caches
+        for (const key of Object.keys(memoryCache)) {
+            delete memoryCache[key];
+        }
+        for (const key of Object.keys(memoryCacheOrgScope)) {
+            delete memoryCacheOrgScope[key];
+        }
+
         try {
             await _logoutImpl();
         } catch (e) {

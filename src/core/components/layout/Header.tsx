@@ -26,8 +26,6 @@ const Header: React.FC<HeaderProps> = ({ onNewBillClick, currentUser, onNavigate
   const menuRef = useRef<HTMLDivElement>(null);
 
   const menuItems = [
-    { id: 'data', label: '<u>K</u>: Company', children: [{id: 'settings', label: 'Alter Profile'}, {id: 'team', label: 'User Roles'}] },
-    { id: 'data_mgt', label: '<u>Y</u>: Data', children: [{id: 'configuration', label: 'Settings'}, {id: 'inventory', label: 'Import Items'}] },
     { id: 'exchange', label: '<u>Z</u>: Exchange', children: [{id: 'eway', label: 'E-Way Bill'}] },
     { id: 'go_to', label: '<u>G</u>: Go To', children: [{id: 'pos', label: 'Sale Entry'}, {id: 'manualSupplierInvoice', label: 'Manual Supplier Invoice'}, {id: 'reports', label: 'Management Reports'}] }
   ];
@@ -136,6 +134,18 @@ const Header: React.FC<HeaderProps> = ({ onNewBillClick, currentUser, onNavigate
             >
                 ☰
             </button>
+            <button
+                onClick={() => onNavigate('dashboard')}
+                className="h-full px-3 hover:bg-white/20 transition-colors flex items-center border-r border-white/10 text-base gap-1"
+                title="Go to Home Dashboard"
+                aria-label="Go to Home Dashboard"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                    <polyline points="9 22 9 12 15 12 15 22"/>
+                </svg>
+                <span className="text-[11px] uppercase font-bold hidden sm:inline">Home</span>
+            </button>
             {canGoBack && (
                 <button
                     onClick={onBack}
@@ -192,46 +202,7 @@ const Header: React.FC<HeaderProps> = ({ onNewBillClick, currentUser, onNavigate
                 </svg>
                 <span className="whitespace-nowrap font-bold text-[#4ade80]">New Window</span>
             </button>
-            {(onResyncAll || onFreshInstallSync) && (
-                <div className="relative h-full">
-                    <button
-                        onClick={() => setActiveMenu(activeMenu === 'syncMenu' ? null : 'syncMenu')}
-                        className={`h-full px-3 sm:px-4 hover:bg-white/20 transition-colors flex items-center border-r border-white/10 gap-2 ${activeMenu === 'syncMenu' ? 'bg-white/20' : ''}`}
-                        title="Sync Options"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                            <polyline points="7 10 12 15 17 10"/>
-                            <line x1="12" y1="15" x2="12" y2="3"/>
-                        </svg>
-                        <span className="whitespace-nowrap font-bold">Sync All</span>
-                        <span className="text-[10px] ml-1">▼</span>
-                    </button>
-                    {activeMenu === 'syncMenu' && (
-                        <div className="absolute top-full left-0 w-48 bg-white dark:bg-zinc-800 border border-gray-400 shadow-xl z-[100] py-1">
-                            {onResyncAll && (
-                                <button
-                                    onClick={() => { onResyncAll(); setActiveMenu(null); }}
-                                    className="w-full text-left px-4 py-2 hover:bg-primary hover:text-white text-gray-800 dark:text-gray-200 text-[11px] sm:text-[12px] font-bold"
-                                    title="Re-download every table from the server into local storage"
-                                >
-                                    Sync All (Resume)
-                                </button>
-                            )}
-                            {onFreshInstallSync && (
-                                <button
-                                    onClick={() => { onFreshInstallSync(); setActiveMenu(null); }}
-                                    className="w-full text-left px-4 py-2 hover:bg-red-600 hover:text-white text-red-600 dark:text-red-400 text-[11px] sm:text-[12px] font-bold border-t border-gray-100 flex items-center gap-2"
-                                    title="Wipe local database and start fresh from Supabase"
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
-                                    Fresh Install Sync
-                                </button>
-                            )}
-                        </div>
-                    )}
-                </div>
-            )}
+
             <div className="relative h-full">
                 <button
                     onClick={() => setActiveMenu(activeMenu === dailyReportsMenu.id ? null : dailyReportsMenu.id)}
@@ -240,13 +211,19 @@ const Header: React.FC<HeaderProps> = ({ onNewBillClick, currentUser, onNavigate
                     {dailyReportsMenu.label}
                 </button>
                 {activeMenu === dailyReportsMenu.id && (
-                    <div className="absolute top-full left-0 w-64 sm:w-72 bg-white dark:bg-zinc-800 border border-gray-400 shadow-xl z-[100] py-1 overflow-y-auto max-h-[70vh]">
+                    <div className="absolute top-full left-0 w-64 sm:w-72 bg-white dark:bg-zinc-800 border border-gray-400 shadow-xl z-[100] py-1">
                         {dailyReportsMenu.children.map(child => (
                             <div key={child.id} className="group relative">
                                 <button
                                     onClick={() => {
                                         if (!('children' in child) || !child.children) {
                                             onNavigate(child.id);
+                                            setActiveMenu(null);
+                                        } else {
+                                            const firstChild = child.children[0];
+                                            if (firstChild) {
+                                                onNavigate(firstChild.id);
+                                            }
                                             setActiveMenu(null);
                                         }
                                     }}

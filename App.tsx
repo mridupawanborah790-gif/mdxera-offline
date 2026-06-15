@@ -101,6 +101,135 @@ type PersistedScreenState = {
 };
 
 
+const getDbOperationsForPage = (pageId: string) => {
+    switch (pageId) {
+        case 'pos':
+        case 'nonGstPos':
+            return [
+                { table: 'sales_bill', op: 'INSERT (1 row)' },
+                { table: 'inventory', op: 'UPDATE stock level' },
+                { table: '_sync_queue', op: 'INSERT sync event' },
+                { table: '_sync_meta', op: 'UPDATE local meta' }
+            ];
+        case 'salesChallans':
+            return [
+                { table: 'sales_challans', op: 'INSERT (1 note)' },
+                { table: 'inventory', op: 'UPDATE stock level' },
+                { table: '_sync_queue', op: 'INSERT sync event' }
+            ];
+        case 'deliveryChallans':
+            return [
+                { table: 'delivery_challans', op: 'INSERT (1 note)' },
+                { table: 'inventory', op: 'UPDATE stock level' },
+                { table: '_sync_queue', op: 'INSERT sync event' }
+            ];
+        case 'automatedPurchaseEntry':
+        case 'manualPurchaseEntry':
+        case 'manualSupplierInvoice':
+            return [
+                { table: 'purchases', op: 'INSERT (1 bill)' },
+                { table: 'inventory', op: 'UPDATE stock level' },
+                { table: '_sync_queue', op: 'INSERT sync event' },
+                { table: 'material_master', op: 'UPDATE price details' }
+            ];
+        default:
+            return [
+                { table: 'configurations', op: 'UPDATE local config' },
+                { table: '_sync_queue', op: 'INSERT sync event' },
+                { table: '_sync_meta', op: 'UPDATE local meta' }
+            ];
+    }
+};
+
+const MargRetroLoader: React.FC<{ currentPage: string }> = ({ currentPage }) => {
+    const [operationProgress, setOperationProgress] = useState(0);
+    const [currentDbOp, setCurrentDbOp] = useState(() => getDbOperationsForPage(currentPage)[0]);
+
+    useEffect(() => {
+        const ops = getDbOperationsForPage(currentPage);
+        setCurrentDbOp(ops[0]);
+        setOperationProgress(0);
+
+        const progressInterval = setInterval(() => {
+            setOperationProgress(prev => {
+                if (prev >= 100) {
+                    setCurrentDbOp(current => {
+                        const idx = ops.findIndex(o => o.table === current.table);
+                        const nextIdx = (idx + 1) % ops.length;
+                        return ops[nextIdx];
+                    });
+                    return 0;
+                }
+                return Math.min(100, prev + Math.floor(Math.random() * 12) + 4);
+            });
+        }, 120);
+
+        return () => clearInterval(progressInterval);
+    }, [currentPage]);
+
+    const fiscalYearStr = React.useMemo(() => {
+        const now = new Date();
+        const year = now.getFullYear();
+        const fyStart = now.getMonth() >= 3 ? year : year - 1;
+        const fyEnd = fyStart + 1;
+        return `${fyStart}0401-${fyEnd}0331`;
+    }, []);
+
+    return (
+        <div className="fixed inset-0 z-[1000] flex flex-col justify-between items-center py-28 md:py-36 bg-black/45 backdrop-blur-[0.5px] font-mono select-none">
+            {/* Top Box: Warning/Wait Banner */}
+            <div className="bg-[#1e3f31] border-2 border-white px-8 py-3.5 shadow-[8px_8px_0px_rgba(0,0,0,0.55)] select-none">
+                <span className="text-white text-xs md:text-sm font-black tracking-widest uppercase">
+                    PLEASE WAIT WRITING TO LOCAL DATABASE
+                </span>
+            </div>
+
+            {/* Bottom Box: Retro File status */}
+            <div className="w-full max-w-[390px] bg-[#d5d5d5] border-2 border-white shadow-[8px_8px_0px_rgba(0,0,0,0.55)] flex flex-col select-none">
+                {/* Title bar */}
+                <div className="bg-[#1e3f31] text-white px-3 py-1.5 text-[10px] font-black uppercase tracking-wider border-b border-gray-400">
+                    UPDATING SQLITE:MDXERA.DB
+                </div>
+
+                {/* Body Content */}
+                <div className="p-4 flex flex-col items-center gap-3">
+                    <span className="text-[10px] font-black text-gray-700 uppercase tracking-widest">% of Progress</span>
+                    
+                    {/* Monospace progress bar */}
+                    <div className="relative w-[356px] h-7 bg-black border border-gray-600 overflow-hidden select-none">
+                        {/* Unfilled text background */}
+                        <div className="absolute inset-0 flex items-center justify-center text-white text-[10px] font-black tracking-widest whitespace-nowrap">
+                            0.....25.....50.....75.....100
+                        </div>
+                        
+                        {/* Filled text overlay */}
+                        <div 
+                            className="absolute left-0 top-0 bottom-0 bg-[#1e3f31] overflow-hidden transition-all duration-150 ease-out"
+                            style={{ width: `${operationProgress}%` }}
+                        >
+                            <div className="w-[356px] h-full flex items-center justify-center text-yellow-300 text-[10px] font-black tracking-widest whitespace-nowrap">
+                                0.....25.....50.....75.....100
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* File Info */}
+                    <div className="w-[356px] mt-2 grid grid-cols-2 text-[10px] font-black uppercase text-gray-800 tracking-wider">
+                        <div className="flex flex-col text-left">
+                            <span className="text-[9px] text-gray-500 font-bold">Table Name</span>
+                            <span className="mt-0.5 text-gray-950 font-black">{currentDbOp.table}</span>
+                        </div>
+                        <div className="flex flex-col text-right">
+                            <span className="text-[9px] text-gray-500 font-bold">DB Operation</span>
+                            <span className="mt-0.5 text-gray-950 font-black">{currentDbOp.op}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const App: React.FC = () => {
     const [currentUser, setCurrentUser] = useState<RegisteredPharmacy | null>(null);
     const [showFreshInstallSyncDialog, setShowFreshInstallSyncDialog] = useState(false);
@@ -145,6 +274,8 @@ const App: React.FC = () => {
     // Refs to trigger child save methods remotely
     const posRef = useRef<any>(null);
     const purchaseFormRef = useRef<any>(null);
+    const salesChallansRef = useRef<any>(null);
+    const deliveryChallansRef = useRef<any>(null);
 
     // Reactive online/offline status. `navigator.onLine` is read once at render
     // time and doesn't notify React when connectivity flips; subscribe to the
@@ -680,6 +811,10 @@ const App: React.FC = () => {
         let isDirty = false;
         if (fromPage === 'pos' || fromPage === 'nonGstPos') {
             isDirty = posRef.current?.isDirty ?? false;
+        } else if (fromPage === 'salesChallans') {
+            isDirty = salesChallansRef.current?.isDirty ?? false;
+        } else if (fromPage === 'deliveryChallans') {
+            isDirty = deliveryChallansRef.current?.isDirty ?? false;
         } else {
             isDirty = purchaseFormRef.current?.isDirty ?? false;
         }
@@ -727,6 +862,10 @@ const App: React.FC = () => {
         try {
             if (currentPage === 'pos' || currentPage === 'nonGstPos') {
                 if (posRef.current) await posRef.current.handleSave();
+            } else if (currentPage === 'salesChallans') {
+                if (salesChallansRef.current) await salesChallansRef.current.handleSubmit();
+            } else if (currentPage === 'deliveryChallans') {
+                if (deliveryChallansRef.current) await deliveryChallansRef.current.handleSubmit();
             } else if (purchaseFormRef.current) {
                 if (typeof purchaseFormRef.current.handleSubmit === 'function') {
                     await purchaseFormRef.current.handleSubmit();
@@ -767,6 +906,10 @@ const App: React.FC = () => {
             if (currentPage === 'pos' || currentPage === 'nonGstPos') {
                 posRef.current?.resetForm?.();
                 setEditingSale(null);
+            } else if (currentPage === 'salesChallans') {
+                salesChallansRef.current?.resetForm?.();
+            } else if (currentPage === 'deliveryChallans') {
+                deliveryChallansRef.current?.resetForm?.();
             } else {
                 purchaseFormRef.current?.resetForm?.();
                 setEditingPurchase(null);
@@ -785,6 +928,12 @@ const App: React.FC = () => {
                 posRef.current?.resetForm?.();
                 setEditingSale(null);
                 handleNavigate(wasEditing ? 'salesHistory' : 'dashboard', true);
+            } else if (currentPage === 'salesChallans') {
+                salesChallansRef.current?.resetForm?.();
+                handleNavigate('dashboard', true);
+            } else if (currentPage === 'deliveryChallans') {
+                deliveryChallansRef.current?.resetForm?.();
+                handleNavigate('dashboard', true);
             } else {
                 purchaseFormRef.current?.resetForm?.();
                 if (currentPage === 'automatedPurchaseEntry' || currentPage === 'manualPurchaseEntry' || currentPage === 'manualSupplierInvoice') {
@@ -2598,6 +2747,7 @@ const App: React.FC = () => {
                     />;
                 case 'salesChallans':
                     return <SalesChallans
+                        ref={salesChallansRef}
                         salesChallans={salesChallans}
                         inventory={inventory}
                         medicines={medicines}
@@ -2640,6 +2790,7 @@ const App: React.FC = () => {
                     />;
                 case 'deliveryChallans':
                     return <DeliveryChallans
+                        ref={deliveryChallansRef}
                         deliveryChallans={deliveryChallans}
                         inventory={inventory}
                         distributors={suppliers}
@@ -3179,6 +3330,18 @@ const App: React.FC = () => {
                             loadData(updated, 'background');
                         })}
                         addNotification={addNotification}
+                        onResyncAll={() => {
+                            if (!currentUser) return;
+                            addNotification('Starting full resync — setup modal will appear shortly.', 'success');
+                            triggerFullResync();
+                            // Refresh the legacy app state after the foreground phase
+                            // completes (5s buffer; background phase will continue
+                            // asynchronously and SyncBootstrap will rehydrate).
+                            setTimeout(() => {
+                                if (currentUser) loadData(currentUser, 'sync');
+                            }, 5000);
+                        }}
+                        onFreshInstallSync={() => setShowFreshInstallSyncDialog(true)}
                     />;
                 case 'moduleVisibility':
                     return <ModuleVisibility
@@ -3336,18 +3499,6 @@ const App: React.FC = () => {
                 currentPage={currentPage}
                 onReload={handleReload}
                 isReloading={isReloading}
-                onResyncAll={() => {
-                    if (!currentUser) return;
-                    addNotification('Starting full resync — setup modal will appear shortly.', 'success');
-                    triggerFullResync();
-                    // Refresh the legacy app state after the foreground phase
-                    // completes (5s buffer; background phase will continue
-                    // asynchronously and SyncBootstrap will rehydrate).
-                    setTimeout(() => {
-                        if (currentUser) loadData(currentUser, 'sync');
-                    }, 5000);
-                }}
-                onFreshInstallSync={() => setShowFreshInstallSyncDialog(true)}
                 onToggleSidebar={toggleSidebar}
             />
             <div className="flex-1 flex overflow-hidden">
@@ -3474,38 +3625,7 @@ const App: React.FC = () => {
                 />
             )}
 
-            {isOperationLoading && (
-                <div className="fixed inset-0 z-[1000] flex flex-col items-center justify-center bg-[#004242] font-sans select-none">
-                    <div className="flex flex-col items-center gap-8">
-                        {/* The 10 loading blocks */}
-                        <div className="flex gap-2.5">
-                            {[...Array(10)].map((_, i) => {
-                                const isFilled = i < loadingProgress;
-                                return (
-                                    <div
-                                        key={i}
-                                        className={`w-[18px] h-[52px] rounded-[1px] transition-all duration-300 ${
-                                            isFilled 
-                                                ? 'bg-white shadow-[0_6px_12px_rgba(0,0,0,0.25),0_0_2px_rgba(255,255,255,0.4)] translate-y-[-2px]' 
-                                                : 'bg-[#002222]/45 shadow-[inset_0_2px_4px_rgba(0,0,0,0.2)] border border-[#ffffff]/5'
-                                        }`}
-                                    />
-                                );
-                            })}
-                        </div>
-                        {/* The loading... text */}
-                        <div 
-                            className="text-white text-3xl font-extrabold tracking-wider select-none opacity-95 animate-pulse"
-                            style={{
-                                fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                                textShadow: '0 2px 4px rgba(0,0,0,0.25)',
-                            }}
-                        >
-                            loading...
-                        </div>
-                    </div>
-                </div>
-            )}
+            {isOperationLoading && <MargRetroLoader currentPage={currentPage} />}
         </div>
     );
 };

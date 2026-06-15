@@ -1,8 +1,8 @@
-﻿import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import Card from '@core/components/ui/Card';
 import Modal from '@core/components/ui/Modal';
 import { Distributor, Purchase, RegisteredPharmacy, TransactionLedgerItem } from '@core/types';
-import { calculateSupplierPayableBreakdown, getOutstandingBalance } from '@core/utils/helpers';
+import { calculateSupplierPayableBreakdown, getOutstandingBalance, formatVoucherNo } from '@core/utils/helpers';
 import { fuzzyMatch } from '@core/utils/search';
 import { handleEnterToNextField } from '@core/utils/navigation';
 import { numberToWords } from '@core/utils/numberToWords';
@@ -264,7 +264,7 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
             .map(p => ({
                 id: p.id,
                 date: p.date,
-                invoiceNumber: p.invoiceNumber || p.id,
+                invoiceNumber: formatVoucherNo(p.invoiceNumber || p.id),
                 invoiceAmount: Number(p.totalAmount || 0),
                 paid: 0,
                 balance: Number(p.totalAmount || 0),
@@ -845,7 +845,7 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
                                         <div className="space-y-2">
                                             {openPayableInvoiceRows.map(row => (
                                                 <div key={row.id} className="grid grid-cols-1 md:grid-cols-6 gap-2">
-                                                    <div className="border border-gray-200 p-2 text-xs font-bold">{row.invoiceNumber}</div>
+                                                    <div className="border border-gray-200 p-2 text-xs font-bold">{formatVoucherNo(row.invoiceNumber)}</div>
                                                     <div className="border border-gray-200 p-2 text-xs">{formatDisplayDate(row.date)}</div>
                                                     <div className="border border-gray-200 p-2 text-xs">Original ₹{row.invoiceAmount.toFixed(2)}</div>
                                                     <div className="border border-gray-200 p-2 text-xs">Paid ₹{row.paid.toFixed(2)}</div>
@@ -900,7 +900,7 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
                                     </label>
                                     {adjustAgainstInvoice && invoiceRows.filter(row => row.balance > 0).map(row => (
                                         <div key={row.id} className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                            <div className="border border-gray-200 p-2 text-xs font-bold">{row.invoiceNumber} • Pending ₹{row.balance.toFixed(2)}</div>
+                                            <div className="border border-gray-200 p-2 text-xs font-bold">{formatVoucherNo(row.invoiceNumber)} • Pending ₹{row.balance.toFixed(2)}</div>
                                             <input type="number" min={0} max={row.balance} value={invoiceAdjustments[row.id] ?? ''} onChange={e => setInvoiceAdjustments(prev => ({ ...prev, [row.id]: parseFloat(e.target.value) || 0 }))} className="border border-gray-300 p-2 text-xs font-bold" placeholder="Adjust amount" />
                                         </div>
                                     ))}
@@ -925,14 +925,14 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
                                             ) : invoiceRows.map(row => (
                                                 <tr key={row.id} className="border-t">
                                                     <td className="p-2">{formatDisplayDate(row.date)}</td>
-                                                    <td className="p-2">{row.invoiceNumber}</td>
+                                                    <td className="p-2">{formatVoucherNo(row.invoiceNumber)}</td>
                                                     <td className="p-2">₹{row.invoiceAmount.toFixed(2)}</td>
                                                     <td className="p-2">₹{row.paid.toFixed(2)}</td>
                                                     <td className="p-2 font-bold">₹{row.balance.toFixed(2)}</td>
                                                     <td className="p-2">{formatDisplayDate(row.paymentDate)}</td>
                                                     <td className="p-2">{row.paymentMode}</td>
                                                     <td className="p-2">{row.bankName}</td>
-                                                    <td className="p-2">{row.voucherRef}</td>
+                                                    <td className="p-2">{formatVoucherNo(row.voucherRef)}</td>
                                                     <td className="p-2">
                                                         {row.latestPaymentEntry ? (
                                                             <button type="button" onClick={() => printVoucher(row.latestPaymentEntry!)} className="px-2 py-1 border border-gray-300 font-bold uppercase text-[10px] hover:bg-gray-100">Print</button>
@@ -964,7 +964,7 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
                                                             <>
                                                     <td className="p-2">{formatDisplayDate(item.date)}</td>
                                                     <td className="p-2">{item.entryCategory === 'down_payment' ? 'DOWN PAYMENT' : item.entryCategory === 'down_payment_adjustment' ? 'DP ADJUSTMENT' : item.entryCategory === 'invoice_payment_adjustment' ? 'INVOICE ADJUSTMENT' : item.entryCategory === 'payment_cancellation' || item.entryCategory === 'down_payment_cancellation' ? 'CANCELLATION' : 'PAYMENT'}</td>
-                                                    <td className="p-2">{item.referenceInvoiceNumber || item.referenceInvoiceId || '-'}</td>
+                                                    <td className="p-2">{formatVoucherNo(item.referenceInvoiceNumber) || item.referenceInvoiceId || '-'}</td>
                                                     <td className="p-2">{item.paymentMode || '-'}</td>
                                                     <td className="p-2">{item.bankName || '-'}</td>
                                                     <td className="p-2">{item.entryCategory === 'down_payment' ? 'Advance Paid' : item.description}</td>
@@ -972,7 +972,7 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
                                                     <td className="p-2">₹{summary.adjustedAmount.toFixed(2)}</td>
                                                     <td className="p-2">₹{summary.remainingAmount.toFixed(2)}</td>
                                                     <td className="p-2">{summary.status}</td>
-                                                    <td className="p-2">{item.journalEntryNumber || item.journalEntryId || '-'}</td>
+                                                    <td className="p-2">{formatVoucherNo(item.journalEntryNumber) || item.journalEntryId || '-'}</td>
                                                     <td className="p-2 flex gap-2">
                                                         <button type="button" onClick={() => printVoucher(item)} className="px-2 py-1 border border-gray-300 font-bold uppercase text-[10px] hover:bg-gray-100">Print</button>
                                                         {(item.entryCategory === 'invoice_payment' || item.entryCategory === 'down_payment') && item.status !== 'cancelled' && (
@@ -1006,7 +1006,7 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
                                                     <td className="p-2">₹{Number(item.debit || 0).toFixed(2)}</td>
                                                     <td className="p-2">₹{Number(item.credit || 0).toFixed(2)}</td>
                                                     <td className="p-2 font-bold">₹{Number(item.balance || 0).toFixed(2)}</td>
-                                                    <td className="p-2">{item.journalEntryNumber || item.journalEntryId || '-'}</td>
+                                                    <td className="p-2">{formatVoucherNo(item.journalEntryNumber) || item.journalEntryId || '-'}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -1022,7 +1022,7 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
                                             return (
                                                 <>
                                                     <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
-                                                        <div><span className="font-black uppercase text-gray-500">Voucher No.</span><div>{voucherNumber}</div></div>
+                                                        <div><span className="font-black uppercase text-gray-500">Voucher No.</span><div>{formatVoucherNo(voucherNumber)}</div></div>
                                                         <div><span className="font-black uppercase text-gray-500">Voucher Date</span><div>{formatDisplayDate(adjustmentVoucher.date)}</div></div>
                                                         <div><span className="font-black uppercase text-gray-500">Party Name</span><div>{selectedDistributor.name}</div></div>
                                                         <div><span className="font-black uppercase text-gray-500">Original Voucher Amount</span><div>₹{getPaymentAmount(adjustmentVoucher).toFixed(2)}</div></div>
@@ -1042,7 +1042,7 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
                                                                     <tr><td colSpan={6} className="p-3 text-center text-gray-500">No open invoices available.</td></tr>
                                                                 ) : openPayableInvoiceRows.map((row) => (
                                                                     <tr key={row.id} className="border-t">
-                                                                        <td className="p-2">{row.invoiceNumber}</td>
+                                                                        <td className="p-2">{formatVoucherNo(row.invoiceNumber)}</td>
                                                                         <td className="p-2">{formatDisplayDate(row.date)}</td>
                                                                         <td className="p-2">₹{row.invoiceAmount.toFixed(2)}</td>
                                                                         <td className="p-2">₹{row.paid.toFixed(2)}</td>

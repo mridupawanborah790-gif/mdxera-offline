@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import Card from '@core/components/ui/Card';
 import Modal from '@core/components/ui/Modal';
 import { Customer, RegisteredPharmacy, Transaction, TransactionLedgerItem } from '@core/types';
-import { calculateCustomerReceivableBreakdown } from '@core/utils/helpers';
+import { calculateCustomerReceivableBreakdown, formatVoucherNo } from '@core/utils/helpers';
 import { fuzzyMatch } from '@core/utils/search';
 import { handleEnterToNextField } from '@core/utils/navigation';
 import { numberToWords } from '@core/utils/numberToWords';
@@ -362,11 +362,11 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
         const paymentModeText = entry.paymentMode || 'Bank';
         const bankAccount = entry.bankName || bankOptions.find(option => option.id === entry.bankAccountId)?.bankName || 'N/A';
         const amountReceived = Number(entry.credit || 0);
-        const receiptAgainstInvoice = entry.referenceInvoiceNumber || entry.referenceInvoiceId || '-';
+        const receiptAgainstInvoice = formatVoucherNo(entry.referenceInvoiceNumber || entry.referenceInvoiceId) || '-';
         const narration = entry.description || 'Payment Received';
         const isAutoReceipt = entry.id.startsWith('auto-') || /auto[-\s]?/i.test(narration);
         const linkedDetails = (entry.referenceInvoiceNumber || entry.referenceInvoiceId)
-            ? `${entry.referenceInvoiceNumber || '-'} (${entry.referenceInvoiceId || '-'})`
+            ? `${formatVoucherNo(entry.referenceInvoiceNumber) || '-'} (${entry.referenceInvoiceId || '-'})`
             : '-';
         const cancellationMark = entry.status === 'cancelled'
             ? `<div class="cancelled-mark">CANCELLED</div>`
@@ -771,7 +771,7 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
                                     <input type="text" value={description} onChange={e => setDescription(e.target.value)} className="border border-gray-300 p-2 text-xs font-bold" placeholder="Narration" />
                                     {paymentType === 'against_invoice' && openReceivableInvoiceRows.map(inv => (
                                         <div key={inv.id} className="col-span-3 grid grid-cols-5 gap-2">
-                                            <div className="border border-gray-200 p-2 text-xs font-bold">{inv.invoiceNumber || inv.id}</div>
+                                            <div className="border border-gray-200 p-2 text-xs font-bold">{formatVoucherNo(inv.invoiceNumber || inv.id)}</div>
                                             <div className="border border-gray-200 p-2 text-xs">Date {formatDisplayDate(inv.date)}</div>
                                             <div className="border border-gray-200 p-2 text-xs">Original ₹{inv.invoiceAmount.toFixed(2)}</div>
                                             <div className="border border-gray-200 p-2 text-xs">Balance ₹{inv.balance.toFixed(2)}</div>
@@ -833,7 +833,7 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
                                     </label>
                                     {adjustAgainstInvoice && invoiceRows.filter(inv => inv.balance > 0).map(inv => (
                                         <div key={inv.id} className="col-span-3 grid grid-cols-3 gap-3">
-                                            <div className="border border-gray-200 p-2 text-xs font-bold">{inv.invoiceNumber || inv.id} | Pending ₹{inv.balance.toFixed(2)}</div>
+                                            <div className="border border-gray-200 p-2 text-xs font-bold">{formatVoucherNo(inv.invoiceNumber || inv.id)} | Pending ₹{inv.balance.toFixed(2)}</div>
                                             <input
                                                 type="number"
                                                 min={0}
@@ -865,7 +865,7 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
                                         <tbody>
                                             {invoiceRows.map(row => (
                                                 <tr key={row.id} className="border-t">
-                                                    <td className="p-2 font-bold">{row.invoiceNumber || row.id}</td>
+                                                    <td className="p-2 font-bold">{formatVoucherNo(row.invoiceNumber || row.id)}</td>
                                                     <td className="p-2">₹{row.invoiceAmount.toFixed(2)}</td>
                                                     <td className="p-2 text-emerald-700">₹{row.received.toFixed(2)}</td>
                                                     <td className="p-2 text-red-700">₹{row.balance.toFixed(2)}</td>
@@ -904,7 +904,7 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
                                                             <>
                                                     <td className="p-2">{formatDisplayDate(item.date)}</td>
                                                     <td className="p-2">{item.entryCategory === 'down_payment' ? 'DOWN PAYMENT' : item.entryCategory === 'down_payment_adjustment' ? 'DP ADJUSTMENT' : item.entryCategory === 'invoice_payment_adjustment' ? 'INVOICE ADJUSTMENT' : item.entryCategory === 'payment_cancellation' || item.entryCategory === 'down_payment_cancellation' ? 'CANCELLATION' : 'PAYMENT'}</td>
-                                                    <td className="p-2">{item.referenceInvoiceNumber || item.referenceInvoiceId || '-'}</td>
+                                                    <td className="p-2">{formatVoucherNo(item.referenceInvoiceNumber || item.referenceInvoiceId) || '-'}</td>
                                                     <td className="p-2">{item.paymentMode || '-'}</td>
                                                     <td className="p-2">{item.bankName || '-'}</td>
                                                     <td className="p-2">{item.entryCategory === 'down_payment' ? 'Advance Received' : item.description}</td>
@@ -912,7 +912,7 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
                                                     <td className="p-2">₹{summary.adjustedAmount.toFixed(2)}</td>
                                                     <td className="p-2">₹{summary.remainingAmount.toFixed(2)}</td>
                                                     <td className="p-2">{summary.status}</td>
-                                                    <td className="p-2">{item.journalEntryNumber || item.journalEntryId || '-'}</td>
+                                                    <td className="p-2">{formatVoucherNo(item.journalEntryNumber || item.journalEntryId) || '-'}</td>
                                                     <td className="p-2 flex gap-2">
                                                         <button type="button" onClick={() => printVoucher(item)} className="px-2 py-1 border border-gray-300 font-bold uppercase text-[10px] hover:bg-gray-100">Print</button>
                                                         {(item.entryCategory === 'invoice_payment' || item.entryCategory === 'down_payment') && item.status !== 'cancelled' && (
@@ -946,7 +946,7 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
                                                     <td className="p-2">₹{Number(item.debit || 0).toFixed(2)}</td>
                                                     <td className="p-2">₹{Number(item.credit || 0).toFixed(2)}</td>
                                                     <td className="p-2 font-bold">₹{Number(item.balance || 0).toFixed(2)}</td>
-                                                    <td className="p-2">{item.journalEntryNumber || item.journalEntryId || '-'}</td>
+                                                    <td className="p-2">{formatVoucherNo(item.journalEntryNumber || item.journalEntryId) || '-'}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -982,7 +982,7 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
                                                                     <tr><td colSpan={6} className="p-3 text-center text-gray-500">No open invoices available.</td></tr>
                                                                 ) : openReceivableInvoiceRows.map((row) => (
                                                                     <tr key={row.id} className="border-t">
-                                                                        <td className="p-2">{row.invoiceNumber || row.id}</td>
+                                                                        <td className="p-2">{formatVoucherNo(row.invoiceNumber || row.id)}</td>
                                                                         <td className="p-2">{formatDisplayDate(row.date)}</td>
                                                                         <td className="p-2">₹{row.invoiceAmount.toFixed(2)}</td>
                                                                         <td className="p-2">₹{row.received.toFixed(2)}</td>

@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Card from '@core/components/ui/Card';
 import type { RegisteredPharmacy } from '@core/types';
 import { handleEnterToNextField } from '@core/utils/navigation';
@@ -10,6 +10,8 @@ interface SettingsProps {
     currentUser: RegisteredPharmacy | null;
     onUpdateProfile: (updatedProfile: RegisteredPharmacy) => void;
     addNotification: (message: string, type?: 'success' | 'error' | 'warning') => void;
+    onResyncAll?: () => void;
+    onFreshInstallSync?: () => void;
 }
 
 const InputGroup = ({ label, name, value, onChange, type = "text", placeholder = "", required = false, readOnly = false, className = '' }: any) => (
@@ -30,7 +32,7 @@ const InputGroup = ({ label, name, value, onChange, type = "text", placeholder =
     </div>
 );
 
-const Settings: React.FC<SettingsProps> = ({ currentUser, onUpdateProfile, addNotification }) => {
+const Settings: React.FC<SettingsProps> = ({ currentUser, onUpdateProfile, addNotification, onResyncAll, onFreshInstallSync }) => {
     const [formData, setFormData] = useState<RegisteredPharmacy | null>(currentUser);
     const [isSaving, setIsSaving] = useState(false);
     const initializedRef = useRef<string | null>(currentUser?.user_id || null);
@@ -272,7 +274,41 @@ const Settings: React.FC<SettingsProps> = ({ currentUser, onUpdateProfile, addNo
                             </div>
                         </section>
 
-                        {/* 5. System & Updates */}
+                        {/* 5. Database Synchronisation */}
+                        {(onResyncAll || onFreshInstallSync) && (
+                            <section className="space-y-4 pt-4 border-t-2 border-primary">
+                                <div className="pb-1">
+                                    <h3 className="text-lg font-black text-primary uppercase tracking-tight">Database Synchronisation</h3>
+                                    <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-0.5">Manage local database sync from the server</p>
+                                </div>
+                                <div className="flex flex-wrap gap-4 pt-2">
+                                    {onResyncAll && (
+                                        <button
+                                            type="button"
+                                            onClick={onResyncAll}
+                                            className="px-6 py-3 border-2 border-primary bg-primary text-white font-black uppercase text-[10px] tracking-widest hover:bg-primary-dark transition-all transform active:scale-95 flex items-center gap-2"
+                                            title="Re-download every table from the server into local storage"
+                                        >
+                                            <svg className="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 4.79M9 9H4M9 9V4" /></svg>
+                                            Sync All (Resume)
+                                        </button>
+                                    )}
+                                    {onFreshInstallSync && (
+                                        <button
+                                            type="button"
+                                            onClick={onFreshInstallSync}
+                                            className="px-6 py-3 border-2 border-red-500 text-red-600 font-black uppercase text-[10px] tracking-widest hover:bg-red-50 transition-all transform active:scale-95 flex items-center gap-2"
+                                            title="Wipe local database and start fresh from Supabase"
+                                        >
+                                            <svg className="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                                            Fresh Install Sync
+                                        </button>
+                                    )}
+                                </div>
+                            </section>
+                        )}
+
+                        {/* 6. System & Updates */}
                         <UpdateChecker addNotification={addNotification} />
 
                         {/* Submit Actions */}

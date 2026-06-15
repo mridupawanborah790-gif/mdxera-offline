@@ -15,7 +15,7 @@ import { InventoryItem, Customer, Transaction, BillItem, AppConfigurations, Regi
 import { generateNewInvoiceId } from '@core/utils/invoice';
 import { handleEnterToNextField } from '@core/utils/navigation';
 import { fuzzyMatch } from '@core/utils/search';
-import { calculateCustomerReceivableBreakdown, getOutstandingBalance, parseNumber, checkIsExpired, formatExpiryToMMYY } from '@core/utils/helpers';
+import { calculateCustomerReceivableBreakdown, getOutstandingBalance, parseNumber, checkIsExpired, formatExpiryToMMYY, formatVoucherNo } from '@core/utils/helpers';
 import { getInventoryPolicy, getResolvedMedicinePolicy } from '@core/utils/materialType';
 import { isLiquidOrWeightPack, resolveUnitsPerStrip } from '@core/utils/pack';
 import { calculateBillingTotals, resolveBillingSettings } from '@core/utils/billing';
@@ -2029,7 +2029,7 @@ const POS = forwardRef<any, POSProps>(({
                                 <span className="shrink-0 font-black text-primary">₹{sale.total.toFixed(2)}</span>
                             </div>
                             <div className="flex justify-between text-[10px] text-gray-500 font-bold uppercase">
-                                <span>{sale.invoiceNumber || sale.id}</span>
+                                <span>{formatVoucherNo(sale.invoiceNumber || sale.id)}</span>
                                 <span>{sale.date}</span>
                             </div>
                             <div className="mt-1 flex items-center gap-2">

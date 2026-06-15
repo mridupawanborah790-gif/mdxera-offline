@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Modal from '@core/components/ui/Modal';
 import type { InventoryItem, Transaction, Purchase, Distributor, Customer, SalesReturn, PurchaseReturn, ModuleConfig, DoctorMaster } from '@core/types';
-import { calculateCustomerReceivableBreakdown, calculateSupplierPayableBreakdown, getCustomerInvoiceOutstandingTotalFromTransactions, getOutstandingBalance, getSupplierInvoiceOutstandingTotalFromPurchases } from '@core/utils/helpers';
+import { calculateCustomerReceivableBreakdown, calculateSupplierPayableBreakdown, getCustomerInvoiceOutstandingTotalFromTransactions, getOutstandingBalance, getSupplierInvoiceOutstandingTotalFromPurchases, formatVoucherNo } from '@core/utils/helpers';
 import { getStockBreakup } from '@core/utils/stock';
 import { formatPackLooseQuantity } from '@core/utils/quantity';
 
@@ -252,7 +252,7 @@ const Reports: React.FC<ReportsProps> = ({
       case 'salesRegister':
         reportHeaders = ['Bill No', 'Bill Date', 'Customer Name', 'GSTIN', 'Billing Category', 'Taxable Amount', 'GST Amount', 'Discount', 'Net Amount', 'Status'];
         rows = completedSales.map(tx => ({
-          'Bill No': tx.invoiceNumber || tx.id,
+          'Bill No': formatVoucherNo(tx.invoiceNumber || tx.id),
           'Bill Date': formatReportDate(tx.date),
           'Customer Name': tx.customerName,
           'GSTIN': customerByName.get(tx.customerName)?.gstNumber || 'N/A',
@@ -280,7 +280,7 @@ const Reports: React.FC<ReportsProps> = ({
       case 'billWiseSales':
         reportHeaders = ['Bill No', 'Date', 'Customer', 'Amount', 'Discount', 'GST', 'Final Bill Amount'];
         rows = completedSales.map(tx => ({
-          'Bill No': tx.invoiceNumber || tx.id,
+          'Bill No': formatVoucherNo(tx.invoiceNumber || tx.id),
           'Date': formatReportDate(tx.date),
           'Customer': tx.customerName,
           'Amount': round2(tx.subtotal || 0),
@@ -345,7 +345,7 @@ const Reports: React.FC<ReportsProps> = ({
               const billAmount = round2(taxableAmount + gstAmount);
               return {
                 'Bill Date': formatReportDate(tx.date),
-                'Sales Bill Number': tx.invoiceNumber || tx.id,
+                'Sales Bill Number': formatVoucherNo(tx.invoiceNumber || tx.id),
                 'Product Name': item.name || '-',
                 'Batch': item.batch || '-',
                 'Qty': round2(qty),
@@ -360,7 +360,7 @@ const Reports: React.FC<ReportsProps> = ({
                 'Referred By': tx.referredBy || '-',
                 'Bill Category': tx.billType || 'regular',
                 'User / Operator': tx.billedByName || tx.user_id || '-',
-                'Bill Number': tx.invoiceNumber || tx.id,
+                'Bill Number': formatVoucherNo(tx.invoiceNumber || tx.id),
                 'Doctor Name': tx.referredBy || '-',
               };
             });
@@ -488,7 +488,7 @@ const Reports: React.FC<ReportsProps> = ({
 
             return {
               'Doctor Name': doctorName,
-              'Sales Bill No': tx.invoiceNumber || tx.id,
+              'Sales Bill No': formatVoucherNo(tx.invoiceNumber || tx.id),
               'Sales Bill Date': formatReportDate(tx.date),
               'Product Name': item.name || 'N/A',
               'Quantity': formatPackLooseQuantity(qty, Number(item.looseQuantity || 0), freeQty),
@@ -585,7 +585,7 @@ const Reports: React.FC<ReportsProps> = ({
             return {
               'MFR Name': item.manufacturer || inv?.manufacturer || 'N/A',
               'Product Name': item.name || 'N/A',
-              'Sales Bill No': tx.invoiceNumber || tx.id,
+              'Sales Bill No': formatVoucherNo(tx.invoiceNumber || tx.id),
               'Sales Bill Date': formatReportDate(tx.date),
               'Customer Name': tx.customerName || 'Walk-in',
               'Quantity': formatPackLooseQuantity(qty, Number(item.looseQuantity || 0), freeQty),
@@ -702,7 +702,7 @@ const Reports: React.FC<ReportsProps> = ({
       case 'salesReturnRegister':
       case 'creditNoteRegister':
         reportHeaders = reportId === 'salesReturnRegister' ? ['Return Voucher No', 'Date', 'Original Bill No', 'Customer', 'Item / Amount', 'Tax Reversal', 'Return Total'] : ['Credit Note No', 'Date', 'Customer', 'Reference Bill', 'Amount', 'Reason'];
-        rows = filteredSalesReturns.map(ret => reportId === 'salesReturnRegister' ? ({ 'Return Voucher No': ret.id, 'Date': formatReportDate(ret.date), 'Original Bill No': ret.originalInvoiceNumber || ret.originalInvoiceId, 'Customer': ret.customerName, 'Item / Amount': `${ret.items.length} items`, 'Tax Reversal': round2(ret.items.reduce((sum: number, i: any) => sum + (Number(i.returnQuantity || 0) * Number(i.rate ?? i.mrp ?? 0) * (Number(i.gstPercent || 0) / 100)), 0)), 'Return Total': round2(ret.totalRefund || 0) }) : ({ 'Credit Note No': `CN-${ret.id}`, 'Date': formatReportDate(ret.date), 'Customer': ret.customerName, 'Reference Bill': ret.originalInvoiceNumber || ret.originalInvoiceId, 'Amount': round2(ret.totalRefund || 0), 'Reason': ret.remarks || 'Sales return adjustment' }));
+        rows = filteredSalesReturns.map(ret => reportId === 'salesReturnRegister' ? ({ 'Return Voucher No': ret.id, 'Date': formatReportDate(ret.date), 'Original Bill No': formatVoucherNo(ret.originalInvoiceNumber || ret.originalInvoiceId), 'Customer': ret.customerName, 'Item / Amount': `${ret.items.length} items`, 'Tax Reversal': round2(ret.items.reduce((sum: number, i: any) => sum + (Number(i.returnQuantity || 0) * Number(i.rate ?? i.mrp ?? 0) * (Number(i.gstPercent || 0) / 100)), 0)), 'Return Total': round2(ret.totalRefund || 0) }) : ({ 'Credit Note No': `CN-${ret.id}`, 'Date': formatReportDate(ret.date), 'Customer': ret.customerName, 'Reference Bill': formatVoucherNo(ret.originalInvoiceNumber || ret.originalInvoiceId), 'Amount': round2(ret.totalRefund || 0), 'Reason': ret.remarks || 'Sales return adjustment' }));
         break;
       case 'schemeDiscountReport':
         reportHeaders = ['Bill No', 'Date', 'Customer', 'Item', 'Trade Discount', 'Bill Discount', 'Scheme Discount', 'Net Impact'];
@@ -710,12 +710,12 @@ const Reports: React.FC<ReportsProps> = ({
           const tradeDiscount = Number(item.itemFlatDiscount || 0) + (Number(item.quantity || 0) * Number(item.rate ?? item.mrp ?? 0) * (Number(item.discountPercent || 0) / 100));
           const schemeDiscount = Number(item.schemeDiscountAmount || 0);
           const billDiscount = (Number(tx.totalItemDiscount || 0) + Number(tx.schemeDiscount || 0)) / Math.max(tx.items.length, 1);
-          return { 'Bill No': tx.invoiceNumber || tx.id, 'Date': formatReportDate(tx.date), 'Customer': tx.customerName, 'Item': item.name, 'Trade Discount': round2(tradeDiscount), 'Bill Discount': round2(billDiscount), 'Scheme Discount': round2(schemeDiscount), 'Net Impact': round2(tradeDiscount + billDiscount + schemeDiscount) };
+          return { 'Bill No': formatVoucherNo(tx.invoiceNumber || tx.id), 'Date': formatReportDate(tx.date), 'Customer': tx.customerName, 'Item': item.name, 'Trade Discount': round2(tradeDiscount), 'Bill Discount': round2(billDiscount), 'Scheme Discount': round2(schemeDiscount), 'Net Impact': round2(tradeDiscount + billDiscount + schemeDiscount) };
         }));
         break;
       case 'freeQuantityReport':
         reportHeaders = ['Bill No', 'Date', 'Customer', 'Item', 'Sold Qty', 'Free Qty', 'Effective Rate'];
-        rows = completedSales.flatMap(tx => tx.items.filter((i: any) => Number(i.freeQuantity || 0) > 0).map((i: any) => ({ 'Bill No': tx.invoiceNumber || tx.id, 'Date': formatReportDate(tx.date), 'Customer': tx.customerName, 'Item': i.name, 'Sold Qty': round2(i.quantity || 0), 'Free Qty': round2(i.freeQuantity || 0), 'Effective Rate': round2((Number(i.rate ?? i.mrp ?? 0) * Number(i.quantity || 0)) / Math.max(Number(i.quantity || 0) + Number(i.freeQuantity || 0), 1)) })));
+        rows = completedSales.flatMap(tx => tx.items.filter((i: any) => Number(i.freeQuantity || 0) > 0).map((i: any) => ({ 'Bill No': formatVoucherNo(tx.invoiceNumber || tx.id), 'Date': formatReportDate(tx.date), 'Customer': tx.customerName, 'Item': i.name, 'Sold Qty': round2(i.quantity || 0), 'Free Qty': round2(i.freeQuantity || 0), 'Effective Rate': round2((Number(i.rate ?? i.mrp ?? 0) * Number(i.quantity || 0)) / Math.max(Number(i.quantity || 0) + Number(i.freeQuantity || 0), 1)) })));
         break;
       case 'profitOnSales':
       case 'marginAnalysis':
@@ -727,17 +727,17 @@ const Reports: React.FC<ReportsProps> = ({
           const salesValue = Number(i.quantity || 0) * salesRate;
           const costValue = Number(i.quantity || 0) * costRate;
           const profit = salesValue - costValue;
-          return reportId === 'profitOnSales' ? { 'Bill No / Item': `${tx.invoiceNumber || tx.id} / ${i.name}`, 'Sales Value': round2(salesValue), 'Cost Value': round2(costValue), 'Gross Profit': round2(profit), 'Profit %': salesValue > 0 ? round2((profit / salesValue) * 100) : 0 } : { 'Item Name': i.name, 'Sales Rate': round2(salesRate), 'Cost Rate': round2(costRate), 'Margin Amount': round2(salesRate - costRate), 'Margin %': salesRate > 0 ? round2(((salesRate - costRate) / salesRate) * 100) : 0 };
+          return reportId === 'profitOnSales' ? { 'Bill No / Item': `${formatVoucherNo(tx.invoiceNumber || tx.id)} / ${i.name}`, 'Sales Value': round2(salesValue), 'Cost Value': round2(costValue), 'Gross Profit': round2(profit), 'Profit %': salesValue > 0 ? round2((profit / salesValue) * 100) : 0 } : { 'Item Name': i.name, 'Sales Rate': round2(salesRate), 'Cost Rate': round2(costRate), 'Margin Amount': round2(salesRate - costRate), 'Margin %': salesRate > 0 ? round2(((salesRate - costRate) / salesRate) * 100) : 0 };
         }));
         break;
       case 'cancelledDeletedBills':
         reportHeaders = ['Bill No', 'Date', 'Customer', 'Amount', 'Cancelled On', 'Cancelled By'];
-        rows = cancelledSales.map(tx => ({ 'Bill No': tx.invoiceNumber || tx.id, 'Date': formatReportDate(tx.date), 'Customer': tx.customerName, 'Amount': round2(tx.total || 0), 'Cancelled On': tx.createdAt ? formatReportDate(tx.createdAt) : formatReportDate(tx.date), 'Cancelled By': tx.billedByName || 'System' }));
+        rows = cancelledSales.map(tx => ({ 'Bill No': formatVoucherNo(tx.invoiceNumber || tx.id), 'Date': formatReportDate(tx.date), 'Customer': tx.customerName, 'Amount': round2(tx.total || 0), 'Cancelled On': tx.createdAt ? formatReportDate(tx.createdAt) : formatReportDate(tx.date), 'Cancelled By': tx.billedByName || 'System' }));
         break;
       case 'purchaseRegister':
       case 'billWisePurchase':
         reportHeaders = reportId === 'purchaseRegister' ? ['Purchase Bill No', 'Date', 'Supplier', 'Taxable Amount', 'GST', 'Discount', 'Net Amount'] : ['Bill No', 'Date', 'Supplier', 'Amount', 'GST', 'Discount', 'Final Amount'];
-        rows = completedPurchases.map(p => ({ [reportId === 'purchaseRegister' ? 'Purchase Bill No' : 'Bill No']: p.invoiceNumber, 'Date': formatReportDate(p.date), 'Supplier': p.supplier, [reportId === 'purchaseRegister' ? 'Taxable Amount' : 'Amount']: round2(p.subtotal - p.totalItemDiscount - p.totalItemSchemeDiscount - p.schemeDiscount), 'GST': round2(p.totalGst || 0), 'Discount': round2((p.totalItemDiscount || 0) + (p.totalItemSchemeDiscount || 0) + (p.schemeDiscount || 0)), [reportId === 'purchaseRegister' ? 'Net Amount' : 'Final Amount']: round2(p.totalAmount || 0) }));
+        rows = completedPurchases.map(p => ({ [reportId === 'purchaseRegister' ? 'Purchase Bill No' : 'Bill No']: formatVoucherNo(p.invoiceNumber || p.id), 'Date': formatReportDate(p.date), 'Supplier': p.supplier, [reportId === 'purchaseRegister' ? 'Taxable Amount' : 'Amount']: round2(p.subtotal - p.totalItemDiscount - p.totalItemSchemeDiscount - p.schemeDiscount), 'GST': round2(p.totalGst || 0), 'Discount': round2((p.totalItemDiscount || 0) + (p.totalItemSchemeDiscount || 0) + (p.schemeDiscount || 0)), [reportId === 'purchaseRegister' ? 'Net Amount' : 'Final Amount']: round2(p.totalAmount || 0) }));
         break;
       case 'purchaseSummary':
         reportHeaders = ['Total Purchase Bills', 'Gross Purchase', 'Discount', 'Taxable Value', 'GST', 'Net Purchase'];
@@ -912,27 +912,27 @@ const Reports: React.FC<ReportsProps> = ({
         purchases.filter(p => p.status !== 'draft' && p.status !== 'cancelled' && new Date(p.date) < new Date(startDate)).forEach(p => {
           (p.items || []).forEach((item: any) => {
             const qty = Number(item.quantity || 0) + Number(item.freeQuantity || 0);
-            addDetailedRow({ name: item.name, manufacturer: item.manufacturer || item.brand || '', batch: item.batch, rate: Number(item.purchasePrice || item.ptr || 0), movementType: 'Opening', referenceNo: p.invoiceNumber || p.id, openingQty: qty });
+            addDetailedRow({ name: item.name, manufacturer: item.manufacturer || item.brand || '', batch: item.batch, rate: Number(item.purchasePrice || item.ptr || 0), movementType: 'Opening', referenceNo: formatVoucherNo(p.invoiceNumber || p.id), openingQty: qty });
           });
         });
         transactions.filter(tx => tx.status !== 'draft' && tx.status !== 'cancelled' && new Date(tx.date) < new Date(startDate)).forEach(tx => {
           (tx.items || []).forEach((item: any) => {
             const inv = getInvByNameAndBatch(item.name, item.batch);
             const qty = Number(item.quantity || 0) + Number(item.freeQuantity || 0);
-            addDetailedRow({ name: item.name, manufacturer: item.manufacturer || inv?.manufacturer || item.brand || '', batch: item.batch || inv?.batch, rate: Number(item.rate ?? item.ptr ?? item.purchasePrice ?? inv?.ptr ?? inv?.purchasePrice ?? 0), movementType: 'Opening Adjustment', referenceNo: tx.invoiceNumber || tx.id, openingQty: -qty });
+            addDetailedRow({ name: item.name, manufacturer: item.manufacturer || inv?.manufacturer || item.brand || '', batch: item.batch || inv?.batch, rate: Number(item.rate ?? item.ptr ?? item.purchasePrice ?? inv?.ptr ?? inv?.purchasePrice ?? 0), movementType: 'Opening Adjustment', referenceNo: formatVoucherNo(tx.invoiceNumber || tx.id), openingQty: -qty });
           });
         });
         purchases.filter(p => p.status !== 'draft' && p.status !== 'cancelled' && isDateWithinRange(p.date, startDate, endDate)).forEach(p => {
           (p.items || []).forEach((item: any) => {
             const qty = Number(item.quantity || 0) + Number(item.freeQuantity || 0);
-            addDetailedRow({ name: item.name, manufacturer: item.manufacturer || item.brand || '', batch: item.batch, rate: Number(item.purchasePrice || item.ptr || 0), movementType: 'Receipt', referenceNo: p.invoiceNumber || p.id, receiptQty: qty });
+            addDetailedRow({ name: item.name, manufacturer: item.manufacturer || item.brand || '', batch: item.batch, rate: Number(item.purchasePrice || item.ptr || 0), movementType: 'Receipt', referenceNo: formatVoucherNo(p.invoiceNumber || p.id), receiptQty: qty });
           });
         });
         transactions.filter(tx => tx.status !== 'draft' && tx.status !== 'cancelled' && isDateWithinRange(tx.date, startDate, endDate)).forEach(tx => {
           (tx.items || []).forEach((item: any) => {
             const inv = getInvByNameAndBatch(item.name, item.batch);
             const qty = Number(item.quantity || 0) + Number(item.freeQuantity || 0);
-            addDetailedRow({ name: item.name, manufacturer: item.manufacturer || inv?.manufacturer || item.brand || '', batch: item.batch || inv?.batch, rate: Number(item.rate ?? item.ptr ?? item.purchasePrice ?? inv?.ptr ?? inv?.purchasePrice ?? 0), movementType: 'Issue', referenceNo: tx.invoiceNumber || tx.id, issueQty: qty });
+            addDetailedRow({ name: item.name, manufacturer: item.manufacturer || inv?.manufacturer || item.brand || '', batch: item.batch || inv?.batch, rate: Number(item.rate ?? item.ptr ?? item.purchasePrice ?? inv?.ptr ?? inv?.purchasePrice ?? 0), movementType: 'Issue', referenceNo: formatVoucherNo(tx.invoiceNumber || tx.id), issueQty: qty });
           });
         });
 
@@ -970,7 +970,7 @@ const Reports: React.FC<ReportsProps> = ({
           ...distributors.flatMap(d => (d.ledger || []).map(entry => ({ party: d.name, entry })))
         ];
         rows = rowsPool
-          .map(r => ({ date: r.entry.date, voucher: r.entry.referenceInvoiceNumber || r.entry.journalEntryNumber || r.entry.id, particulars: `${r.party} - ${r.entry.description}`, debit: Number(r.entry.debit || 0), credit: Number(r.entry.credit || 0), balance: Number(r.entry.balance || 0) }))
+          .map(r => ({ date: r.entry.date, voucher: formatVoucherNo(r.entry.referenceInvoiceNumber || r.entry.journalEntryNumber || r.entry.id), particulars: `${r.party} - ${r.entry.description}`, debit: Number(r.entry.debit || 0), credit: Number(r.entry.credit || 0), balance: Number(r.entry.balance || 0) }))
           .filter(r => isDateWithinRange(r.date, startDate, endDate))
           .map(r => ({ 'Date': formatReportDate(r.date), 'Voucher No': r.voucher, 'Particulars': r.particulars, 'Debit': round2(r.debit), 'Credit': round2(r.credit), 'Running Balance': round2(r.balance) }));
         break;
@@ -978,8 +978,8 @@ const Reports: React.FC<ReportsProps> = ({
       case 'dayBook':
         reportHeaders = ['Date', 'Voucher Type', 'Voucher No', 'Party / Ledger', 'Amount', 'Narration'];
         rows = [
-          ...completedSales.map(tx => ({ 'Date': formatReportDate(tx.date), 'Voucher Type': 'Sales', 'Voucher No': tx.invoiceNumber || tx.id, 'Party / Ledger': tx.customerName, 'Amount': round2(tx.total || 0), 'Narration': `Sale (${tx.paymentMode || 'N/A'})`, _sort: tx.date })),
-          ...completedPurchases.map(p => ({ 'Date': formatReportDate(p.date), 'Voucher Type': 'Purchase', 'Voucher No': p.invoiceNumber, 'Party / Ledger': p.supplier, 'Amount': round2(p.totalAmount || 0), 'Narration': 'Purchase entry', _sort: p.date })),
+          ...completedSales.map(tx => ({ 'Date': formatReportDate(tx.date), 'Voucher Type': 'Sales', 'Voucher No': formatVoucherNo(tx.invoiceNumber || tx.id), 'Party / Ledger': tx.customerName, 'Amount': round2(tx.total || 0), 'Narration': `Sale (${tx.paymentMode || 'N/A'})`, _sort: tx.date })),
+          ...completedPurchases.map(p => ({ 'Date': formatReportDate(p.date), 'Voucher Type': 'Purchase', 'Voucher No': formatVoucherNo(p.invoiceNumber || p.id), 'Party / Ledger': p.supplier, 'Amount': round2(p.totalAmount || 0), 'Narration': 'Purchase entry', _sort: p.date })),
         ].sort((a, b) => new Date(a._sort).getTime() - new Date(b._sort).getTime());
         break;
       case 'outstandingReceivables':
@@ -988,7 +988,7 @@ const Reports: React.FC<ReportsProps> = ({
           const dueAmount = Number(tx.total || 0);
           const receivedAmount = Number(tx.amountReceived || 0);
           const balance = dueAmount - receivedAmount;
-          return { 'Customer': tx.customerName, 'Bill No': tx.invoiceNumber || tx.id, 'Bill Date': formatReportDate(tx.date), 'Due Amount': round2(dueAmount), 'Received Amount': round2(receivedAmount), 'Balance Outstanding': round2(balance), 'Ageing': Math.max(0, Math.ceil((new Date().getTime() - new Date(tx.date).getTime()) / (1000 * 60 * 60 * 24))) };
+          return { 'Customer': tx.customerName, 'Bill No': formatVoucherNo(tx.invoiceNumber || tx.id), 'Bill Date': formatReportDate(tx.date), 'Due Amount': round2(dueAmount), 'Received Amount': round2(receivedAmount), 'Balance Outstanding': round2(balance), 'Ageing': Math.max(0, Math.ceil((new Date().getTime() - new Date(tx.date).getTime()) / (1000 * 60 * 60 * 24))) };
         }).filter(r => r['Balance Outstanding'] > 0);
         break;
       case 'outstandingPayables':
@@ -997,7 +997,7 @@ const Reports: React.FC<ReportsProps> = ({
           const billAmount = Number(p.totalAmount || 0);
           const supplierOutstanding = Math.max(Number(getOutstandingBalance(distributors.find(d => d.name === p.supplier)) || 0), 0);
           const paidAmount = Math.max(billAmount - supplierOutstanding, 0);
-          return { 'Supplier': p.supplier, 'Bill No': p.invoiceNumber, 'Bill Date': formatReportDate(p.date), 'Bill Amount': round2(billAmount), 'Paid Amount': round2(paidAmount), 'Balance Outstanding': round2(Math.max(billAmount - paidAmount, 0)), 'Ageing': Math.max(0, Math.ceil((new Date().getTime() - new Date(p.date).getTime()) / (1000 * 60 * 60 * 24))) };
+          return { 'Supplier': p.supplier, 'Bill No': formatVoucherNo(p.invoiceNumber || p.id), 'Bill Date': formatReportDate(p.date), 'Bill Amount': round2(billAmount), 'Paid Amount': round2(paidAmount), 'Balance Outstanding': round2(Math.max(billAmount - paidAmount, 0)), 'Ageing': Math.max(0, Math.ceil((new Date().getTime() - new Date(p.date).getTime()) / (1000 * 60 * 60 * 24))) };
         }).filter(r => r['Balance Outstanding'] > 0);
         break;
       case 'customerPartyWiseFullStatement': {
@@ -1059,7 +1059,7 @@ const Reports: React.FC<ReportsProps> = ({
 
         rows = customerInvoices.map((tx: any) => {
           const invoiceAmount = round2(Number(tx.total || 0));
-          const invoiceNo = tx.invoiceNumber || tx.id;
+          const invoiceNo = formatVoucherNo(tx.invoiceNumber || tx.id);
           const adjustmentTotals = invoiceAdjustments.get(tx.id) || { previous: 0, current: 0 };
           const isDirectReceipt = paymentReceivedModes.has(String(tx.paymentMode || '').trim().toLowerCase());
           const directReceipt = isDirectReceipt ? round2(Number(tx.amountReceived || tx.total || 0)) : round2(Number(tx.amountReceived || 0));
@@ -1134,7 +1134,7 @@ const Reports: React.FC<ReportsProps> = ({
         rows = supplierInvoices
           .map((purchase: any) => {
             const invoiceAmount = round2(Number(purchase.totalAmount || purchase.grandTotal || purchase.grand_total || 0));
-            const invoiceNo = purchase.invoiceNumber || purchase.purchaseInvoiceNumber || purchase.purchase_invoice_number || purchase.purchaseSerialId || purchase.id;
+            const invoiceNo = formatVoucherNo(purchase.invoiceNumber || purchase.purchaseInvoiceNumber || purchase.purchase_invoice_number || purchase.purchaseSerialId || purchase.id);
             const invoiceDate = purchase.date || purchase.invoiceDate || purchase.invoice_date;
             const adjustmentTotals = invoiceAdjustments.get(purchase.id) || { previous: 0, current: 0 };
             const openingOutstanding = round2(Math.max(invoiceAmount - Number(adjustmentTotals.previous || 0), 0));
@@ -1177,7 +1177,7 @@ const Reports: React.FC<ReportsProps> = ({
             return txCustomerName === normalizedPartyName || (selectedPartyId && txCustomerId === selectedPartyId);
           })
           .flatMap((tx: any) => {
-            const invoiceNo = tx.invoiceNumber || tx.id;
+            const invoiceNo = formatVoucherNo(tx.invoiceNumber || tx.id);
             const invoiceAmount = round2(Number(tx.total || 0));
             const receivedAmount = round2(Number(tx.amountReceived || 0));
             const rowsForTx: any[] = [{
@@ -1215,7 +1215,7 @@ const Reports: React.FC<ReportsProps> = ({
             type: 'return',
             debit: 0,
             credit: round2(Number(ret.totalValue || 0)),
-            referenceInvoiceNumber: ret.originalBillNumber || ret.originalInvoiceNumber || '-',
+            referenceInvoiceNumber: formatVoucherNo(ret.originalBillNumber || ret.originalInvoiceNumber || '-'),
             journalEntryNumber: `SR-${ret.id}`,
             status: 'active',
           })) : [];
@@ -1238,7 +1238,7 @@ const Reports: React.FC<ReportsProps> = ({
               debit: 0,
               credit: round2(Number(purchase.totalAmount || 0)),
               paymentMode: 'Credit',
-              referenceInvoiceNumber: purchase.invoiceNumber || '-',
+              referenceInvoiceNumber: formatVoucherNo(purchase.invoiceNumber || '-'),
               referenceInvoiceId: purchase.id,
               journalEntryNumber: purchase.purchaseSerialId || purchase.id,
               status: String(purchase.status || 'completed').toLowerCase() === 'completed' ? 'completed' : 'active',
@@ -1260,7 +1260,7 @@ const Reports: React.FC<ReportsProps> = ({
               description: ret.reason || ret.notes || 'Purchase return / debit note',
               debit: round2(Number(ret.totalAmount || ret.totalValue || 0)),
               credit: 0,
-              referenceInvoiceNumber: ret.referenceInvoiceNumber || ret.originalBillNumber || ret.originalInvoiceNumber || '-',
+              referenceInvoiceNumber: formatVoucherNo(ret.referenceInvoiceNumber || ret.originalBillNumber || ret.originalInvoiceNumber || '-'),
               journalEntryNumber: ret.debitNoteNumber || `PR-${ret.id}`,
               status: 'active',
             }));
@@ -1320,8 +1320,8 @@ const Reports: React.FC<ReportsProps> = ({
             'Section': 'Ledger Statement',
             'Date': formatReportDate(entry.date),
             'Ref. Type': entry.type === 'sale' ? 'Sales Invoice' : entry.type === 'purchase' ? 'Purchase Invoice' : entry.type === 'return' ? (isCustomer ? 'Credit Note / Sales Return' : 'Debit Note / Purchase Return') : entry.type === 'openingBalance' ? 'Opening Balance' : (isCustomer ? 'Receipt / Payment' : 'Payment / Voucher'),
-            'Voucher No': entry.journalEntryNumber || entry.id,
-            'Reference Bill No': entry.referenceInvoiceNumber || '-',
+            'Voucher No': formatVoucherNo(entry.journalEntryNumber || entry.id),
+            'Reference Bill No': formatVoucherNo(entry.referenceInvoiceNumber || '-'),
             [partyColumnName]: entry.supplierName || partyName,
             'Payment Mode': entry.type === 'payment' ? (entry.paymentMode || '-') : '-',
             'Bank/Cash Account': entry.type === 'payment' ? (entry.bankName || 'Cash') : '-',
@@ -1341,8 +1341,8 @@ const Reports: React.FC<ReportsProps> = ({
             'Section': 'Bill-wise Outstanding',
             'Date': formatReportDate(entry.date),
             'Ref. Type': isCustomer ? 'Sales Invoice' : 'Purchase Invoice',
-            'Voucher No': entry.journalEntryNumber || entry.id,
-            'Reference Bill No': entry.referenceInvoiceNumber || '-',
+            'Voucher No': formatVoucherNo(entry.journalEntryNumber || entry.id),
+            'Reference Bill No': formatVoucherNo(entry.referenceInvoiceNumber || '-'),
             [partyColumnName]: partyName,
             'Payment Mode': '-',
             'Bank/Cash Account': '-',
@@ -1363,8 +1363,8 @@ const Reports: React.FC<ReportsProps> = ({
             'Section': 'Payment History',
             'Date': formatReportDate(entry.date),
             'Ref. Type': isCustomer ? 'Receipt' : 'Payment',
-            'Voucher No': entry.journalEntryNumber || entry.id,
-            'Reference Bill No': entry.referenceInvoiceNumber || '-',
+            'Voucher No': formatVoucherNo(entry.journalEntryNumber || entry.id),
+            'Reference Bill No': formatVoucherNo(entry.referenceInvoiceNumber || '-'),
             [partyColumnName]: partyName,
             'Payment Mode': entry.paymentMode || '-',
             'Bank/Cash Account': entry.bankName || 'Cash',

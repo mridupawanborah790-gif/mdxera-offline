@@ -1,4 +1,4 @@
-﻿
+
 import React, { useState, useMemo } from 'react';
 import Card from '@core/components/ui/Card';
 import POS from '@modules/pos/components/POS';
@@ -42,7 +42,9 @@ const SalesChallans = React.forwardRef<any, SalesChallansProps>(({
             setActiveTab('create');
             posRef.current?.resetForm?.();
         },
-        isDirty: activeTab === 'create' && (posRef.current?.isDirty ?? false)
+        get isDirty() {
+            return activeTab === 'create' && (posRef.current?.isDirty ?? false);
+        }
     }), [activeTab]);
 
     const visibleChallans = useMemo(() => {
@@ -110,8 +112,7 @@ Do you want to continue?`);
             }
         }
 
-        const reserved = await reserveVoucherNumber('sales-challan', currentUser);
-        const serialId = reserved.documentNumber;
+        const serialId = tx.invoiceNumber;
         const challan: SalesChallan = {
             id: crypto.randomUUID(),
             organization_id: currentUser?.organization_id || '',
@@ -149,7 +150,7 @@ Do you want to continue?`);
     };
 
     return (
-        <main className="flex-1 overflow-hidden flex flex-col page-fade-in bg-app-bg">
+        <main className="h-full overflow-hidden flex flex-col page-fade-in bg-app-bg">
             <div className="bg-primary text-white h-7 flex items-center px-4 justify-between border-b border-gray-600 shadow-md flex-shrink-0">
                 <span className="text-[10px] font-black uppercase tracking-widest">Sales Challan (Delivery Note)</span>
                 <span className="text-[10px] font-black uppercase text-accent">Entries: {visibleChallans.length}</span>
@@ -178,13 +179,14 @@ Do you want to continue?`);
                             onSaveOrUpdateTransaction={handleChallanSave}
                             onPrintBill={() => {}}
                             currentUser={currentUser}
-                            config={{ fields: {} }}
+                            config={configurations.modules?.['pos']}
                             configurations={configurations}
                             billType="regular"
                             addNotification={addNotification}
                             onAddMedicineMaster={onAddMedicineMaster}
                             onCancel={() => setActiveTab('list')}
                             salesChallans={salesChallans}
+                            isChallan={true}
                         />
                     </div>
                 ) : (

@@ -1,4 +1,4 @@
-﻿import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import Card from '@core/components/ui/Card';
 // Fix: Corrected named import for PurchaseForm to default import
 import PurchaseForm from '../components/PurchaseForm';
@@ -65,7 +65,9 @@ const DeliveryChallansPage = React.forwardRef<any, DeliveryChallansPageProps>(({
             setActiveTab('create');
             purchaseFormRef.current?.resetForm?.();
         },
-        isDirty: activeTab === 'create' && (purchaseFormRef.current?.isDirty ?? false)
+        get isDirty() {
+            return activeTab === 'create' && (purchaseFormRef.current?.isDirty ?? false);
+        }
     }), [activeTab]);
 
     const visibleChallans = useMemo(() => {
@@ -152,8 +154,7 @@ const DeliveryChallansPage = React.forwardRef<any, DeliveryChallansPageProps>(({
             addNotification('User context missing for voucher number generation.', 'error');
             return;
         }
-        const reserved = await reserveVoucherNumber('delivery-challan', currentUser);
-        const serialId = reserved.documentNumber;
+        const serialId = purchaseData.purchaseSerialId;
         const challan: DeliveryChallan = {
             id: crypto.randomUUID(),
             organization_id: currentUser?.organization_id || '',
@@ -207,7 +208,7 @@ const DeliveryChallansPage = React.forwardRef<any, DeliveryChallansPageProps>(({
     }, [challanToEdit]);
 
     return (
-        <main className="flex-1 overflow-hidden flex flex-col page-fade-in bg-app-bg">
+        <main className="h-full overflow-hidden flex flex-col page-fade-in bg-app-bg">
             <div className="bg-primary text-white h-7 flex items-center px-4 justify-between border-b border-gray-600 shadow-md flex-shrink-0">
                 <span className="text-[10px] font-black uppercase tracking-widest">Delivery Challan Register (Inward)</span>
                 <span className="text-[10px] font-black uppercase text-accent">Total Items: {visibleChallans.length}</span>

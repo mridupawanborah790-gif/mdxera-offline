@@ -20,7 +20,7 @@ import { supabase } from '@core/db/supabaseClient';
 import { InventoryItem, Customer, Transaction, BillItem, AppConfigurations, RegisteredPharmacy, Medicine, Purchase, FileInput, MasterPriceMaintainRecord, SalesChallan, DoctorMaster, OrganizationMember } from '@core/types';
 import { handleEnterToNextField } from '@core/utils/navigation';
 import { fuzzyMatch } from '@core/utils/search';
-import { calculateCustomerReceivableBreakdown, formatExpiryToMMYY, getOutstandingBalance, parseNumber, checkIsExpired } from '@core/utils/helpers';
+import { calculateCustomerReceivableBreakdown, formatExpiryToMMYY, getOutstandingBalance, parseNumber, checkIsExpired, formatVoucherNo } from '@core/utils/helpers';
 import { calculateBillingTotals, resolveBillingSettings, calculateLineNetAmount, isRateFieldAvailable } from '@core/utils/billing';
 import { extractPackMultiplier, isLiquidOrWeightPack, resolveUnitsPerStrip } from '@core/utils/pack';
 import { shouldHandleScreenShortcut } from '@core/utils/screenShortcuts';
@@ -61,6 +61,7 @@ interface POSProps {
     onRefreshConfig?: () => void;
     openChallanExposure?: number;
     salesChallans?: SalesChallan[];
+    isChallan?: boolean;
 }
 
 interface UploadedFile {
@@ -355,7 +356,8 @@ const POS = forwardRef<any, POSProps>(({
     defaultCustomerControlGlId,
     onRefreshConfig,
     openChallanExposure = 0,
-    salesChallans = []
+    salesChallans = [],
+    isChallan = false
 }, ref) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -389,7 +391,7 @@ const POS = forwardRef<any, POSProps>(({
     const [reservedVoucherNumber, setReservedVoucherNumber] = useState<string | null>(null);
     const [isReservedPreview, setIsReservedPreview] = useState<boolean>(true);
     const [nextVoucherNumberHint, setNextVoucherNumberHint] = useState<number | null>(null);
-    const lastReservedType = useRef<'sales-gst' | 'sales-non-gst' | null>(null);
+    const lastReservedType = useRef<'sales-gst' | 'sales-non-gst' | 'sales-challan' | null>(null);
     const [isProcessingRx, setIsProcessingRx] = useState(false);
     const [isWebcamOpen, setIsWebcamOpen] = useState(false);
     const [lumpsumDiscount, setLumpsumDiscount] = useState<number>(0);
@@ -436,6 +438,10 @@ const POS = forwardRef<any, POSProps>(({
     const [isAddInventoryModalOpen, setIsAddInventoryModalOpen] = useState(false);
     const [newlyCreatedMedicine, setNewlyCreatedMedicine] = useState<Medicine | null>(null);
     const [isInsightsOpen, setIsInsightsOpen] = useState(false);
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(isChallan);
+    useEffect(() => {
+        setIsSidebarCollapsed(isChallan);
+    }, [isChallan]);
     const [isKeywordFocused, setIsKeywordFocused] = useState(false);
     const [salesHistory, setSalesHistory] = useState<Transaction[]>([]);
     const [viewingHistorySale, setViewingHistorySale] = useState<Transaction | null>(null);
@@ -849,7 +855,7 @@ const POS = forwardRef<any, POSProps>(({
     const reserveNextVoucherNumber = useCallback(async (force: boolean = false, isPreview: boolean = true): Promise<{ documentNumber: string; nextNumber: number } | null> => {
         if (transactionToEdit || !currentUser) return null;
         
-        const docType = isNonGst ? 'sales-non-gst' : 'sales-gst';
+        const docType = isChallan ? 'sales-challan' : (isNonGst ? 'sales-non-gst' : 'sales-gst');
         
         // Prevent redundant reservation/preview if we already have a valid one for this type
         // However, if we're moving from preview to real reservation, we must force it
@@ -876,13 +882,13 @@ const POS = forwardRef<any, POSProps>(({
             addNotification(`Unable to reserve voucher number. ${errorMessage}`, 'error');
             return null;
         }
-    }, [transactionToEdit, currentUser, isNonGst, addNotification, reservedVoucherNumber, nextVoucherNumberHint, isReservedPreview, onRefreshConfig]);
+    }, [transactionToEdit, currentUser, isNonGst, isChallan, addNotification, reservedVoucherNumber, nextVoucherNumberHint, isReservedPreview, onRefreshConfig]);
 
     // Initial reservation and handling type switches - ALWAYS use preview mode here
     useEffect(() => {
         if (transactionToEdit || !currentUser) return;
         
-        const docType = isNonGst ? 'sales-non-gst' : 'sales-gst';
+        const docType = isChallan ? 'sales-challan' : (isNonGst ? 'sales-non-gst' : 'sales-gst');
         
         // If we don't have a number, or it's for a different type, fetch a preview
         if (!reservedVoucherNumber || lastReservedType.current !== docType) {
@@ -893,19 +899,19 @@ const POS = forwardRef<any, POSProps>(({
             }
             reserveNextVoucherNumber(false, true);
         }
-    }, [transactionToEdit, currentUser, isNonGst, reserveNextVoucherNumber, reservedVoucherNumber]);
+    }, [transactionToEdit, currentUser, isNonGst, isChallan, reserveNextVoucherNumber, reservedVoucherNumber]);
 
     useEffect(() => {
         if (transactionToEdit || nextVoucherNumberHint === null) return;
 
-        const configKey = isNonGst ? 'nonGstInvoiceConfig' : 'invoiceConfig';
+        const configKey = isChallan ? 'salesChallanConfig' : (isNonGst ? 'nonGstInvoiceConfig' : 'invoiceConfig');
         const configCurrentNumber = Number((configurations[configKey] as any)?.currentNumber || 0);
 
         // Clear the local hint only after app configuration catches up to or moves beyond it.
         if (configCurrentNumber >= nextVoucherNumberHint) {
             setNextVoucherNumberHint(null);
         }
-    }, [transactionToEdit, nextVoucherNumberHint, isNonGst, configurations]);
+    }, [transactionToEdit, nextVoucherNumberHint, isNonGst, isChallan, configurations]);
 
     const getCustomerInvoiceOutstandingTotal = useCallback(async (customer: Customer): Promise<number> => {
         if (!currentUser?.organization_id) return 0;
@@ -2456,7 +2462,7 @@ const POS = forwardRef<any, POSProps>(({
             <div className="bg-primary text-white h-7 flex items-center px-4 justify-between border-b border-gray-600 shadow-md flex-shrink-0">
                 <div className="flex items-center gap-2">
                     <span className="text-[10px] font-black uppercase tracking-widest">
-                        {isNonGst ? 'Estimate Billing (Non-GST)' : 'Accounting Voucher Creation (Sales)'}
+                        {isChallan ? 'Sales Challan Entry' : (isNonGst ? 'Estimate Billing (Non-GST)' : 'Accounting Voucher Creation (Sales)')}
                     </span>
                     <button
                         type="button"
@@ -2466,6 +2472,13 @@ const POS = forwardRef<any, POSProps>(({
                         className="px-2 py-0.5 border border-white/60 text-white text-[9px] font-black uppercase tracking-widest disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         View Journal Entry
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setIsSidebarCollapsed(prev => !prev)}
+                        className="px-2 py-0.5 border border-white/60 text-white text-[9px] font-black uppercase tracking-widest hover:bg-white/10 transition-colors"
+                    >
+                        {isSidebarCollapsed ? 'Show Insights' : 'Hide Insights'}
                     </button>
                     {currentUser?.organization_type === 'Retail' && (
                         <button
@@ -3748,63 +3761,65 @@ const POS = forwardRef<any, POSProps>(({
             />
         </div>
 
-        <div className="w-64 h-full bg-white flex flex-col overflow-hidden shadow-xl shrink-0">
-            <div className="bg-gray-800 text-white h-7 flex items-center px-4 shrink-0">
-                <span className="text-[10px] font-black uppercase tracking-widest">Sales Insights</span>
-            </div>
-            
-            <div className="p-3 border-b border-gray-200 bg-gray-50 flex flex-col gap-2">
-                <div className="flex gap-2">
-                    <div className="flex-1 bg-white p-2 border border-gray-300 shadow-sm">
-                        <div className="text-[9px] font-bold text-gray-500 uppercase">This Month</div>
-                        <div className="text-xs font-black text-primary">₹{stats.monthTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+        {!isSidebarCollapsed && (
+            <div className="w-64 h-full bg-white flex flex-col overflow-hidden shadow-xl shrink-0">
+                <div className="bg-gray-800 text-white h-7 flex items-center px-4 shrink-0">
+                    <span className="text-[10px] font-black uppercase tracking-widest">Sales Insights</span>
+                </div>
+                
+                <div className="p-3 border-b border-gray-200 bg-gray-50 flex flex-col gap-2">
+                    <div className="flex gap-2">
+                        <div className="flex-1 bg-white p-2 border border-gray-300 shadow-sm">
+                            <div className="text-[9px] font-bold text-gray-500 uppercase">This Month</div>
+                            <div className="text-xs font-black text-primary">₹{stats.monthTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                        </div>
+                        <div className="flex-1 bg-white p-2 border border-gray-300 shadow-sm">
+                            <div className="text-[9px] font-bold text-gray-500 uppercase">Today</div>
+                            <div className="text-xs font-black text-emerald-600">₹{stats.todayTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                        </div>
                     </div>
-                    <div className="flex-1 bg-white p-2 border border-gray-300 shadow-sm">
-                        <div className="text-[9px] font-bold text-gray-500 uppercase">Today</div>
-                        <div className="text-xs font-black text-emerald-600">₹{stats.todayTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                    <div className="bg-white p-2 border border-gray-300 shadow-sm flex justify-between items-center">
+                        <div className="text-[9px] font-bold text-gray-500 uppercase">Orders Count (MTD)</div>
+                        <div className="text-sm font-black text-gray-800">{stats.monthCount}</div>
                     </div>
                 </div>
-                <div className="bg-white p-2 border border-gray-300 shadow-sm flex justify-between items-center">
-                    <div className="text-[9px] font-bold text-gray-500 uppercase">Orders Count (MTD)</div>
-                    <div className="text-sm font-black text-gray-800">{stats.monthCount}</div>
-                </div>
-            </div>
 
-            <div className="flex-1 overflow-y-auto p-2 bg-gray-50/50">
-                <div className="text-[10px] font-black text-gray-400 uppercase mb-2 ml-1">Last 20 Sales</div>
-                <div className="space-y-1.5">
-                    {salesHistory.map((sale) => (
-                        <button
-                            key={sale.id}
-                            type="button"
-                            onClick={() => handleOpenRecentSalePreview(sale)}
-                            disabled={historyPreviewLoadingId === sale.id}
-                            className="w-full text-left p-2 bg-white border border-gray-200 hover:bg-primary group transition-colors cursor-pointer text-[11px] shadow-sm disabled:opacity-60 disabled:cursor-wait"
-                        >
-                            <div className="flex justify-between items-start mb-0.5">
-                                <span className="font-black text-gray-800 uppercase truncate pr-2 flex-1 group-hover:text-white" title={sale.customerName}>{sale.customerName}</span>
-                                <span className="shrink-0 font-black text-primary group-hover:text-white">
-                                    {historyPreviewLoadingId === sale.id ? 'Opening...' : `₹${sale.total.toFixed(2)}`}
-                                </span>
-                            </div>
-                            <div className="flex justify-between text-[9px] text-gray-400 font-bold uppercase group-hover:text-white/70">
-                                <span>{sale.invoiceNumber || sale.id}</span>
-                                <span>{(sale.date || '').split('T')[0]}</span>
-                            </div>
-                        </button>
-                    ))}
-                    {salesHistory.length === 0 && (
-                        <div className="text-center py-10 text-gray-400 text-xs italic">No recent sales</div>
-                    )}
+                <div className="flex-1 overflow-y-auto p-2 bg-gray-50/50">
+                    <div className="text-[10px] font-black text-gray-400 uppercase mb-2 ml-1">Last 20 Sales</div>
+                    <div className="space-y-1.5">
+                        {salesHistory.map((sale) => (
+                            <button
+                                key={sale.id}
+                                type="button"
+                                onClick={() => handleOpenRecentSalePreview(sale)}
+                                disabled={historyPreviewLoadingId === sale.id}
+                                className="w-full text-left p-2 bg-white border border-gray-200 hover:bg-primary group transition-colors cursor-pointer text-[11px] shadow-sm disabled:opacity-60 disabled:cursor-wait"
+                            >
+                                <div className="flex justify-between items-start mb-0.5">
+                                    <span className="font-black text-gray-800 uppercase truncate pr-2 flex-1 group-hover:text-white" title={sale.customerName}>{sale.customerName}</span>
+                                    <span className="shrink-0 font-black text-primary group-hover:text-white">
+                                        {historyPreviewLoadingId === sale.id ? 'Opening...' : `₹${sale.total.toFixed(2)}`}
+                                    </span>
+                                </div>
+                                <div className="flex justify-between text-[9px] text-gray-400 font-bold uppercase group-hover:text-white/70">
+                                    <span>{formatVoucherNo(sale.invoiceNumber || sale.id)}</span>
+                                    <span>{(sale.date || '').split('T')[0]}</span>
+                                </div>
+                            </button>
+                        ))}
+                        {salesHistory.length === 0 && (
+                            <div className="text-center py-10 text-gray-400 text-xs italic">No recent sales</div>
+                        )}
+                    </div>
                 </div>
             </div>
-        </div>
+        )}
 
         {viewingHistorySale && (
             <Modal
                 isOpen={!!viewingHistorySale}
                 onClose={() => setViewingHistorySale(null)}
-                title={`View Sales Invoice: ${viewingHistorySale.invoiceNumber || viewingHistorySale.id}`}
+                title={`View Sales Invoice: ${formatVoucherNo(viewingHistorySale.invoiceNumber || viewingHistorySale.id)}`}
             >
                 <div className="h-[90vh] overflow-hidden flex flex-col">
                     <POS

@@ -19,6 +19,7 @@ import { downloadCsv, arrayToCsvRow } from '@core/utils/csv';
 import ConfirmModal from '@core/components/ui/ConfirmModal';
 import JournalEntryViewerModal from '@modules/accounting/components/JournalEntryViewerModal';
 import { shouldHandleScreenShortcut } from '@core/utils/screenShortcuts';
+import { formatVoucherNo } from '@core/utils/helpers';
 
 type PurchaseSortableKeys = 'purchaseSerialId' | 'invoiceNumber' | 'date' | 'supplier' | 'totalAmount' | 'status' | 'itemCount';
 
@@ -571,9 +572,9 @@ const PurchaseHistory: React.FC<PurchaseHistoryProps> = ({
                 <Card className="flex-1 flex flex-col p-0 tally-border !rounded-none overflow-hidden shadow-inner bg-white">
                     <div className="border-b border-gray-300 p-3 bg-gray-50 space-y-3">
                         <div className="text-[11px] font-bold text-gray-700">
-                            Selected Bill: <span className="font-mono text-primary">{selectedPurchase?.purchaseSerialId || 'None'}</span>
+                            Selected Bill: <span className="font-mono text-primary">{formatVoucherNo(selectedPurchase?.purchaseSerialId) || 'None'}</span>
                             {' '}| Supplier: <span className="uppercase">{selectedPurchase?.supplier || '-'}</span>
-                            {' '}| Supplier Bill ID: <span className="font-mono">{selectedPurchase?.invoiceNumber || '-'}</span>
+                            {' '}| Supplier Bill ID: <span className="font-mono">{formatVoucherNo(selectedPurchase?.invoiceNumber) || '-'}</span>
                             {' '}| Amount: <span className="font-black">₹{(selectedPurchase?.totalAmount || 0).toFixed(2)}</span>
                         </div>
                         {actionWarning && <div className="text-[11px] font-bold text-red-700 bg-red-100 border border-red-200 px-2 py-1">{actionWarning}</div>}
@@ -626,8 +627,8 @@ const PurchaseHistory: React.FC<PurchaseHistoryProps> = ({
                                         className={`cursor-pointer transition-colors group ${selectedPurchaseId === p.id ? 'bg-primary text-white shadow-md' : 'hover:bg-primary hover:text-white'} ${p.status === 'cancelled' ? (selectedPurchaseId === p.id ? 'line-through text-white/50 bg-primary' : 'line-through text-red-500 bg-red-50/50') : ''}`}
                                     >
                                         <td className={`p-2 border-r border-gray-200 font-bold text-center ${selectedPurchaseId === p.id ? 'text-white' : 'group-hover:text-white text-gray-400'}`}>{((currentPage - 1) * ITEMS_PER_PAGE) + idx + 1}</td>
-                                        <td className={`p-2 border-r border-gray-200 font-mono font-bold ${selectedPurchaseId === p.id ? 'text-white' : 'group-hover:text-white text-primary'}`}>{p.purchaseSerialId}</td>
-                                        <td className={`p-2 border-r border-gray-200 font-bold uppercase ${selectedPurchaseId === p.id ? 'text-white' : 'group-hover:text-white'}`}>{p.invoiceNumber}</td>
+                                        <td className={`p-2 border-r border-gray-200 font-mono font-bold ${selectedPurchaseId === p.id ? 'text-white' : 'group-hover:text-white text-primary'}`}>{formatVoucherNo(p.purchaseSerialId)}</td>
+                                        <td className={`p-2 border-r border-gray-200 font-bold uppercase ${selectedPurchaseId === p.id ? 'text-white' : 'group-hover:text-white'}`}>{formatVoucherNo(p.invoiceNumber)}</td>
                                         <td className={`p-2 border-r border-gray-200 ${selectedPurchaseId === p.id ? 'text-white' : 'group-hover:text-white'}`}>{new Date(p.date).toLocaleDateString('en-IN')}</td>
                                         <td className={`p-2 border-r border-gray-200 font-bold uppercase ${selectedPurchaseId === p.id ? 'text-white' : 'group-hover:text-white'}`}>{p.supplier}</td>
                                         <td className={`p-2 border-r border-gray-200 text-center font-bold ${selectedPurchaseId === p.id ? 'text-white' : 'group-hover:text-white'}`}>
@@ -710,7 +711,7 @@ const PurchaseHistory: React.FC<PurchaseHistoryProps> = ({
                 isOpen={!!journalPurchase}
                 onClose={() => setJournalPurchase(null)}
                 invoiceId={journalPurchase?.id}
-                invoiceNumber={journalPurchase?.invoiceNumber || journalPurchase?.purchaseSerialId}
+                invoiceNumber={formatVoucherNo(journalPurchase?.invoiceNumber || journalPurchase?.purchaseSerialId)}
                 documentType="PURCHASE"
                 currentUser={currentUser}
                 isPosted={(journalPurchase?.status || '') === 'completed'}

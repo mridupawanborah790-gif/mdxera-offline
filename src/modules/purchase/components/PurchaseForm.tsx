@@ -314,11 +314,16 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
 
     useEffect(() => {
         if (!isEditing && currentUser) {
-            reserveVoucherNumber('purchase-entry', currentUser, true)
+            reserveVoucherNumber(isChallan ? 'delivery-challan' : 'purchase-entry', currentUser, true)
                 .then(res => setPreviewVoucherNumber(res.documentNumber))
                 .catch(err => console.error('Error fetching preview number:', err));
         }
-    }, [isEditing, currentUser]);
+    }, [isEditing, currentUser, isChallan]);
+
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(isChallan);
+    useEffect(() => {
+        setIsSidebarCollapsed(isChallan);
+    }, [isChallan]);
 
     // Matrix Props
     const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
@@ -948,7 +953,7 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
             let purchaseSerialId = purchaseToEdit?.purchaseSerialId;
 
             if (!purchaseToEdit && currentUser) {
-                const reserved = await reserveVoucherNumber('purchase-entry', currentUser);
+                const reserved = await reserveVoucherNumber(isChallan ? 'delivery-challan' : 'purchase-entry', currentUser);
                 purchaseSerialId = reserved.documentNumber;
             }
 
@@ -988,6 +993,7 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
             
             console.log('PurchaseForm: Save successful', saved);
             onClearDraft();
+            resetFormForNewEntry();
             return saved;
         } catch (e: any) {
             console.error('PurchaseForm: Save failed', e);
@@ -997,7 +1003,7 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
             isSubmittingRef.current = false;
             setIsSubmitting(false);
         }
-    }, [supplier, invoiceNumber, hasDuplicateSupplierInvoice, items, calculatedTotals, purchaseToEdit, currentUser, date, organizationId, onUpdatePurchase, supplierGst, onAddPurchase, onClearDraft, addNotification]);
+    }, [supplier, invoiceNumber, hasDuplicateSupplierInvoice, items, calculatedTotals, purchaseToEdit, currentUser, date, organizationId, onUpdatePurchase, supplierGst, onAddPurchase, onClearDraft, resetFormForNewEntry, addNotification]);
 
     const triggerSaveAction = useCallback(async (forcedStatus?: 'completed' | 'hold' | 'draft') => {
         const saved = await handleSubmit(forcedStatus);
@@ -2221,6 +2227,13 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
                     >
                         View Journal Entry
                     </button>
+                    <button
+                        type="button"
+                        onClick={() => setIsSidebarCollapsed(prev => !prev)}
+                        className="px-2 py-0.5 border border-white/60 text-white text-[9px] font-black uppercase tracking-widest hover:bg-white/10 transition-colors"
+                    >
+                        {isSidebarCollapsed ? 'Show Insights' : 'Hide Insights'}
+                    </button>
                 </div>
                 <span className="text-[10px] font-black uppercase text-accent">No. {isEditing ? purchaseToEdit?.purchaseSerialId : (previewVoucherNumber || 'Loading...')}</span>
             </div>
@@ -3029,53 +3042,55 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
             />
         </div>
 
-        <div className="w-64 h-full bg-white flex flex-col overflow-hidden shadow-xl shrink-0 border-l border-gray-200">
-            <div className="bg-gray-800 text-white h-7 flex items-center px-4 shrink-0">
-                <span className="text-[10px] font-black uppercase tracking-widest">Purchase Insights</span>
-            </div>
-            
-            <div className="p-3 border-b border-gray-200 bg-gray-50 flex flex-col gap-2">
-                <div className="flex gap-2">
-                    <div className="flex-1 bg-white p-2 border border-gray-300 shadow-sm">
-                        <div className="text-[9px] font-bold text-gray-500 uppercase">This Month</div>
-                        <div className="text-xs font-black text-primary">₹{stats.monthTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
-                    </div>
-                    <div className="flex-1 bg-white p-2 border border-gray-300 shadow-sm">
-                        <div className="text-[9px] font-bold text-gray-500 uppercase">Today</div>
-                        <div className="text-xs font-black text-emerald-600">₹{stats.todayTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
-                    </div>
+        {!isSidebarCollapsed && (
+            <div className="w-64 h-full bg-white flex flex-col overflow-hidden shadow-xl shrink-0 border-l border-gray-200">
+                <div className="bg-gray-800 text-white h-7 flex items-center px-4 shrink-0">
+                    <span className="text-[10px] font-black uppercase tracking-widest">Purchase Insights</span>
                 </div>
-                <div className="bg-white p-2 border border-gray-300 shadow-sm flex justify-between items-center">
-                    <div className="text-[9px] font-bold text-gray-500 uppercase">Bills Count (MTD)</div>
-                    <div className="text-sm font-black text-gray-800">{stats.monthCount}</div>
-                </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-2 bg-gray-50/50">
-                <div className="text-[10px] font-black text-gray-400 uppercase mb-2 ml-1">{currentsupplier ? 'Supplier History' : 'Last 20 Purchases'}</div>
-                <div className="space-y-1.5">
-                    {historyItems.map((pur) => (
-                        <div
-                            key={pur.id}
-                            onClick={() => handleHistoryPurchasePreview(pur)}
-                            className={`p-2 border transition-colors cursor-pointer text-[11px] shadow-sm ${selectedHistoryPurchaseId === pur.id ? 'bg-teal-600/10 border-teal-600' : 'bg-white border-gray-200 hover:border-primary/50 hover:bg-emerald-50'}`}
-                        >
-                            <div className="flex justify-between items-start mb-0.5">
-                                <span className="font-black text-gray-800 uppercase truncate pr-2 flex-1" title={pur.supplier}>{pur.supplier}</span>
-                                <span className="shrink-0 font-black text-primary">₹{(pur.totalAmount || 0).toFixed(2)}</span>
-                            </div>
-                            <div className="flex justify-between text-[9px] text-gray-400 font-bold uppercase">
-                                <span>{pur.invoiceNumber || pur.purchaseSerialId}</span>
-                                <span>{(pur.date || '').split('T')[0]}</span>
-                            </div>
+                
+                <div className="p-3 border-b border-gray-200 bg-gray-50 flex flex-col gap-2">
+                    <div className="flex gap-2">
+                        <div className="flex-1 bg-white p-2 border border-gray-300 shadow-sm">
+                            <div className="text-[9px] font-bold text-gray-500 uppercase">This Month</div>
+                            <div className="text-xs font-black text-primary">₹{stats.monthTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
                         </div>
-                    ))}
-                    {historyItems.length === 0 && (
-                        <div className="text-center py-10 text-gray-400 text-xs italic">No recent purchases</div>
-                    )}
+                        <div className="flex-1 bg-white p-2 border border-gray-300 shadow-sm">
+                            <div className="text-[9px] font-bold text-gray-500 uppercase">Today</div>
+                            <div className="text-xs font-black text-emerald-600">₹{stats.todayTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                        </div>
+                    </div>
+                    <div className="bg-white p-2 border border-gray-300 shadow-sm flex justify-between items-center">
+                        <div className="text-[9px] font-bold text-gray-500 uppercase">Bills Count (MTD)</div>
+                        <div className="text-sm font-black text-gray-800">{stats.monthCount}</div>
+                    </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-2 bg-gray-50/50">
+                    <div className="text-[10px] font-black text-gray-400 uppercase mb-2 ml-1">{currentsupplier ? 'Supplier History' : 'Last 20 Purchases'}</div>
+                    <div className="space-y-1.5">
+                        {historyItems.map((pur) => (
+                            <div
+                                key={pur.id}
+                                onClick={() => handleHistoryPurchasePreview(pur)}
+                                className={`p-2 border transition-colors cursor-pointer text-[11px] shadow-sm ${selectedHistoryPurchaseId === pur.id ? 'bg-teal-600/10 border-teal-600' : 'bg-white border-gray-200 hover:border-primary/50 hover:bg-emerald-50'}`}
+                            >
+                                <div className="flex justify-between items-start mb-0.5">
+                                    <span className="font-black text-gray-800 uppercase truncate pr-2 flex-1" title={pur.supplier}>{pur.supplier}</span>
+                                    <span className="shrink-0 font-black text-primary">₹{(pur.totalAmount || 0).toFixed(2)}</span>
+                                </div>
+                                <div className="flex justify-between text-[9px] text-gray-400 font-bold uppercase">
+                                    <span>{pur.invoiceNumber || pur.purchaseSerialId}</span>
+                                    <span>{(pur.date || '').split('T')[0]}</span>
+                                </div>
+                            </div>
+                        ))}
+                        {historyItems.length === 0 && (
+                            <div className="text-center py-10 text-gray-400 text-xs italic">No recent purchases</div>
+                        )}
+                    </div>
                 </div>
             </div>
-        </div>
+        )}
 
         {historyPreviewPurchase && (
             <Modal

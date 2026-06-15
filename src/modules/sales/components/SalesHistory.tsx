@@ -7,6 +7,7 @@ import { downloadCsv, arrayToCsvRow } from '@core/utils/csv';
 import ConfirmModal from '@core/components/ui/ConfirmModal';
 import JournalEntryViewerModal from '@modules/accounting/components/JournalEntryViewerModal';
 import { shouldHandleScreenShortcut } from '@core/utils/screenShortcuts';
+import { formatVoucherNo } from '@core/utils/helpers';
 
 type SortableKeys = 'invoiceNumber' | 'date' | 'customerName' | 'total' | 'status' | 'itemCount';
 
@@ -213,7 +214,7 @@ const PrescriptionPreviewModal: React.FC<PrescriptionPreviewModalProps> = ({ tra
         // `download` attribute on large data: URIs, so the click would open the
         // file inline instead of saving it.
         link.href = asset.blobSrc;
-        link.download = `Rx_${tx.invoiceNumber || tx.id}_${idx + 1}.${asset.ext}`;
+        link.download = `Rx_${formatVoucherNo(tx.invoiceNumber || tx.id)}_${idx + 1}.${asset.ext}`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -225,7 +226,7 @@ const PrescriptionPreviewModal: React.FC<PrescriptionPreviewModalProps> = ({ tra
         <Modal
             isOpen={true}
             onClose={onClose}
-            title={`Prescription Preview — ${tx.invoiceNumber || tx.id}`}
+            title={`Prescription Preview — ${formatVoucherNo(tx.invoiceNumber || tx.id)}`}
             widthClass="max-w-5xl"
             heightClass="h-[85vh]"
         >
@@ -867,9 +868,9 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                 <Card className="flex-1 flex flex-col p-0 tally-border !rounded-none overflow-hidden shadow-inner bg-white">
                     <div className="border-b border-gray-300 p-3 bg-gray-50 space-y-3">
                         <div className="text-[11px] font-bold text-gray-700">
-                            Selected Invoice: <span className="font-mono text-primary">{selectedTransaction?.invoiceNumber || selectedTransaction?.id || 'None'}</span>
+                            Selected Invoice: <span className="font-mono text-primary">{formatVoucherNo(selectedTransaction?.invoiceNumber || selectedTransaction?.id) || 'None'}</span>
                             {' '}| Customer: <span className="uppercase">{selectedTransaction?.customerName || '-'}</span>
-                            {' '}| Voucher ID: <span className="font-mono">{selectedTransaction?.invoiceNumber || selectedTransaction?.id || '-'}</span>
+                            {' '}| Voucher ID: <span className="font-mono">{formatVoucherNo(selectedTransaction?.invoiceNumber || selectedTransaction?.id) || '-'}</span>
                             {' '}| Amount: <span className="font-black">₹{(selectedTransaction?.total || 0).toFixed(2)}</span>
                             {selectedTransaction?.narration && (
                                 <> | Narration: <span className="text-indigo-600 italic font-medium">{selectedTransaction.narration}</span></>
@@ -938,7 +939,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                                         className={`cursor-pointer transition-colors group ${selectedTransactionId === tx.id ? 'bg-primary text-white shadow-md' : 'hover:bg-primary hover:text-white'} ${status === 'cancelled' ? (selectedTransactionId === tx.id ? 'line-through text-white/50 bg-primary' : 'line-through text-red-500 bg-red-50/50') : ''}`}
                                     >
                                         <td className={`p-2 border-r border-gray-200 font-bold text-center ${selectedTransactionId === tx.id ? 'text-white' : 'group-hover:text-white text-gray-400'}`}>{((currentPage - 1) * ITEMS_PER_PAGE) + idx + 1}</td>
-                                        <td className={`p-2 border-r border-gray-200 font-mono font-bold ${selectedTransactionId === tx.id ? 'text-white' : 'group-hover:text-white text-primary'}`}>{tx.invoiceNumber || tx.id}</td>
+                                        <td className={`p-2 border-r border-gray-200 font-mono font-bold ${selectedTransactionId === tx.id ? 'text-white' : 'group-hover:text-white text-primary'}`}>{formatVoucherNo(tx.invoiceNumber || tx.id)}</td>
                                         <td className={`p-2 border-r border-gray-200 ${selectedTransactionId === tx.id ? 'text-white' : 'group-hover:text-white'}`}>{new Date(tx.date).toLocaleDateString('en-IN')}</td>
                                         <td className={`p-2 border-r border-gray-200 font-bold uppercase ${selectedTransactionId === tx.id ? 'text-white' : 'group-hover:text-white'}`}>{tx.customerName}</td>
                                         <td className={`p-2 border-r border-gray-200 text-center font-bold ${selectedTransactionId === tx.id ? 'text-white' : 'group-hover:text-white'}`}>
@@ -1059,7 +1060,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                 <Modal
                     isOpen={!!viewingTransaction}
                     onClose={() => setViewingTransaction(null)}
-                    title={`View Sales Invoice: ${viewingTransaction.invoiceNumber || viewingTransaction.id}`}
+                    title={`View Sales Invoice: ${formatVoucherNo(viewingTransaction.invoiceNumber || viewingTransaction.id)}`}
                 >
                     <div className="h-[90vh] overflow-hidden flex flex-col">
                         <POS

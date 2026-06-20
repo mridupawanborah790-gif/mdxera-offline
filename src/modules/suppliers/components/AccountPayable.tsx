@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import Card from '@core/components/ui/Card';
 import Modal from '@core/components/ui/Modal';
+import PrintSupplierVoucherModal from './PrintSupplierVoucherModal';
 import { Distributor, Purchase, RegisteredPharmacy, TransactionLedgerItem } from '@core/types';
 import { calculateSupplierPayableBreakdown, getOutstandingBalance, formatVoucherNo } from '@core/utils/helpers';
 import { fuzzyMatch } from '@core/utils/search';
@@ -130,6 +131,7 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
     const [adjustmentVoucher, setAdjustmentVoucher] = useState<TransactionLedgerItem | null>(null);
     const [adjustmentDate, setAdjustmentDate] = useState(new Date().toISOString().split('T')[0]);
     const [voucherInvoiceAdjustments, setVoucherInvoiceAdjustments] = useState<Record<string, number>>({});
+    const [printingVoucher, setPrintingVoucher] = useState<TransactionLedgerItem | null>(null);
 
     const normalizedPaymentMode = paymentMode.trim().toLowerCase();
     const isCashMode = normalizedPaymentMode === 'cash';
@@ -410,105 +412,7 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
     const netPayable = payableBreakdown.netOutstanding;
 
     const printVoucher = (entry: TransactionLedgerItem) => {
-        if (!selectedDistributor) return;
-        const popup = window.open('', '_blank', 'width=900,height=700');
-        if (!popup) return;
-
-        const summary = getVoucherAllocationSummary(entry);
-        const voucherType = entry.entryCategory === 'down_payment'
-            ? 'Down Payment Voucher'
-            : entry.entryCategory === 'down_payment_adjustment'
-                ? 'Down Payment Adjustment'
-                : entry.entryCategory === 'invoice_payment_adjustment'
-                    ? 'Invoice Payment Adjustment'
-                    : entry.entryCategory === 'payment_cancellation' || entry.entryCategory === 'down_payment_cancellation'
-                        ? 'Payment Cancellation'
-                        : 'Payment Voucher';
-        const voucherNumber = entry.journalEntryNumber || entry.journalEntryId || 'Pending Voucher Number';
-        const voucherDate = formatDisplayDate(entry.date);
-        const paymentModeText = entry.paymentMode || 'Bank';
-        const bankAccount = entry.bankName || bankOptions.find(option => option.id === entry.bankAccountId)?.bankName || 'N/A';
-        const amountPaid = getPaymentAmount(entry);
-        const narration = entry.description || 'Supplier payment posted';
-        const paymentAgainstInvoice = entry.referenceInvoiceNumber || entry.referenceInvoiceId || '-';
-        const linkedDetails = (entry.referenceInvoiceNumber || entry.referenceInvoiceId)
-            ? `${entry.referenceInvoiceNumber || '-'} (${entry.referenceInvoiceId || '-'})`
-            : '-';
-        const isAutoPayment = entry.id.startsWith('auto-') || /auto[-\s]?/i.test(narration);
-        const cancellationMark = entry.status === 'cancelled'
-            ? `<div class="cancelled-mark">CANCELLED</div>`
-            : '';
-
-        const companyName = currentUser?.pharmacy_name || 'Company';
-        const companyAddress = [currentUser?.address, currentUser?.district, currentUser?.state, currentUser?.pincode].filter(Boolean).join(', ');
-        const authorizedSignatory = currentUser?.manager_name || currentUser?.full_name || 'Authorized Signatory';
-
-        popup.document.write(`
-            <html>
-                <head>
-                    <title>Payment Voucher ${escapeHtml(voucherNumber)}</title>
-                    <style>
-                        body { font-family: Arial, sans-serif; margin: 20px; color: #111827; }
-                        .voucher { border: 1px solid #111827; padding: 20px; max-width: 840px; margin: 0 auto; }
-                        .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 18px; }
-                        .title { font-size: 22px; font-weight: 700; text-transform: uppercase; }
-                        .meta { text-align: right; font-size: 13px; line-height: 1.6; }
-                        table { width: 100%; border-collapse: collapse; margin-top: 14px; }
-                        td { border: 1px solid #d1d5db; padding: 10px; font-size: 13px; vertical-align: top; }
-                        .label-col { width: 34%; font-weight: 700; background: #f9fafb; }
-                        .amount-row td { font-size: 14px; font-weight: 700; }
-                        .amount-words { margin-top: 12px; font-size: 12px; font-style: italic; }
-                        .signatory { margin-top: 56px; display: flex; justify-content: flex-end; }
-                        .signatory-box { text-align: center; min-width: 220px; }
-                        .signatory-line { border-top: 1px solid #111827; margin-top: 36px; padding-top: 8px; font-size: 12px; font-weight: 700; text-transform: uppercase; }
-                        .cancelled-mark { position: fixed; top: 42%; left: 20%; transform: rotate(-24deg); font-size: 72px; letter-spacing: 5px; font-weight: 900; color: rgba(220, 38, 38, 0.18); pointer-events: none; z-index: 9999; }
-                    </style>
-                </head>
-                <body>
-                    ${cancellationMark}
-                    <div class="voucher">
-                        <div class="header">
-                            <div>
-                                <div class="title">${escapeHtml(voucherType)}</div>
-                                <div style="font-size:12px; margin-top:6px; font-weight:600;">${escapeHtml(companyName)}</div>
-                                <div style="font-size:11px; margin-top:2px; color:#374151;">${escapeHtml(companyAddress || '-')}</div>
-                            </div>
-                            <div class="meta">
-                                <div><strong>Voucher No.:</strong> ${escapeHtml(voucherNumber)}</div>
-                                <div><strong>Voucher Date:</strong> ${escapeHtml(voucherDate)}</div>
-                            </div>
-                        </div>
-
-                        <table>
-                            <tr><td class="label-col">Supplier Name</td><td>${escapeHtml(selectedDistributor.name)}</td></tr>
-                            <tr><td class="label-col">Supplier Code / ID</td><td>${escapeHtml(selectedDistributor.id)}</td></tr>
-                            <tr><td class="label-col">Payment Against Invoice No.</td><td>${escapeHtml(paymentAgainstInvoice)}</td></tr>
-                            <tr><td class="label-col">Payment Mode</td><td>${escapeHtml(paymentModeText)}</td></tr>
-                            <tr><td class="label-col">Bank / Cash Account</td><td>${escapeHtml(bankAccount)}</td></tr>
-                            <tr class="amount-row"><td class="label-col">Amount Paid</td><td>₹${escapeHtml(amountPaid.toFixed(2))}</td></tr>
-                            <tr><td class="label-col">Adjusted Amount</td><td>₹${escapeHtml(summary.adjustedAmount.toFixed(2))}</td></tr>
-                            <tr><td class="label-col">Unadjusted Amount</td><td>₹${escapeHtml(summary.remainingAmount.toFixed(2))}</td></tr>
-                            <tr><td class="label-col">Status</td><td>${escapeHtml(summary.status)}</td></tr>
-                            <tr><td class="label-col">Linked Invoice / Against Invoice</td><td>${escapeHtml(linkedDetails)}</td></tr>
-                            <tr><td class="label-col">Auto Payment</td><td>${isAutoPayment ? 'Yes (System Generated)' : 'No (Manual)'}</td></tr>
-                            <tr><td class="label-col">Narration / Remarks</td><td>${escapeHtml(narration)}</td></tr>
-                        </table>
-                        <div class="amount-words">Amount in words: ${escapeHtml(numberToWords(amountPaid))}</div>
-
-                        <div class="signatory">
-                            <div class="signatory-box">
-                                <div class="signatory-line">Authorized Signatory</div>
-                                <div style="font-size:12px; margin-top:4px;">${escapeHtml(authorizedSignatory)}</div>
-                            </div>
-                        </div>
-                    </div>
-                    <script>
-                        window.onload = function () { window.print(); };
-                    </script>
-                </body>
-            </html>
-        `);
-        popup.document.close();
+        setPrintingVoucher(entry);
     };
 
     const openPaymentPanel = () => {
@@ -1072,6 +976,15 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
                     )}
                 </Card>
             </div>
+            <PrintSupplierVoucherModal
+                isOpen={Boolean(printingVoucher)}
+                onClose={() => setPrintingVoucher(null)}
+                voucher={printingVoucher}
+                distributor={selectedDistributor}
+                pharmacy={currentUser}
+                bankOptions={bankOptions}
+                summary={printingVoucher ? getVoucherAllocationSummary(printingVoucher) : null}
+            />
         </main>
     );
 };

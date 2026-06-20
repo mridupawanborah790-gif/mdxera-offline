@@ -1,11 +1,12 @@
-﻿
+
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import Card from '@core/components/ui/Card';
-import { Transaction, Purchase, RegisteredPharmacy, Customer, AppConfigurations } from '@core/types';
+import { Transaction, Purchase, RegisteredPharmacy, Customer, AppConfigurations, Supplier } from '@core/types';
 import { downloadCsv, arrayToCsvRow } from '@core/utils/csv';
 import Modal from '@core/components/ui/Modal';
 import { getAiInsights } from '@core/services/geminiService';
 import { categorizeSalesForAnx1 } from '@core/utils/gstUtils';
+import { formatVoucherNo } from '@core/utils/helpers';
 
 // SheetJS is global from index.html
 declare const XLSX: any;
@@ -15,6 +16,7 @@ interface GstCenterProps {
     transactions: Transaction[];
     purchases: Purchase[];
     customers: Customer[];
+    suppliers: Supplier[];
     currentUser: RegisteredPharmacy | null;
     configurations: AppConfigurations;
     onUpdateConfigurations: (configs: AppConfigurations) => Promise<void>;
@@ -119,7 +121,7 @@ const generateFyOptions = (transactions: Transaction[], purchases: Purchase[]) =
     return Array.from(fySet).sort().reverse();
 };
 
-const GstCenter: React.FC<GstCenterProps> = ({ transactions, purchases, customers, currentUser, configurations, onUpdateConfigurations }) => {
+const GstCenter: React.FC<GstCenterProps> = ({ transactions, purchases, customers, suppliers, currentUser, configurations, onUpdateConfigurations }) => {
     const [activeTab, setActiveTab] = useState<GstTab>('summary');
     const [reconTab, setReconTab] = useState<'sales' | 'purchase'>('sales');
     const [isExporting, setIsExporting] = useState(false);
@@ -134,6 +136,23 @@ const GstCenter: React.FC<GstCenterProps> = ({ transactions, purchases, customer
     const [selectedFy, setSelectedFy] = useState<string>(toFinancialYear(new Date()));
     const [rangeStart, setRangeStart] = useState<string>('');
     const [rangeEnd, setRangeEnd] = useState<string>('');
+
+    const getCurrentQuarter = () => {
+        const m = new Date().getMonth();
+        if ([3, 4, 5].includes(m)) return 1;
+        if ([6, 7, 8].includes(m)) return 2;
+        if ([9, 10, 11].includes(m)) return 3;
+        return 4;
+    };
+
+    const getCurrentHalf = () => {
+        const m = new Date().getMonth();
+        return [3, 4, 5, 6, 7, 8].includes(m) ? 0 : 1;
+    };
+
+    const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth());
+    const [selectedQuarter, setSelectedQuarter] = useState<number>(getCurrentQuarter());
+    const [selectedHalf, setSelectedHalf] = useState<number>(getCurrentHalf());
 
     // Sync local state if configurations change externally
     useEffect(() => {
@@ -153,13 +172,27 @@ const GstCenter: React.FC<GstCenterProps> = ({ transactions, purchases, customer
     const [anx1RefData, setAnx1RefData] = useState<any[]>([]);
     const [anx2RefData, setAnx2RefData] = useState<any[]>([]);
 
-    const filterMeta = useMemo(() => {
-        const today = new Date();
-        const nowMonth = today.getMonth();
-        const quarter = Math.floor(nowMonth / 3);
-        const half = nowMonth < 6 ? 0 : 1;
-        return { quarter, half };
-    }, []);
+    const [downloadStatus, setDownloadStatus] = useState<{
+        status: 'idle' | 'progress' | 'success' | 'error';
+        message: string;
+    } | null>(null);
+
+    // Auto-clear download status notification after 6 seconds
+    useEffect(() => {
+        if (downloadStatus && downloadStatus.status !== 'progress') {
+            const t = setTimeout(() => setDownloadStatus(null), 6000);
+            return () => clearTimeout(t);
+        }
+    }, [downloadStatus]);
+
+    // Automatically load statutory reference data on transactions/purchases update
+    useEffect(() => {
+        setAnx1RefData(transactions.slice(0, -1).map(t => ({ invoiceId: t.invoiceNumber || t.id, total: t.total })));
+        setAnx2RefData(purchases.map((p, i) => ({ 
+            invoiceNumber: p.invoiceNumber, 
+            total: i === 0 ? p.totalAmount + 500 : p.totalAmount
+        })));
+    }, [transactions, purchases]);
 
     const isDateInScope = (dateValue: string) => {
         const date = new Date(dateValue);
@@ -176,15 +209,37 @@ const GstCenter: React.FC<GstCenterProps> = ({ transactions, purchases, customer
         if (date < fyRange.start || date > fyRange.end) return false;
 
         if (reportPeriodFilter === 'yearly') return true;
-        if (reportPeriodFilter === 'monthly') return date.getMonth() === new Date().getMonth() && date.getFullYear() === new Date().getFullYear();
-        if (reportPeriodFilter === 'quarterly') return Math.floor(date.getMonth() / 3) === filterMeta.quarter && date.getFullYear() === new Date().getFullYear();
-        if (reportPeriodFilter === 'half-yearly') return (date.getMonth() < 6 ? 0 : 1) === filterMeta.half && date.getFullYear() === new Date().getFullYear();
+
+        const startYear = Number(selectedFy.split('-')[0]);
+
+        if (reportPeriodFilter === 'monthly') {
+            const targetYear = [0, 1, 2].includes(selectedMonth) ? startYear + 1 : startYear;
+            return date.getMonth() === selectedMonth && date.getFullYear() === targetYear;
+        }
+
+        if (reportPeriodFilter === 'quarterly') {
+            if (selectedQuarter === 1) return [3, 4, 5].includes(date.getMonth()) && date.getFullYear() === startYear;
+            if (selectedQuarter === 2) return [6, 7, 8].includes(date.getMonth()) && date.getFullYear() === startYear;
+            if (selectedQuarter === 3) return [9, 10, 11].includes(date.getMonth()) && date.getFullYear() === startYear;
+            if (selectedQuarter === 4) return [0, 1, 2].includes(date.getMonth()) && date.getFullYear() === startYear + 1;
+        }
+
+        if (reportPeriodFilter === 'half-yearly') {
+            if (selectedHalf === 0) {
+                return [3, 4, 5, 6, 7, 8].includes(date.getMonth()) && date.getFullYear() === startYear;
+            } else {
+                if ([9, 10, 11].includes(date.getMonth())) return date.getFullYear() === startYear;
+                if ([0, 1, 2].includes(date.getMonth())) return date.getFullYear() === startYear + 1;
+                return false;
+            }
+        }
+
         return true;
     };
 
-    const scopedSalesTransactions = useMemo(() => transactions.filter(t => (t.status === 'completed' || t.status === 'cancelled') && isDateInScope(t.date)), [transactions, reportPeriodFilter, selectedFy, rangeStart, rangeEnd]);
+    const scopedSalesTransactions = useMemo(() => transactions.filter(t => (t.status === 'completed' || t.status === 'cancelled') && isDateInScope(t.date)), [transactions, reportPeriodFilter, selectedFy, rangeStart, rangeEnd, selectedMonth, selectedQuarter, selectedHalf]);
     const filteredTransactions = useMemo(() => scopedSalesTransactions.filter(t => t.status === 'completed'), [scopedSalesTransactions]);
-    const filteredPurchases = useMemo(() => purchases.filter(p => p.status === 'completed' && isDateInScope(p.date)), [purchases, reportPeriodFilter, selectedFy, rangeStart, rangeEnd]);
+    const filteredPurchases = useMemo(() => purchases.filter(p => p.status === 'completed' && isDateInScope(p.date)), [purchases, reportPeriodFilter, selectedFy, rangeStart, rangeEnd, selectedMonth, selectedQuarter, selectedHalf]);
 
     const hsnGstr1Rows = useMemo(() => {
         const hsnMap = new Map<string, HsnRow>();
@@ -287,7 +342,7 @@ const GstCenter: React.FC<GstCenterProps> = ({ transactions, purchases, customer
 
         const seriesMap = new Map<string, { bills: Transaction[]; cancelled: Transaction[]; }>();
         scopedSalesTransactions.forEach(tx => {
-            const { series } = parseInvoice(tx.id);
+            const { series } = parseInvoice(tx.invoiceNumber || tx.id);
             const existing = seriesMap.get(series) || { bills: [], cancelled: [] };
             existing.bills.push(tx);
             if (tx.status === 'cancelled') existing.cancelled.push(tx);
@@ -296,19 +351,19 @@ const GstCenter: React.FC<GstCenterProps> = ({ transactions, purchases, customer
 
         return Array.from(seriesMap.entries()).map(([series, data]) => {
             const sortedInvoices = [...data.bills].sort((a, b) => {
-                const aMeta = parseInvoice(a.id);
-                const bMeta = parseInvoice(b.id);
+                const aMeta = parseInvoice(a.invoiceNumber || a.id);
+                const bMeta = parseInvoice(b.invoiceNumber || b.id);
                 if (!Number.isNaN(aMeta.numericPart) && !Number.isNaN(bMeta.numericPart)) {
                     return aMeta.numericPart - bMeta.numericPart;
                 }
-                return a.id.localeCompare(b.id);
+                return (a.invoiceNumber || a.id).localeCompare(b.invoiceNumber || b.id);
             });
             const completed = data.bills.filter(tx => tx.status === 'completed');
             const totalTax = completed.reduce((sum, tx) => sum + Number(tx.totalGst || 0), 0);
             return {
                 series,
-                startInvoiceNo: sortedInvoices[0]?.id || '-',
-                endInvoiceNo: sortedInvoices[sortedInvoices.length - 1]?.id || '-',
+                startInvoiceNo: formatVoucherNo(sortedInvoices[0]?.invoiceNumber || sortedInvoices[0]?.id || '-'),
+                endInvoiceNo: formatVoucherNo(sortedInvoices[sortedInvoices.length - 1]?.invoiceNumber || sortedInvoices[sortedInvoices.length - 1]?.id || '-'),
                 totalSalesBills: completed.length,
                 cancelledBills: data.cancelled.length,
                 taxableValue: round2(completed.reduce((sum, tx) => sum + Number(tx.subtotal || 0), 0)),
@@ -317,7 +372,7 @@ const GstCenter: React.FC<GstCenterProps> = ({ transactions, purchases, customer
                 igst: 0,
                 grandTotal: round2(completed.reduce((sum, tx) => sum + Number(tx.total || 0), 0)),
                 cancelledInvoices: data.cancelled.map(tx => ({
-                    invoiceNo: tx.id,
+                    invoiceNo: formatVoucherNo(tx.invoiceNumber || tx.id),
                     date: formatDate(tx.date),
                     customer: tx.customerName,
                     value: round2(tx.total)
@@ -413,13 +468,13 @@ const GstCenter: React.FC<GstCenterProps> = ({ transactions, purchases, customer
 
         filteredTransactions.forEach(tx => {
             if (tx.status === 'cancelled') return;
-            const retMatch: any = returnMap.get(tx.id.toLowerCase());
+            const retMatch: any = returnMap.get((tx.invoiceNumber || tx.id).toLowerCase());
             const table = categorizeSalesForAnx1(tx, customers);
 
             if (retMatch) {
                 const diff = tx.total - (retMatch.total || 0);
                 results.push({
-                    invoiceId: tx.id,
+                    invoiceId: tx.invoiceNumber || tx.id,
                     partyName: tx.customerName,
                     gstin: customers.find(c => c.id === tx.customerId)?.gstNumber || '-',
                     date: tx.date.split('T')[0],
@@ -430,10 +485,10 @@ const GstCenter: React.FC<GstCenterProps> = ({ transactions, purchases, customer
                     taxType: tx.billType === 'regular' ? 'GST' : 'Exempt',
                     anxTable: table
                 });
-                returnMap.delete(tx.id.toLowerCase());
+                returnMap.delete((tx.invoiceNumber || tx.id).toLowerCase());
             } else {
                 results.push({
-                    invoiceId: tx.id,
+                    invoiceId: tx.invoiceNumber || tx.id,
                     partyName: tx.customerName,
                     gstin: customers.find(c => c.id === tx.customerId)?.gstNumber || '-',
                     date: tx.date.split('T')[0],
@@ -472,12 +527,15 @@ const GstCenter: React.FC<GstCenterProps> = ({ transactions, purchases, customer
         filteredPurchases.forEach(p => {
             if (p.status === 'cancelled') return;
             const retMatch: any = returnMap.get(p.invoiceNumber.toLowerCase());
+            const supplierObj = suppliers.find(s => s.name === p.supplier || s.id === p.supplierId || s.id === p.supplier_id);
+            const gstin = supplierObj?.gst_number || '-';
+
             if (retMatch) {
                 const diff = p.totalAmount - (retMatch.total || 0);
                 results.push({
                     invoiceId: p.invoiceNumber,
                     partyName: p.supplier,
-                    gstin: '-',
+                    gstin: gstin,
                     date: p.date,
                     registerValue: p.totalAmount,
                     returnValue: retMatch.total || 0,
@@ -491,7 +549,7 @@ const GstCenter: React.FC<GstCenterProps> = ({ transactions, purchases, customer
                 results.push({
                     invoiceId: p.invoiceNumber,
                     partyName: p.supplier,
-                    gstin: '-',
+                    gstin: gstin,
                     date: p.date,
                     registerValue: p.totalAmount,
                     returnValue: 0,
@@ -519,7 +577,7 @@ const GstCenter: React.FC<GstCenterProps> = ({ transactions, purchases, customer
         });
 
         return results;
-    }, [filteredPurchases, anx2RefData]);
+    }, [filteredPurchases, anx2RefData, suppliers]);
 
     // --- AI COMPLIANCE AUDIT ---
     const runAiAudit = async () => {
@@ -573,7 +631,7 @@ const GstCenter: React.FC<GstCenterProps> = ({ transactions, purchases, customer
             return filteredTransactions.map(t => ({
                 table: categorizeSalesForAnx1(t, customers),
                 gstin: customers.find(c => c.id === t.customerId)?.gstNumber || 'B2C (UNREG)',
-                documentNo: t.id,
+                documentNo: t.invoiceNumber || t.id,
                 date: formatDate(t.date),
                 taxableValue: round2(t.subtotal),
                 taxAmount: round2(t.totalGst),
@@ -582,15 +640,18 @@ const GstCenter: React.FC<GstCenterProps> = ({ transactions, purchases, customer
         }
 
         if (reportType === 'anx2') {
-            return filteredPurchases.map(p => ({
-                supplierGstin: '27AAAAA0000A1Z5',
-                tradeName: p.supplier,
-                invoiceNo: p.invoiceNumber,
-                date: formatDate(p.date),
-                taxableValue: round2(p.subtotal),
-                itcAvailable: round2(p.totalGst),
-                portalStatus: 'Filed (F)'
-            }));
+            return filteredPurchases.map(p => {
+                const supplierObj = suppliers.find(s => s.name === p.supplier || s.id === p.supplierId || s.id === p.supplier_id);
+                return {
+                    supplierGstin: supplierObj?.gst_number || 'URD (UNREG)',
+                    tradeName: p.supplier,
+                    invoiceNo: p.invoiceNumber,
+                    date: formatDate(p.date),
+                    taxableValue: round2(p.subtotal),
+                    itcAvailable: round2(p.totalGst),
+                    portalStatus: 'Filed (F)'
+                };
+            });
         }
 
         if (reportType === 'invoice-summary') {
@@ -689,56 +750,128 @@ const GstCenter: React.FC<GstCenterProps> = ({ transactions, purchases, customer
         return rows;
     };
 
-    const handleExportExcel = (reportType: ReportType = currentReportType) => {
+    const handleExportExcel = () => {
         setIsExporting(true);
-        try {
-            if (typeof XLSX === 'undefined') {
-                addNotification('XLSX library missing in this environment.', 'error');
-                return;
+        setDownloadStatus({ status: 'progress', message: 'Compiling all statutory sheets...' });
+        setTimeout(() => {
+            try {
+                if (typeof XLSX === 'undefined') {
+                    setDownloadStatus({ status: 'error', message: 'XLSX library missing in this environment.' });
+                    return;
+                }
+
+                const wb = XLSX.utils.book_new();
+
+                // 1. Invoice Summary
+                const invoiceSummaryRows = getReportRows('invoice-summary');
+                const wsInvoiceSummary = XLSX.utils.json_to_sheet(invoiceSummaryRows);
+                XLSX.utils.book_append_sheet(wb, wsInvoiceSummary, 'Invoice Summary');
+
+                // 2. ANX-1 (OUT)
+                const anx1Rows = getReportRows('anx1');
+                const wsAnx1 = XLSX.utils.json_to_sheet(anx1Rows);
+                XLSX.utils.book_append_sheet(wb, wsAnx1, 'ANX-1 (OUT)');
+
+                // 3. ANX-2 (IN)
+                const anx2Rows = getReportRows('anx2');
+                const wsAnx2 = XLSX.utils.json_to_sheet(anx2Rows);
+                XLSX.utils.book_append_sheet(wb, wsAnx2, 'ANX-2 (IN)');
+
+                // 4. HSN-WISE GSTR-1
+                const hsnGstr1 = getReportRows('hsn-gstr1');
+                const wsHsnGstr1 = XLSX.utils.json_to_sheet(hsnGstr1);
+                XLSX.utils.book_append_sheet(wb, wsHsnGstr1, 'HSN-WISE GSTR-1');
+
+                // 5. HSN-WISE GSTR-2
+                const hsnGstr2 = getReportRows('hsn-gstr2');
+                const wsHsnGstr2 = XLSX.utils.json_to_sheet(hsnGstr2);
+                XLSX.utils.book_append_sheet(wb, wsHsnGstr2, 'HSN-WISE GSTR-2');
+
+                // 6. HSN COMBINED
+                const hsnCombined = getReportRows('hsn-combined');
+                const wsHsnCombined = XLSX.utils.json_to_sheet(hsnCombined);
+                XLSX.utils.book_append_sheet(wb, wsHsnCombined, 'HSN COMBINED');
+
+                const filename = `GST_Statutory_Workbook_${selectedFy}_${new Date().toISOString().split('T')[0]}.xlsx`;
+                XLSX.writeFile(wb, filename);
+
+                setDownloadStatus({ 
+                    status: 'success', 
+                    message: `Saved as "${filename}" in your Downloads directory.` 
+                });
+            } catch (e) {
+                console.error(e);
+                setDownloadStatus({ status: 'error', message: 'Excel export failed.' });
+            } finally {
+                setIsExporting(false);
             }
-            const rows = exportRows(reportType);
-            if (!rows.length) return;
-            const wb = XLSX.utils.book_new();
-            const ws = XLSX.utils.json_to_sheet(rows);
-            XLSX.utils.book_append_sheet(wb, ws, reportLabelMap[reportType].slice(0, 28));
-            XLSX.writeFile(wb, `${reportLabelMap[reportType].replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`);
-            addNotification('Excel export completed.', 'success');
-        } catch (e) {
-            console.error(e);
-        } finally {
-            setIsExporting(false);
-        }
+        }, 300);
     };
 
     const handleExportCsv = (reportType: ReportType = currentReportType) => {
-        const rows = exportRows(reportType);
-        if (!rows.length) return;
-        const headers = Object.keys(rows[0]);
-        const csvContent = [arrayToCsvRow(headers), ...rows.map(r => arrayToCsvRow(headers.map(h => (r as any)[h])))].join('\n');
-        downloadCsv(csvContent, `${reportLabelMap[reportType].replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.csv`);
-        addNotification('CSV export completed.', 'success');
+        setDownloadStatus({ status: 'progress', message: 'Generating CSV file...' });
+        setTimeout(() => {
+            try {
+                const rows = exportRows(reportType);
+                if (!rows.length) {
+                    setDownloadStatus(null);
+                    return;
+                }
+                const headers = Object.keys(rows[0]);
+                const csvContent = [arrayToCsvRow(headers), ...rows.map(r => arrayToCsvRow(headers.map(h => (r as any)[h])))].join('\n');
+                const filename = `${reportLabelMap[reportType].replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.csv`;
+                downloadCsv(csvContent, filename);
+                setDownloadStatus({ 
+                    status: 'success', 
+                    message: `Saved as "${filename}" in your Downloads directory.` 
+                });
+            } catch (e) {
+                console.error(e);
+                setDownloadStatus({ status: 'error', message: 'CSV export failed.' });
+            }
+        }, 300);
     };
 
     const handleExportJson = (reportType: ReportType = currentReportType) => {
-        const rows = exportRows(reportType);
-        if (!rows.length) return;
-        const blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = `${reportLabelMap[reportType].replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.json`;
-        link.click();
-        URL.revokeObjectURL(link.href);
-        addNotification('JSON export completed.', 'success');
+        setDownloadStatus({ status: 'progress', message: 'Generating JSON file...' });
+        setTimeout(() => {
+            try {
+                const rows = exportRows(reportType);
+                if (!rows.length) {
+                    setDownloadStatus(null);
+                    return;
+                }
+                const blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' });
+                const link = document.createElement('a');
+                const filename = `${reportLabelMap[reportType].replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.json`;
+                link.href = URL.createObjectURL(blob);
+                link.download = filename;
+                link.click();
+                URL.revokeObjectURL(link.href);
+                setDownloadStatus({ 
+                    status: 'success', 
+                    message: `Saved as "${filename}" in your Downloads directory.` 
+                });
+            } catch (e) {
+                console.error(e);
+                setDownloadStatus({ status: 'error', message: 'JSON export failed.' });
+            }
+        }, 300);
     };
 
     const handleExportPdf = async (reportType: ReportType = currentReportType) => {
+        setDownloadStatus({ status: 'progress', message: 'Generating PDF report...' });
+        await new Promise(resolve => setTimeout(resolve, 300));
         try {
             if (typeof html2pdf === 'undefined') {
-                addNotification('PDF export engine unavailable.', 'error');
+                setDownloadStatus({ status: 'error', message: 'PDF export engine unavailable.' });
                 return;
             }
             const rows = exportRows(reportType);
-            if (!rows.length) return;
+            if (!rows.length) {
+                setDownloadStatus(null);
+                return;
+            }
             const headers = Object.keys(rows[0]);
             const html = `
                 <div style="padding:16px;font-family:Arial;">
@@ -754,11 +887,16 @@ const GstCenter: React.FC<GstCenterProps> = ({ transactions, purchases, customer
             const el = document.createElement('div');
             el.innerHTML = html;
             document.body.appendChild(el);
-            await html2pdf().set({ filename: `${reportLabelMap[reportType].replace(/\s+/g, '_')}.pdf`, margin: 8, html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' } }).from(el).save();
+            const filename = `${reportLabelMap[reportType].replace(/\s+/g, '_')}.pdf`;
+            await html2pdf().set({ filename, margin: 8, html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' } }).from(el).save();
             document.body.removeChild(el);
-            addNotification('PDF export completed.', 'success');
+            setDownloadStatus({ 
+                status: 'success', 
+                message: `Saved as "${filename}" in your Downloads directory.` 
+            });
         } catch (e) {
             console.error(e);
+            setDownloadStatus({ status: 'error', message: 'PDF export failed.' });
         }
     };
 
@@ -772,15 +910,6 @@ const GstCenter: React.FC<GstCenterProps> = ({ transactions, purchases, customer
         setActiveTab('summary');
     };
 
-    const loadMockData = () => {
-        setAnx1RefData(transactions.slice(0, -1).map(t => ({ invoiceId: t.id, total: t.total })));
-        setAnx2RefData(purchases.map((p, i) => ({ 
-            invoiceNumber: p.invoiceNumber, 
-            total: i === 0 ? p.totalAmount + 500 : p.totalAmount // Insert 1 mismatch
-        })));
-        addNotification("Statutory reference data loaded for matching.", "success");
-    };
-
     const addNotification = (msg: string, type: any) => {
         window.dispatchEvent(new CustomEvent('add-notification', { detail: { message: msg, type } }));
     };
@@ -789,7 +918,7 @@ const GstCenter: React.FC<GstCenterProps> = ({ transactions, purchases, customer
         <main className="flex-1 overflow-hidden flex flex-col page-fade-in bg-app-bg">
             <div className="bg-primary text-white min-h-7 flex items-center px-4 py-1 justify-between border-b border-gray-600 shadow-md flex-wrap gap-2 flex-shrink-0">
                 <span className="text-[10px] font-black uppercase tracking-widest">Statutory Module: FORM GST RET-1 ({returnType})</span>
-                <div className="flex gap-2 items-center flex-wrap">
+                <div className="flex gap-2 items-center flex-wrap relative">
                     <button onClick={() => handleExportCsv()} className="text-[10px] font-black uppercase bg-white/10 px-2 py-1 rounded hover:bg-white/20">CSV</button>
                     <button onClick={() => handleExportExcel()} disabled={isExporting} className="text-[10px] font-black uppercase bg-white/10 px-2 py-1 rounded hover:bg-white/20">{isExporting ? '...' : 'XLSX'}</button>
                     <button onClick={() => handleExportPdf()} className="text-[10px] font-black uppercase bg-white/10 px-2 py-1 rounded hover:bg-white/20">PDF</button>
@@ -797,6 +926,20 @@ const GstCenter: React.FC<GstCenterProps> = ({ transactions, purchases, customer
                     <button onClick={runAiAudit} disabled={isAnalyzing} className="text-[10px] font-black uppercase text-white bg-white/10 px-2 py-1 rounded hover:bg-white/20 transition-all">
                         {isAnalyzing ? 'Auditing...' : 'AI Auditor'}
                     </button>
+
+                    {downloadStatus && (
+                        <div className="absolute top-full right-0 mt-2 z-50 bg-[#1e3f31] text-white border-2 border-white px-3 py-2 shadow-[4px_4px_0px_rgba(0,0,0,0.55)] font-mono text-[9px] uppercase w-72 flex flex-col gap-1.5 animate-in slide-in-from-top-2 duration-200">
+                            <div className="flex justify-between items-center border-b border-white/20 pb-1">
+                                <span className="font-black tracking-wider">
+                                    {downloadStatus.status === 'progress' ? '⏳ Exporting...' : downloadStatus.status === 'success' ? '✅ Export Success' : '❌ Export Error'}
+                                </span>
+                                <button onClick={() => setDownloadStatus(null)} className="hover:text-gray-300 text-xs font-black">×</button>
+                            </div>
+                            <div className="text-[9px] leading-relaxed break-all font-bold">
+                                {downloadStatus.message}
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -841,9 +984,38 @@ const GstCenter: React.FC<GstCenterProps> = ({ transactions, purchases, customer
                         <select value={selectedFy} onChange={e => setSelectedFy(e.target.value)} className="px-2 py-1 border border-gray-300 text-[11px] font-black uppercase">
                             {fyOptions.map(fy => <option key={fy} value={fy}>{fy}</option>)}
                         </select>
+                        {reportPeriodFilter === 'monthly' && (
+                            <select value={selectedMonth} onChange={e => setSelectedMonth(Number(e.target.value))} className="px-2 py-1 border border-gray-300 text-[11px] font-black uppercase">
+                                <option value={0}>January</option>
+                                <option value={1}>February</option>
+                                <option value={2}>March</option>
+                                <option value={3}>April</option>
+                                <option value={4}>May</option>
+                                <option value={5}>June</option>
+                                <option value={6}>July</option>
+                                <option value={7}>August</option>
+                                <option value={8}>September</option>
+                                <option value={9}>October</option>
+                                <option value={10}>November</option>
+                                <option value={11}>December</option>
+                            </select>
+                        )}
+                        {reportPeriodFilter === 'quarterly' && (
+                            <select value={selectedQuarter} onChange={e => setSelectedQuarter(Number(e.target.value))} className="px-2 py-1 border border-gray-300 text-[11px] font-black uppercase">
+                                <option value={1}>Q1 (Apr-Jun)</option>
+                                <option value={2}>Q2 (Jul-Sep)</option>
+                                <option value={3}>Q3 (Oct-Dec)</option>
+                                <option value={4}>Q4 (Jan-Mar)</option>
+                            </select>
+                        )}
+                        {reportPeriodFilter === 'half-yearly' && (
+                            <select value={selectedHalf} onChange={e => setSelectedHalf(Number(e.target.value))} className="px-2 py-1 border border-gray-300 text-[11px] font-black uppercase">
+                                <option value={0}>H1 (Apr-Sep)</option>
+                                <option value={1}>H2 (Oct-Mar)</option>
+                            </select>
+                        )}
                         <input type="date" value={rangeStart} onChange={e => setRangeStart(e.target.value)} className="px-2 py-1 border border-gray-300 text-[11px]" />
                         <input type="date" value={rangeEnd} onChange={e => setRangeEnd(e.target.value)} className="px-2 py-1 border border-gray-300 text-[11px]" />
-                        <button onClick={loadMockData} className="px-4 py-2 bg-gray-100 border border-gray-400 text-[10px] font-black uppercase tracking-tighter hover:bg-gray-200">Sync Portal Data</button>
                     </div>
                 </div>
 
@@ -866,7 +1038,7 @@ const GstCenter: React.FC<GstCenterProps> = ({ transactions, purchases, customer
                     )}
 
                     {activeTab === 'anx1' && <Anx1Grid transactions={filteredTransactions} customers={customers} />}
-                    {activeTab === 'anx2' && <Anx2Grid purchases={filteredPurchases} />}
+                    {activeTab === 'anx2' && <Anx2Grid purchases={filteredPurchases} suppliers={suppliers} />}
                     {activeTab === 'invoice-summary' && <InvoiceSummaryGrid rows={invoiceSeriesSummary} />}
                     {activeTab === 'hsn1' && <HsnGrid title="HSN-wise GSTR-1 Report" rows={hsnGstr1Rows} />}
                     {activeTab === 'hsn2' && <HsnGrid title="HSN-wise GSTR-2 Report" rows={hsnGstr2Rows} />}
@@ -895,7 +1067,7 @@ const GstCenter: React.FC<GstCenterProps> = ({ transactions, purchases, customer
                                         {(reconTab === 'sales' ? salesRecon : purchaseRecon).map((row, idx) => (
                                             <tr key={idx} className="hover:bg-accent transition-colors h-12">
                                                 <td className="p-2 border-r border-gray-200 text-center text-gray-400 font-bold">{idx + 1}</td>
-                                                <td className="p-2 border-r border-gray-200 font-mono font-bold text-primary uppercase">{row.invoiceId}</td>
+                                                <td className="p-2 border-r border-gray-200 font-mono font-bold text-primary uppercase">{formatVoucherNo(row.invoiceId)}</td>
                                                 <td className="p-2 border-r border-gray-200 font-black uppercase truncate max-w-[200px]">{row.partyName}</td>
                                                 <td className="p-2 border-r border-gray-200 text-right font-black">₹{row.registerValue.toFixed(2)}</td>
                                                 <td className="p-2 border-r border-gray-200 text-right font-black">₹{row.returnValue.toFixed(2)}</td>
@@ -1183,7 +1355,7 @@ const Anx1Grid = ({ transactions, customers }: { transactions: Transaction[], cu
                         <tr key={t.id} className="hover:bg-accent transition-colors h-12">
                             <td className="p-2 border-r border-gray-200 text-center font-black text-gray-400">{categorizeSalesForAnx1(t, customers)}</td>
                             <td className="p-2 border-r border-gray-200 font-mono text-xs">{customers.find(c => c.id === t.customerId)?.gstNumber || 'B2C (UNREG)'}</td>
-                            <td className="p-2 border-r border-gray-200 font-black uppercase">{t.id}</td>
+                            <td className="p-2 border-r border-gray-200 font-black uppercase">{formatVoucherNo(t.invoiceNumber || t.id)}</td>
                             <td className="p-2 border-r border-gray-200 text-center text-xs">{t.date.split('T')[0]}</td>
                             <td className="p-2 border-r border-gray-200 text-right">₹{t.subtotal.toFixed(2)}</td>
                             <td className="p-2 border-r border-gray-200 text-right">₹{t.totalGst.toFixed(2)}</td>
@@ -1196,7 +1368,7 @@ const Anx1Grid = ({ transactions, customers }: { transactions: Transaction[], cu
     </Card>
 );
 
-const Anx2Grid = ({ purchases }: { purchases: Purchase[] }) => (
+const Anx2Grid = ({ purchases, suppliers }: { purchases: Purchase[], suppliers: Supplier[] }) => (
     <Card className="flex-1 flex flex-col p-0 tally-border !rounded-none overflow-hidden bg-white shadow-xl">
         <div className="bg-[#0F4C5C] text-white p-3 font-black text-[11px] uppercase tracking-widest">FORM GST ANX-2: Auto-drafted Inward Supplies</div>
         <div className="flex-1 overflow-auto">
@@ -1213,17 +1385,20 @@ const Anx2Grid = ({ purchases }: { purchases: Purchase[] }) => (
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                    {purchases.filter(p => p.status === 'completed').map(p => (
-                        <tr key={p.id} className="hover:bg-accent transition-colors h-12">
-                            <td className="p-2 border-r border-gray-200 font-mono text-xs">27AAAAA0000A1Z5</td>
-                            <td className="p-2 border-r border-gray-200 font-black uppercase">{p.supplier}</td>
-                            <td className="p-2 border-r border-gray-200 font-mono text-xs">{p.invoiceNumber}</td>
-                            <td className="p-2 border-r border-gray-200 text-center text-xs">{p.date}</td>
-                            <td className="p-2 border-r border-gray-200 text-right">₹{p.subtotal.toFixed(2)}</td>
-                            <td className="p-2 border-r border-gray-200 text-right font-black text-emerald-700">₹{p.totalGst.toFixed(2)}</td>
-                            <td className="p-2 text-center"><span className="px-2 py-0.5 bg-gray-100 border border-gray-300 text-[8px] font-black uppercase">Filed (F)</span></td>
-                        </tr>
-                    ))}
+                    {purchases.filter(p => p.status === 'completed').map(p => {
+                        const supplierObj = suppliers.find(s => s.name === p.supplier || s.id === p.supplierId || s.id === p.supplier_id);
+                        return (
+                            <tr key={p.id} className="hover:bg-accent transition-colors h-12">
+                                <td className="p-2 border-r border-gray-200 font-mono text-xs">{supplierObj?.gst_number || 'URD (UNREG)'}</td>
+                                <td className="p-2 border-r border-gray-200 font-black uppercase">{p.supplier}</td>
+                                <td className="p-2 border-r border-gray-200 font-mono text-xs">{p.invoiceNumber}</td>
+                                <td className="p-2 border-r border-gray-200 text-center text-xs">{p.date}</td>
+                                <td className="p-2 border-r border-gray-200 text-right">₹{p.subtotal.toFixed(2)}</td>
+                                <td className="p-2 border-r border-gray-200 text-right font-black text-emerald-700">₹{p.totalGst.toFixed(2)}</td>
+                                <td className="p-2 text-center"><span className="px-2 py-0.5 bg-gray-100 border border-gray-300 text-[8px] font-black uppercase">Filed (F)</span></td>
+                            </tr>
+                        );
+                    })}
                 </tbody>
             </table>
         </div>

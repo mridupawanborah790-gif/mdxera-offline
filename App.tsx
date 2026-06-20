@@ -3246,6 +3246,7 @@ const App: React.FC = () => {
                 case 'gst':
                     return <GstCenter
                         transactions={transactions} purchases={purchases} customers={customers}
+                        suppliers={suppliers}
                         currentUser={currentUser} configurations={configurations}
                         onUpdateConfigurations={(cfg) => {
                             const normalizedConfig = normalizeStockHandlingConfig(cfg);

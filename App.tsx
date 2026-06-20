@@ -185,7 +185,7 @@ const MargRetroLoader: React.FC<{ currentPage: string }> = ({ currentPage }) => 
             </div>
 
             {/* Bottom Box: Retro File status */}
-            <div className="w-full max-w-[390px] bg-[#d5d5d5] border-2 border-white shadow-[8px_8px_0px_rgba(0,0,0,0.55)] flex flex-col select-none">
+            <div className="w-full max-w-[480px] bg-[#d5d5d5] border-2 border-white shadow-[8px_8px_0px_rgba(0,0,0,0.55)] flex flex-col select-none">
                 {/* Title bar */}
                 <div className="bg-[#1e3f31] text-white px-3 py-1.5 text-[10px] font-black uppercase tracking-wider border-b border-gray-400">
                     UPDATING SQLITE:MDXERA.DB
@@ -196,7 +196,7 @@ const MargRetroLoader: React.FC<{ currentPage: string }> = ({ currentPage }) => 
                     <span className="text-[10px] font-black text-gray-700 uppercase tracking-widest">% of Progress</span>
                     
                     {/* Monospace progress bar */}
-                    <div className="relative w-[356px] h-7 bg-black border border-gray-600 overflow-hidden select-none">
+                    <div className="relative w-[440px] h-7 bg-black border border-gray-600 overflow-hidden select-none">
                         {/* Unfilled text background */}
                         <div className="absolute inset-0 flex items-center justify-center text-white text-[10px] font-black tracking-widest whitespace-nowrap">
                             0.....25.....50.....75.....100
@@ -207,14 +207,14 @@ const MargRetroLoader: React.FC<{ currentPage: string }> = ({ currentPage }) => 
                             className="absolute left-0 top-0 bottom-0 bg-[#1e3f31] overflow-hidden transition-all duration-150 ease-out"
                             style={{ width: `${operationProgress}%` }}
                         >
-                            <div className="w-[356px] h-full flex items-center justify-center text-yellow-300 text-[10px] font-black tracking-widest whitespace-nowrap">
+                            <div className="w-[440px] h-full flex items-center justify-center text-yellow-300 text-[10px] font-black tracking-widest whitespace-nowrap">
                                 0.....25.....50.....75.....100
                             </div>
                         </div>
                     </div>
 
                     {/* File Info */}
-                    <div className="w-[356px] mt-2 grid grid-cols-2 text-[10px] font-black uppercase text-gray-800 tracking-wider">
+                    <div className="w-[440px] mt-2 grid grid-cols-2 text-[10px] font-black uppercase text-gray-800 tracking-wider">
                         <div className="flex flex-col text-left">
                             <span className="text-[9px] text-gray-500 font-bold">Table Name</span>
                             <span className="mt-0.5 text-gray-950 font-black">{currentDbOp.table}</span>

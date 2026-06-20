@@ -204,6 +204,47 @@ const getMedicinesByName = (medicines: Medicine[], name: string): Medicine[] => 
     return cached?.byName.get(name.trim().toLowerCase()) || [];
 };
 
+const resolveMedicineForInventoryItem = (
+    medicines: Medicine[],
+    item?: InventoryItem,
+    billItemName?: string,
+    billItemBrand?: string,
+    inventoryItemId?: string
+): Medicine | undefined => {
+    getMedicineByIdOrCode(medicines); // ensure cache built
+    if (item) {
+        const materialId = (item as any).materialId || (item as any).material_id;
+        if (materialId) {
+            const med = getMedicineByIdOrCode(medicines, materialId);
+            if (med) return med;
+        }
+        const code = (item.code || '').trim().toLowerCase();
+        if (code) {
+            const med = getMedicineByIdOrCode(medicines, undefined, code);
+            if (med) return med;
+        }
+    }
+
+    if (inventoryItemId && inventoryItemId.startsWith('MM-')) {
+        const medId = inventoryItemId.substring(3);
+        const med = getMedicineByIdOrCode(medicines, medId);
+        if (med) return med;
+    }
+
+    const name = (item?.name || billItemName || '').trim().toLowerCase();
+    const brand = (item?.brand || billItemBrand || '').trim().toLowerCase();
+    if (name) {
+        const matched = getMedicinesByName(medicines, name);
+        if (matched.length > 0) {
+            const best = matched.find(m => (m.brand || '').trim().toLowerCase() === brand);
+            if (best) return best;
+            return matched[0];
+        }
+    }
+
+    return undefined;
+};
+
 const inventoryMapCache = new WeakMap<InventoryItem[], Map<string, InventoryItem>>();
 
 const getInventoryItemById = (inventory: InventoryItem[], id?: string): InventoryItem | undefined => {
@@ -703,9 +744,8 @@ const POS = forwardRef<any, POSProps>(({
         if (cartItems.length === 0) return false;
         return cartItems.some((item) => {
             const inventoryRow = getInventoryItemById(inventory, item.inventoryItemId);
-            const inventoryCode = normalizeLookupToken(inventoryRow?.code);
-            const medicine = getMedicineByIdOrCode(medicines, item.inventoryItemId, inventoryCode || undefined);
-            return medicine?.isPrescriptionRequired === true;
+            const medicine = resolveMedicineForInventoryItem(medicines, inventoryRow, item.name, item.brand, item.inventoryItemId);
+            return !!medicine?.isPrescriptionRequired;
         });
     }, [cartItems, inventory, medicines]);
 
@@ -1902,7 +1942,7 @@ const POS = forwardRef<any, POSProps>(({
         }
 
         const activePriceRecord = resolveActivePriceRecord(batch, medicines, invoiceDate);
-        const linkedMedicine = getMedicineByIdOrCode(medicines, batch.id, batch.code);
+        const linkedMedicine = resolveMedicineForInventoryItem(medicines, batch, batch.name, batch.brand, batch.id);
         const pricingSource = activePriceRecord ? {
             mrp: Number(activePriceRecord.mrp || batch.mrp || 0),
             gstPercent: batch.gstPercent,
@@ -1940,7 +1980,7 @@ const POS = forwardRef<any, POSProps>(({
         };
 
         const newItem = normalizePackConversion(selectedItem);
-        const isPrescriptionItem = linkedMedicine?.isPrescriptionRequired === true;
+        const isPrescriptionItem = !!linkedMedicine?.isPrescriptionRequired;
 
         setCartItems(prev => {
             const index = prev.findIndex(p => p.id === activeRowIdRef.current);
@@ -2138,11 +2178,8 @@ const POS = forwardRef<any, POSProps>(({
         if (!rowName) return null;
 
         const inventoryItem = getInventoryItemById(inventory, row.inventoryItemId);
-        const inventoryCode = (inventoryItem?.code || '').trim().toLowerCase();
-        if (inventoryCode) {
-            const byInventoryCode = getMedicineByIdOrCode(medicines, undefined, inventoryCode);
-            if (byInventoryCode) return byInventoryCode;
-        }
+        const resolved = resolveMedicineForInventoryItem(medicines, inventoryItem, row.name, row.brand, row.inventoryItemId);
+        if (resolved) return resolved;
 
         const rowPack = (row.packType || '').trim().toLowerCase();
         const matchedMedicines = getMedicinesByName(medicines, rowName);

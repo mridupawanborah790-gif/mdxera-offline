@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import Card from '@core/components/ui/Card';
 import AddBusinessRoleModal from '../components/AddBusinessRoleModal';
 import ConfirmModal from '@core/components/ui/ConfirmModal';
@@ -30,7 +30,9 @@ const BusinessRoles: React.FC<BusinessRolesProps> = ({ currentUser, addNotificat
             ]);
             setRoles(roleData);
             setMembers(memberData);
-            if (roleData.length > 0 && !selectedRole) {
+            if (selectedRole && !roleData.some(r => r.id === selectedRole.id)) {
+                setSelectedRole(null);
+            } else if (roleData.length > 0 && !selectedRole) {
                 setSelectedRole(roleData[0]);
             }
         } catch {
@@ -95,7 +97,7 @@ const BusinessRoles: React.FC<BusinessRolesProps> = ({ currentUser, addNotificat
     const handleConfirmDelete = async () => {
         if (!roleToRemove) return;
         try {
-            await deleteData('business_roles', roleToRemove.id);
+            await deleteData('business_roles', roleToRemove.id, currentUser);
             addNotification(`Role '${roleToRemove.name}' deleted.`, 'success');
             await loadRoles();
             if (selectedRole?.id === roleToRemove.id) setSelectedRole(null);
@@ -110,7 +112,7 @@ const BusinessRoles: React.FC<BusinessRolesProps> = ({ currentUser, addNotificat
     const matrix = selectedRole ? normalizeRolePermissionMatrix(selectedRole) : {};
 
     return (
-        <main className="flex-1 overflow-hidden flex flex-col page-fade-in bg-app-bg">
+        <main className="h-full overflow-hidden flex flex-col page-fade-in bg-app-bg">
             <div className="bg-primary text-white h-7 flex items-center px-4 justify-between border-b border-gray-600 shadow-md flex-shrink-0">
                 <span className="text-[10px] font-black uppercase tracking-widest">Access Control Matrix (Business Roles)</span>
                 <span className="text-[10px] font-black uppercase text-accent">Total Templates: {roles.length}</span>

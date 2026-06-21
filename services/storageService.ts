@@ -1,7 +1,7 @@
     
 import { db as sqliteDb } from '../src/core/db/client';
 import { TABLE as SCHEMA_TABLE } from '../src/core/db/schema';
-import { supabase } from './supabaseClient';
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient';
     import { idb, STORES } from './indexedDbService';
     import {
         RegisteredPharmacy, InventoryItem, Transaction, BillItem, Purchase, PurchaseItem, Supplier,
@@ -34,6 +34,8 @@ import {
     ensureLiveAuth as _ensureLiveAuthImpl,
 } from '../src/core/auth/authService';
 import { SyncQueue } from '../src/core/sync/SyncQueue';
+import { createClient } from '@supabase/supabase-js';
+import { cacheOfflineCredentials } from '../src/core/auth/offlineAuth';
 import { pushWithDriftLearning } from '../src/core/sync/schemaDriftCache';
 
 // Tables the new SyncEngine knows how to push. Writes to these tables get
@@ -49,6 +51,7 @@ const SYNC_QUEUE_TABLES = new Set<string>([
     'physical_inventory', 'mrp_change_log', 'ewaybills',
     'journal_entry_header', 'journal_entry_lines',
     'promotions', 'configurations',
+    'team_members', 'business_roles',
 ]);
 
 async function enqueueForSync(
@@ -912,6 +915,29 @@ const normalizeMaterialMasterType = (value: unknown): string | undefined => {
             normalized.user_id = payload.created_by_id;
         }
 
+        // Normalize boolean fields to prevent SQLite integer/string coercion bugs
+        const booleanKeys = ['isLocked', 'passwordLocked', 'isSystemRole', 'isPrescriptionRequired', 'is_active', 'is_blocked', 'auto_apply'];
+        for (const key of booleanKeys) {
+            if (normalized[key] !== undefined) {
+                const val = normalized[key];
+                normalized[key] = val === true || val === 1 || val === '1' || (typeof val === 'string' && (val.toLowerCase().trim() === 'true' || val.trim() === '1'));
+            }
+        }
+
+        // Special: Normalize nested permissions matrix booleans if present
+        if (tableName === 'business_roles' && normalized.permissionsMatrix && typeof normalized.permissionsMatrix === 'object') {
+            const matrix = normalized.permissionsMatrix;
+            for (const section in matrix) {
+                if (matrix[section] && typeof matrix[section] === 'object') {
+                    const permSet = matrix[section];
+                    for (const action in permSet) {
+                        const val = permSet[action];
+                        permSet[action] = val === true || val === 1 || val === '1' || (typeof val === 'string' && (val.toLowerCase().trim() === 'true' || val.trim() === '1'));
+                    }
+                }
+            }
+        }
+
         return normalized;
     };
     export const toSnake = (obj: any): any => {
@@ -1344,6 +1370,10 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
     export const deleteData = async (tableName: string, id: string, user?: RegisteredPharmacy | null): Promise<void> => {
         const storeKey = tableName.toUpperCase() as keyof typeof STORES;
         await idb.delete(STORES[storeKey], id);
+
+        if (memoryCache[storeKey]) {
+            memoryCache[storeKey] = memoryCache[storeKey].filter((item: any) => item.id !== id);
+        }
 
         // Mirror the delete into local SQLite so a restart before the queue
         // flushes doesn't bring the row back via hydration. Best-effort —
@@ -2423,8 +2453,43 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
         extra?: Partial<OrganizationMember>
     ) => {
         const id = generateUUID();
+        let technicalId: string | undefined = undefined;
+
+        if (navigator.onLine) {
+            try {
+                const tempClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+                    auth: {
+                        persistSession: false,
+                        autoRefreshToken: false,
+                        detectSessionInUrl: false
+                    }
+                });
+
+                const { data: authData, error: authError } = await tempClient.auth.signUp({
+                    email,
+                    password: pass,
+                    options: {
+                        data: {
+                            full_name: name,
+                            organization_id,
+                            role,
+                        }
+                    }
+                });
+
+                if (authError) {
+                    console.error("[addTeamMember] Supabase signUp failed:", authError);
+                } else if (authData?.user) {
+                    technicalId = authData.user.id;
+                }
+            } catch (err) {
+                console.error("[addTeamMember] error during tempClient.auth.signUp:", err);
+            }
+        }
+
         const newMember: OrganizationMember = {
             id,
+            technicalId,
             email,
             name,
             role,
@@ -2434,8 +2499,25 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
             ...extra,
             assignedRoles: extra?.assignedRoles || [],
         };
-        await idb.put(STORES.TEAM_MEMBERS, { ...newMember, organization_id });
-        if (navigator.onLine) await supabase.from('team_members').upsert(toSnake({ ...newMember, organization_id }));
+        const mockUser = { organization_id } as RegisteredPharmacy;
+        await saveData('team_members', newMember, mockUser, false);
+
+        // Pre-cache local auth credentials on this device so the user can log in locally/offline immediately
+        try {
+            const localUserRecord = {
+                id: technicalId || id,
+                organization_id,
+                email,
+                full_name: name,
+                pharmacy_name: '',
+                role,
+                is_active: true,
+            } as RegisteredPharmacy;
+
+            await cacheOfflineCredentials(localUserRecord, pass, extra?.assignedRoles || []);
+        } catch (localAuthErr) {
+            console.error("[addTeamMember] failed to cache local auth credentials:", localAuthErr);
+        }
     };
 
     export const updateMemberRole = async (memberId: string, newRole: UserRole) => {
@@ -2447,9 +2529,8 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
         if (navigator.onLine) await supabase.from('team_members').update({ role: newRole }).eq('id', memberId);
     };
 
-    export const removeTeamMember = async (memberId: string) => {
-        await idb.delete(STORES.TEAM_MEMBERS, memberId);
-        if (navigator.onLine) await supabase.from('team_members').delete().eq('id', memberId);
+    export const removeTeamMember = async (memberId: string, user?: RegisteredPharmacy | null) => {
+        await deleteData('team_members', memberId, user);
     };
 
     export const addLedgerEntry = async (entry: TransactionLedgerItem, owner: { type: 'customer' | 'supplier' | 'distributor', id: string }, user: RegisteredPharmacy) => {

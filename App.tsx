@@ -30,6 +30,7 @@ import BusinessRoles from '@modules/configuration/components/BusinessRoles';
 import Configuration from '@modules/configuration/components/Configuration';
 import CompanyConfiguration from '@modules/configuration/components/CompanyConfiguration';
 import Settings from '@modules/configuration/components/Settings';
+import SyncAndUpdates from '@modules/configuration/components/SyncAndUpdates';
 import Auth from '@core/auth/components/Auth';
 import AccountReceivable from '@modules/customers/components/AccountReceivable';
 import AccountPayable from '@modules/suppliers/components/AccountPayable';
@@ -90,7 +91,7 @@ const PERSISTABLE_SCREENS = new Set([
     'doctorsMaster',
     'substituteFinder', 'promotions', 'reports', 'dailyReports', 'balanceCarryforward', 'gst', 'eway', 'ewayLoginSetup',
     'businessUsers', 'businessRoles', 'companyConfiguration', 'configuration', 'settings', 'moduleVisibility',
-    'classification', 'accountReceivable', 'accountPayable', 'newJournalEntryVoucher',
+    'classification', 'accountReceivable', 'accountPayable', 'newJournalEntryVoucher', 'syncAndUpdates',
     'mbcCardDashboard', 'mbcCardList', 'mbcGenerateCard', 'mbcCardTypeMaster', 'mbcCardTemplateMaster', 'mbcCardPrintPreview', 'mbcCardRenewalHistory'
 ]);
 
@@ -3291,6 +3292,7 @@ const App: React.FC = () => {
                     return <BusinessUserAssignment
                         currentUser={currentUser!} addNotification={addNotification}
                         members={teamMembers} onRefresh={() => loadData(currentUser!, 'sync')}
+                        isActive={isActive}
                     />;
                 case 'businessRoles':
                     return <BusinessRoles currentUser={currentUser!} addNotification={addNotification} />;
@@ -3320,6 +3322,21 @@ const App: React.FC = () => {
                         onMigrationStateChange={setMigrationUiState}
                         forceShowMigrationPopupToken={migrationPopupToken}
                         isActive={isActive}
+                    />;
+                case 'syncAndUpdates':
+                    return <SyncAndUpdates
+                        currentUser={currentUser}
+                        addNotification={addNotification}
+                        onResyncAll={() => {
+                            if (!currentUser) return;
+                            addNotification('Starting full resync — setup modal will appear shortly.', 'success');
+                            triggerFullResync();
+                            setTimeout(() => {
+                                if (currentUser) loadData(currentUser, 'sync');
+                            }, 5000);
+                        }}
+                        onFreshInstallSync={() => setShowFreshInstallSyncDialog(true)}
+                        onCancel={() => handleNavigate('dashboard')}
                     />;
                 case 'settings':
                     return <Settings

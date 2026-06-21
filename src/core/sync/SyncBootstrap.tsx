@@ -91,6 +91,18 @@ export const SyncBootstrap: React.FC<Props> = ({ currentUser }) => {
   // We keep a ref of phase so the event listener doesn't need to depend on it
   const phaseRef = useRef(phase);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
+
+  useEffect(() => {
+    // Reset schema drift cache on application mount so any newly deployed
+    // migration columns are automatically re-attempted and learned without
+    // requiring manual developer console cache clears.
+    try {
+      resetSchemaDriftCache();
+      console.info('[SyncBootstrap] Schema drift cache reset on application start.');
+    } catch (err) {
+      console.warn('[SyncBootstrap] Failed to reset schema drift cache on boot:', err);
+    }
+  }, []);
   const setAuthUser = useAuthStore((s) => s.setUser);
   const orgId = currentUser?.organization_id;
 

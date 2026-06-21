@@ -7,7 +7,7 @@ export function usePermissions() {
 
   return {
     can: (screen: string) =>
-      currentUser ? canAccessScreen(currentUser, screen) : false,
+      currentUser ? canAccessScreen(screen, currentUser, [], []) : false,
     currentUser,
   };
 }

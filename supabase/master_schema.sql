@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS public.business_roles (
     name text NOT NULL,
     description text,
     work_centers jsonb NOT NULL DEFAULT '[]'::jsonb,
+    permissions_matrix jsonb DEFAULT '{}'::jsonb,
     is_system_role boolean DEFAULT false,
     is_active boolean DEFAULT true,
     created_at timestamptz DEFAULT now(),

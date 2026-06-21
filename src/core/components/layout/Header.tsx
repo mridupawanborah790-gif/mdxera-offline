@@ -34,6 +34,7 @@ const Header: React.FC<HeaderProps> = ({ onNewBillClick, currentUser, onNavigate
     id: 'utilities_setup',
     label: 'Utilities & Setup',
     children: [
+      { id: 'syncAndUpdates', label: 'Sync & Check for Updates' },
       { id: 'configuration', label: 'Global ERP Configuration (Control Room)' },
       { id: 'companyConfiguration', label: 'Company Configuration' },
       { id: 'businessRoles', label: 'Business Roles' },

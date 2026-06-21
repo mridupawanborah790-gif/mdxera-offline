@@ -34,6 +34,7 @@ CREATE TABLE public.business_roles (
     -- Stored as JSONB to hold the array of WorkCenters and their assigned views.
     -- Example Structure: [{ "id": "sales", "name": "Sales", "views": [{ "id": "pos", "name": "POS", "assigned": true }] }]
     work_centers jsonb NOT NULL DEFAULT '[]'::jsonb,
+    permissions_matrix jsonb DEFAULT '{}'::jsonb,
     
     -- System Controls
     is_system_role boolean DEFAULT false, -- Protects built-in roles from deletion

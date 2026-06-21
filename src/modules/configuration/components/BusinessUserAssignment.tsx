@@ -1,4 +1,4 @@
-﻿
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Card from '@core/components/ui/Card';
 import Modal from '@core/components/ui/Modal';
@@ -13,6 +13,7 @@ interface BusinessUserAssignmentProps {
     addNotification: (message: string, type?: 'success' | 'error' | 'warning') => void;
     members: OrganizationMember[];
     onRefresh: () => Promise<void>;
+    isActive?: boolean;
 }
 
 const DEFAULT_WORK_CENTERS: WorkCenter[] = [
@@ -45,7 +46,7 @@ const DEFAULT_WORK_CENTERS: WorkCenter[] = [
     }
 ];
 
-const BusinessUserAssignment: React.FC<BusinessUserAssignmentProps> = ({ currentUser, addNotification, members, onRefresh }) => {
+const BusinessUserAssignment: React.FC<BusinessUserAssignmentProps> = ({ currentUser, addNotification, members, onRefresh, isActive }) => {
     const [businessRoles, setBusinessRoles] = useState<BusinessRole[]>([]);
     const [selectedUser, setSelectedUser] = useState<OrganizationMember | null>(null);
     const [activeTab, setActiveTab] = useState<'general' | 'roles' | 'workcenters' | 'sod'>('general');
@@ -53,15 +54,24 @@ const BusinessUserAssignment: React.FC<BusinessUserAssignmentProps> = ({ current
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
     const [isLoadingRoles, setIsLoadingRoles] = useState(true);
     const [focusedIndex, setFocusedIndex] = useState(0);
+    const hasInitializedSelection = useRef(false);
 
     const loadExtraData = useCallback(async () => {
+        if (selectedUser && !members.some(m => m.id === selectedUser.id)) {
+            setSelectedUser(null);
+            return;
+        }
+
         setIsLoadingRoles(true);
         try {
             const rolesData = await getData('business_roles', [], currentUser);
             setBusinessRoles(rolesData);
             
             // Prioritize selecting the current user (Owner/Super User) by default on mount
-            if (members.length > 0 && !selectedUser) {
+            if (members.length === 0) {
+                hasInitializedSelection.current = false;
+                setSelectedUser(null);
+            } else if (!selectedUser && !hasInitializedSelection.current) {
                 const me = members.find(m => m.email === currentUser.email || m.technicalId === currentUser.user_id);
                 if (me) {
                     setSelectedUser(me);
@@ -70,6 +80,7 @@ const BusinessUserAssignment: React.FC<BusinessUserAssignmentProps> = ({ current
                 } else {
                     setSelectedUser(members[0]);
                 }
+                hasInitializedSelection.current = true;
             }
         } catch (err) {
             addNotification("Failed to fetch administrative templates", "error");
@@ -79,8 +90,10 @@ const BusinessUserAssignment: React.FC<BusinessUserAssignmentProps> = ({ current
     }, [currentUser, addNotification, members, selectedUser]);
 
     useEffect(() => {
-        loadExtraData();
-    }, [loadExtraData]);
+        if (isActive !== false) {
+            loadExtraData();
+        }
+    }, [isActive, loadExtraData]);
 
     const handleAddMember = async (payload: {
         name: string;
@@ -140,7 +153,7 @@ const BusinessUserAssignment: React.FC<BusinessUserAssignmentProps> = ({ current
             return;
         }
         try {
-            await removeTeamMember(selectedUser.id);
+            await removeTeamMember(selectedUser.id, currentUser);
             addNotification(`User ${selectedUser.name} removed from directory.`, 'success');
             setSelectedUser(null);
             await onRefresh();
@@ -189,7 +202,7 @@ const BusinessUserAssignment: React.FC<BusinessUserAssignmentProps> = ({ current
     }, [members, focusedIndex]);
 
     return (
-        <main className="flex-1 overflow-hidden flex flex-col page-fade-in bg-app-bg">
+        <main className="h-full overflow-hidden flex flex-col page-fade-in bg-app-bg">
             <div className="bg-primary text-white h-7 flex items-center px-4 justify-between border-b border-gray-600 shadow-md flex-shrink-0">
                 <span className="text-[10px] font-black uppercase tracking-widest">Enterprise Identity Control (Directory)</span>
                 <div className="flex gap-4">
@@ -387,7 +400,7 @@ const BusinessUserAssignment: React.FC<BusinessUserAssignmentProps> = ({ current
                                         </div>
                                         
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                            {(selectedUser.workCenters || DEFAULT_WORK_CENTERS).map((wc, wcIdx) => (
+                                            {(!selectedUser.workCenters || selectedUser.workCenters.length === 0 ? DEFAULT_WORK_CENTERS : selectedUser.workCenters).map((wc, wcIdx) => (
                                                 <Card key={wc.id} className="p-0 border-2 border-gray-200 bg-white !rounded-none shadow-md">
                                                     <div className="bg-gray-100 p-3 border-b border-gray-200 flex justify-between items-center">
                                                         <span className="text-xs font-black uppercase text-primary">{wc.name}</span>
@@ -399,7 +412,8 @@ const BusinessUserAssignment: React.FC<BusinessUserAssignmentProps> = ({ current
                                                                 key={view.id} 
                                                                 onClick={() => {
                                                                     if (selectedUser.email === currentUser.email) return; // Prevent disabling own access in UI
-                                                                    const newWc = JSON.parse(JSON.stringify(selectedUser.workCenters || DEFAULT_WORK_CENTERS));
+                                                                    const currentWc = !selectedUser.workCenters || selectedUser.workCenters.length === 0 ? DEFAULT_WORK_CENTERS : selectedUser.workCenters;
+                                                                    const newWc = JSON.parse(JSON.stringify(currentWc));
                                                                     newWc[wcIdx].views[vIdx].assigned = !newWc[wcIdx].views[vIdx].assigned;
                                                                     setSelectedUser({...selectedUser, workCenters: newWc});
                                                                 }}

@@ -1,4 +1,4 @@
-﻿import { BusinessRole, OrganizationMember, PermissionAction, PermissionSet, RegisteredPharmacy } from '@core/types';
+import { BusinessRole, OrganizationMember, PermissionAction, PermissionSet, RegisteredPharmacy } from '@core/types';
 import type { NavItem } from '@core/types';
 
 export interface RbacModuleDefinition {
@@ -44,17 +44,31 @@ export const RBAC_MODULES: RbacModuleDefinition[] = [
         children: [
             { id: 'suppliers', name: 'Suppliers' },
             { id: 'customers', name: 'Customers' },
-            { id: 'medicineMasterList', name: 'Material Master' },
+            { id: 'medicineMasterParent', name: 'Material Master Parent' },
+            { id: 'medicineMasterList', name: 'Material Master Data' },
             { id: 'masterPriceMaintain', name: 'Price Maintain' },
             { id: 'vendorNomenclature', name: 'Vendor Nomenclature' },
             { id: 'bulkUtility', name: 'Bulk Utility' },
+            { id: 'otherMaster', name: 'Other Master Parent' },
+            { id: 'doctorsMaster', name: 'Doctor’s Master' },
+            { id: 'mbcCardParent', name: 'MBC Card Parent' },
+            { id: 'mbcCardDashboard', name: 'MBC Card Dashboard' },
+            { id: 'mbcCardList', name: 'MBC Card List' },
+            { id: 'mbcGenerateCard', name: 'Generate MBC Card' },
+            { id: 'mbcCardTypeMaster', name: 'MBC Card Type Master' },
+            { id: 'mbcCardTemplateMaster', name: 'MBC Card Template Master' },
+            { id: 'mbcCardPrintPreview', name: 'Print / Preview MBC Card' },
+            { id: 'mbcCardRenewalHistory', name: 'MBC Card Renewal / Upgrade History' },
         ],
     },
     {
         id: 'utilities',
         name: 'Utilities',
         children: [
+            { id: 'financialStatement', name: 'Financial Statement Parent' },
             { id: 'reports', name: 'Reports' },
+            { id: 'balanceCarryforward', name: 'Balance Carryforward' },
+            { id: 'newJournalEntryVoucher', name: 'New Journal Entry Voucher' },
             { id: 'eway', name: 'E-Way Bill' },
             { id: 'ewayLoginSetup', name: 'E-Way Setup' },
             { id: 'gst', name: 'GST' },

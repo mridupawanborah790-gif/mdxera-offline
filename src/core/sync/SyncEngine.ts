@@ -3,6 +3,7 @@ import { SyncQueue } from './SyncQueue';
 import { processSyncQueue } from './SyncWorker';
 import { pullDeltaFromSupabase } from './SyncPuller';
 import { warmupVoucherSeries } from '@core/voucher/voucherService';
+import { ensureLiveAuth } from '@core/auth/authService';
 
 const syncChannel = new BroadcastChannel('mdxera-sync-channel');
 
@@ -46,6 +47,15 @@ async function runSyncCycle(skipConnectivityCheck = false): Promise<void> {
 
     if (!online) {
       setStatus('offline');
+      return;
+    }
+
+    // Try to ensure Supabase client has a live authenticated session before doing pull/push
+    try {
+      await ensureLiveAuth();
+    } catch (authErr) {
+      console.warn('[SyncEngine] auth check failed before sync:', authErr);
+      setStatus('error', authErr instanceof Error ? authErr.message : 'Auth session expired');
       return;
     }
 
@@ -120,6 +130,7 @@ export const SyncEngine = {
         // this is the catch-up point.
         setStatus('syncing');
         try {
+          await ensureLiveAuth();
           await pullDeltaFromSupabase(organizationId);
           await processSyncQueue();
           await warmupVoucherSeries(organizationId);

@@ -13,28 +13,6 @@ import * as storage from '@core/services/storageService';
 import type { InventoryItem, Medicine, RegisteredPharmacy } from '@core/types';
 import { supabase } from '@core/db/supabaseClient';
 
-/**
- * Make sure the Supabase JS client has a live session before issuing writes.
- * When the app booted from a restored Tauri-persisted session, the JS client
- * can have stale or missing auth; that surfaces as HTTP 401 + RLS 42501 on
- * INSERT. Calling this up-front gives the user a clear "please log in"
- * message instead of an opaque "row violates row-level security policy".
- */
-async function ensureLiveAuth(): Promise<void> {
-  if (!navigator.onLine) return; // offline writes are queued anyway
-  const { data, error } = await supabase.auth.getSession();
-  if (error) throw new Error('Could not read auth session. Please log in again.');
-  if (data.session) return;
-  const refreshed = await supabase.auth.refreshSession();
-
-  if (refreshed.error && refreshed.error.message.includes('LockManager lock')) {
-    throw refreshed.error; // Throw actual transient error so caller can handle it gracefully
-  }
-
-  if (refreshed.error || !refreshed.data.session) {
-    throw new Error('Your session has expired. Please log out and log in again to continue.');
-  }
-}
 
 /** Normalize so casing/whitespace differences don't fragment groups. */
 export const materialKey = (name: string | null | undefined, brand: string | null | undefined): string =>
@@ -159,7 +137,7 @@ export async function createMasterFromGroup(
   user: RegisteredPharmacy,
   overrides?: Partial<Medicine>,
 ): Promise<{ medicine: Medicine; updatedBatches: number }> {
-  await ensureLiveAuth();
+  await storage.ensureLiveAuth();
   const payload = buildMasterPayload(group, user.organization_id, overrides);
   const saved = (await storage.saveData('material_master', payload, user)) as Medicine;
   const newCode = saved.materialCode;
@@ -192,7 +170,7 @@ export async function bulkCreateFromInventory(
   onProgress?: (done: number, total: number, currentName: string) => void,
 ): Promise<{ created: number; updatedBatches: number; failed: { key: string; name: string; error: string }[] }> {
   // Fail fast if auth is dead — better one clear message than N opaque RLS errors.
-  await ensureLiveAuth();
+  await storage.ensureLiveAuth();
   const failed: { key: string; name: string; error: string }[] = [];
   let created = 0;
   let updatedBatches = 0;

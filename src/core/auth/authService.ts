@@ -353,6 +353,86 @@ export async function updatePassword(newPassword: string): Promise<void> {
 }
 
 /**
+ * Make sure the Supabase JS client has a live session before issuing writes or syncs.
+ * Checks if the client has a session, and if not, attempts to restore it using the
+ * persisted refresh token from local storage / Tauri store.
+ */
+export async function ensureLiveAuth(): Promise<void> {
+  if (!isOnline()) return; // offline writes/sync are queued/offline anyway
+
+  let sessionData;
+  try {
+    sessionData = await supabase.auth.getSession();
+  } catch (err) {
+    console.warn('[auth] getSession failed:', err);
+    throw new Error('Could not read auth session. Please log in again.');
+  }
+
+  let session = sessionData.data.session;
+
+  // If no active session in the Supabase client, try to restore from our persisted session
+  if (!session) {
+    try {
+      const persisted = await loadPersistedSession();
+      if (persisted && persisted.supabaseSession) {
+        console.info('[auth] Supabase client has no session, attempting to restore persisted session...');
+        const result = await supabase.auth.setSession({
+          access_token: persisted.supabaseSession.accessToken,
+          refresh_token: persisted.supabaseSession.refreshToken,
+        });
+        if (result.data.session) {
+          session = result.data.session;
+          // Persist the updated session (which might have refreshed)
+          await persistSession({
+            supabaseSession: {
+              accessToken: result.data.session.access_token,
+              refreshToken: result.data.session.refresh_token,
+              expiresAt: result.data.session.expires_at ?? 0,
+              userId: result.data.session.user.id,
+            }
+          });
+        }
+      }
+    } catch (restoreErr) {
+      console.warn('[auth] Failed to restore persisted Supabase session:', restoreErr);
+    }
+  }
+
+  // If we still don't have a session, or if it is expired/about to expire, call refreshSession()
+  if (!session) {
+    throw new Error('Your session has expired. Please log out and log in again to continue.');
+  }
+
+  // Check if session is expired or close to expiring (within 60 seconds)
+  const isExpired = session.expires_at ? (session.expires_at * 1000 - Date.now() < 60000) : true;
+  if (isExpired) {
+    console.info('[auth] Supabase session is expired or expiring soon, refreshing...');
+    const refreshed = await supabase.auth.refreshSession();
+
+    if (refreshed.error) {
+      if (refreshed.error.message.includes('LockManager lock')) {
+        throw refreshed.error; // Throw actual transient error so caller can retry
+      }
+      throw new Error('Your session has expired. Please log out and log in again to continue.');
+    }
+
+    if (!refreshed.data.session) {
+      throw new Error('Your session has expired. Please log out and log in again to continue.');
+    }
+
+    // Persist the refreshed session
+    await persistSession({
+      supabaseSession: {
+        accessToken: refreshed.data.session.access_token,
+        refreshToken: refreshed.data.session.refresh_token,
+        expiresAt: refreshed.data.session.expires_at ?? 0,
+        userId: refreshed.data.session.user.id,
+      }
+    });
+  }
+}
+
+/**
  * Try to restore the previous session on app startup.
  * Returns the user if a valid session exists, or null if login is required.
  */
@@ -360,25 +440,17 @@ export async function restoreSession(): Promise<RegisteredPharmacy | null> {
   const { supabaseSession, localSession, user } = await loadPersistedSession();
   if (!user) return null;
 
-  // Try to silently refresh the Supabase token if online
+  // Try to restore and refresh the Supabase token if online
   if (isOnline()) {
     try {
-      const refreshed = await Promise.race([
-        supabaseRefreshSession(),
-        new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Session refresh timed out')), 4000))
+      await Promise.race([
+        ensureLiveAuth(),
+        new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Session restore/refresh timed out')), 5000))
       ]);
-      if (refreshed) {
-        await persistSession({ supabaseSession: refreshed });
-        await refreshCachedUserData(user.id, user);
-
-        // Refresh the org roster on every successful online startup (non-blocking)
-        syncOrgRoster(user).catch((err) =>
-          console.warn('[auth] roster sync on restore failed:', err)
-        );
-
-        return user;
-      }
-      // Refresh returned null but didn't throw — fall through to local check
+      // Refresh the org roster on every successful online startup (non-blocking)
+      syncOrgRoster(user).catch((err) =>
+        console.warn('[auth] roster sync on restore failed:', err)
+      );
     } catch (err) {
       // Don't clear the persisted session on a non-network failure: a flaky
       // 4xx, a temporarily revoked refresh token, or a brief auth outage will
@@ -431,5 +503,4 @@ export async function tryUpgradeToOnlineSession(
   }
 }
 
-// Re-export for convenience
 export { supabaseRestoreSession };

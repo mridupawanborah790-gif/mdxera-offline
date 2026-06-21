@@ -31,6 +31,7 @@ import {
     verifyRecoveryToken as _verifyRecoveryTokenImpl,
     updatePassword as _updatePasswordImpl,
     restoreSession as _restoreSessionImpl,
+    ensureLiveAuth as _ensureLiveAuthImpl,
 } from '../src/core/auth/authService';
 import { SyncQueue } from '../src/core/sync/SyncQueue';
 import { pushWithDriftLearning } from '../src/core/sync/schemaDriftCache';
@@ -950,19 +951,7 @@ const normalizeMaterialMasterType = (value: unknown): string | undefined => {
     };
 
     export const ensureLiveAuth = async (): Promise<void> => {
-        if (!navigator.onLine) return;
-        const { data, error } = await supabase.auth.getSession();
-        if (error) throw new Error('Could not read auth session. Please log in again.');
-        if (data.session) return;
-        const refreshed = await supabase.auth.refreshSession();
-        
-        if (refreshed.error && refreshed.error.message.includes('LockManager lock')) {
-            throw refreshed.error; // Throw actual transient error so caller can enqueue offline
-        }
-        
-        if (refreshed.error || !refreshed.data.session) {
-            throw new Error('Your session has expired. Please log out and log in again to continue.');
-        }
+        await _ensureLiveAuthImpl();
     };
 
     const isNetworkError = (error: any): boolean => {

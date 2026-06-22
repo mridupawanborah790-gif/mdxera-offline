@@ -1,6 +1,6 @@
-﻿import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import Card from '@core/components/ui/Card';
-import type { Supplier, RegisteredPharmacy } from '@core/types';
+import type { Supplier, RegisteredPharmacy, PermissionSet } from '@core/types';
 import type { SupplierQuickResult } from '@core/services/supplierService';
 import { AddSupplierModal, EditSupplierModal } from '@modules/suppliers/components/AddSupplierModal';
 import ExportSuppliersModal from '../components/ExportSuppliersModal';
@@ -48,9 +48,21 @@ interface SuppliersProps {
     config: any;
     currentUser: RegisteredPharmacy | null;
     defaultSupplierControlGlId?: string;
+    permissions?: PermissionSet;
 }
 
-const Suppliers: React.FC<SuppliersProps> = ({ suppliers, onAddSupplier, onBulkAddSuppliers, onRecordPayment, onUpdateSupplier, onBlockSupplier, onUnblockSupplier, onDeleteSupplier, config, currentUser, defaultSupplierControlGlId }) => {
+const Suppliers: React.FC<SuppliersProps> = ({ suppliers, onAddSupplier, onBulkAddSuppliers, onRecordPayment, onUpdateSupplier, onBlockSupplier, onUnblockSupplier, onDeleteSupplier, config, currentUser, defaultSupplierControlGlId, permissions }) => {
+    const defaultPermissions: PermissionSet = {
+        view: true,
+        entry: true,
+        edit: true,
+        delete: true,
+        approve: true,
+        print: true,
+        export: true,
+        full: true,
+    };
+    const perms = permissions || defaultPermissions;
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
@@ -80,10 +92,10 @@ const Suppliers: React.FC<SuppliersProps> = ({ suppliers, onAddSupplier, onBulkA
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (!shouldHandleScreenShortcut(e, 'suppliers')) return;
-            if (e.key === 'F2') {
+            if (e.key === 'F2' && perms.entry) {
                 e.preventDefault();
                 setIsAddModalOpen(true);
-            } else if (e.key === 'F3') {
+            } else if (e.key === 'F3' && perms.export) {
                 e.preventDefault();
                 if (Array.isArray(filteredSuppliers) && filteredSuppliers.length > 0) {
                     setIsExportModalOpen(true);
@@ -92,7 +104,7 @@ const Suppliers: React.FC<SuppliersProps> = ({ suppliers, onAddSupplier, onBulkA
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [filteredSuppliers]);
+    }, [filteredSuppliers, perms.entry, perms.export]);
 
     const handleExportClick = () => {
         if (!Array.isArray(filteredSuppliers) || filteredSuppliers.length === 0) return;
@@ -162,8 +174,8 @@ const Suppliers: React.FC<SuppliersProps> = ({ suppliers, onAddSupplier, onBulkA
                         ))}
                     </div>
                     <div className="p-3 border-t border-gray-400 bg-gray-50 flex gap-2 flex-shrink-0">
-                        <button onClick={() => setIsAddModalOpen(true)} className="flex-1 py-2 tally-button-primary text-[10px] uppercase">F2: Create</button>
-                        <button onClick={handleExportClick} className="flex-1 py-2 tally-border bg-white font-bold uppercase text-[10px]">F3: Export</button>
+                        {perms.entry && <button onClick={() => setIsAddModalOpen(true)} className="flex-1 py-2 tally-button-primary text-[10px] uppercase">F2: Create</button>}
+                        {perms.export && <button onClick={handleExportClick} className="flex-1 py-2 tally-border bg-white font-bold uppercase text-[10px]">F3: Export</button>}
                     </div>
                 </Card>
 
@@ -193,23 +205,27 @@ const Suppliers: React.FC<SuppliersProps> = ({ suppliers, onAddSupplier, onBulkA
                                             </div>
                                         </div>
                                         <div className="flex gap-2">
-                                            <button onClick={() => setIsEditModalOpen(true)} className="px-6 py-2 tally-border bg-white font-black text-[10px] uppercase shadow-sm">Alter</button>
-                                            {(selectedSupplier.is_blocked || selectedSupplier.is_active === false) ? (
-                                                <button onClick={() => { if (window.confirm('Unblock this supplier?')) void onUnblockSupplier(selectedSupplier); }} className="px-4 py-2 border border-emerald-700 bg-emerald-50 text-emerald-700 font-black text-[10px] uppercase shadow-sm">Unblock Supplier</button>
-                                            ) : (
-                                                <button onClick={() => { if (window.confirm('Block this supplier?')) void onBlockSupplier(selectedSupplier); }} className="px-4 py-2 border border-amber-700 bg-amber-50 text-amber-700 font-black text-[10px] uppercase shadow-sm">Block Supplier</button>
+                                            <button onClick={() => setIsEditModalOpen(true)} className="px-6 py-2 tally-border bg-white font-black text-[10px] uppercase shadow-sm">{perms.edit ? 'Alter' : 'View'}</button>
+                                            {perms.edit && (
+                                                (selectedSupplier.is_blocked || selectedSupplier.is_active === false) ? (
+                                                    <button onClick={() => { if (window.confirm('Unblock this supplier?')) void onUnblockSupplier(selectedSupplier); }} className="px-4 py-2 border border-emerald-700 bg-emerald-50 text-emerald-700 font-black text-[10px] uppercase shadow-sm">Unblock Supplier</button>
+                                                ) : (
+                                                    <button onClick={() => { if (window.confirm('Block this supplier?')) void onBlockSupplier(selectedSupplier); }} className="px-4 py-2 border border-amber-700 bg-amber-50 text-amber-700 font-black text-[10px] uppercase shadow-sm">Block Supplier</button>
+                                                )
                                             )}
-                                            <button
-                                                onClick={async () => {
-                                                    if (!window.confirm('Delete this supplier?')) return;
-                                                    const result = await onDeleteSupplier(selectedSupplier);
-                                                    alert(result.message);
-                                                    if (result.success) setSelectedSupplierId(null);
-                                                }}
-                                                className="px-4 py-2 border border-red-700 bg-red-50 text-red-700 font-black text-[10px] uppercase shadow-sm"
-                                            >
-                                                Delete Supplier
-                                            </button>
+                                            {perms.edit && (
+                                                <button
+                                                    onClick={async () => {
+                                                        if (!window.confirm('Delete this supplier?')) return;
+                                                        const result = await onDeleteSupplier(selectedSupplier);
+                                                        alert(result.message);
+                                                        if (result.success) setSelectedSupplierId(null);
+                                                    }}
+                                                    className="px-4 py-2 border border-red-700 bg-red-50 text-red-700 font-black text-[10px] uppercase shadow-sm"
+                                                >
+                                                    Delete Supplier
+                                                </button>
+                                            )}
                                         </div>
                                     </div>
 
@@ -294,6 +310,7 @@ const Suppliers: React.FC<SuppliersProps> = ({ suppliers, onAddSupplier, onBulkA
                     onSave={handleUpdate}
                     supplier={selectedSupplier}
                     defaultControlGlId={defaultSupplierControlGlId}
+                    isReadOnly={!perms.edit}
                 />
             )}
 

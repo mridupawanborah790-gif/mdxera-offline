@@ -1,7 +1,10 @@
-﻿import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import Modal from '@core/components/ui/Modal';
 import { BusinessRole, PermissionAction, PermissionSet } from '@core/types';
 import { applyFullAccess, createEmptyPermissionSet, RBAC_ACTIONS, RBAC_MODULES } from '@core/utils/rbac';
+
+const DISPLAY_ACTIONS = RBAC_ACTIONS.filter(action => action !== 'approve' && action !== 'delete');
+const DISPLAY_MODULES = RBAC_MODULES.filter(module => module.id !== 'dashboard');
 
 interface AddBusinessRoleModalProps {
     isOpen: boolean;
@@ -174,17 +177,17 @@ const AddBusinessRoleModal: React.FC<AddBusinessRoleModalProps> = ({
                             <thead className="bg-gray-100">
                                 <tr>
                                     <th className="p-2 text-left uppercase">Module</th>
-                                    {RBAC_ACTIONS.map((action) => (
+                                    {DISPLAY_ACTIONS.map((action) => (
                                         <th key={action} className="p-2 uppercase">{action}</th>
                                     ))}
                                 </tr>
                             </thead>
                             <tbody>
-                                {RBAC_MODULES.map((module) => (
+                                {DISPLAY_MODULES.map((module) => (
                                     <React.Fragment key={module.id}>
                                         <tr className="bg-slate-50 border-t border-gray-200">
                                             <td className="p-2 font-black uppercase">{module.name}</td>
-                                            {RBAC_ACTIONS.map((action) => (
+                                            {DISPLAY_ACTIONS.map((action) => (
                                                 <td key={`${module.id}-${action}`} className="text-center p-2">
                                                     <input
                                                         type="checkbox"
@@ -197,7 +200,7 @@ const AddBusinessRoleModal: React.FC<AddBusinessRoleModalProps> = ({
                                         {(module.children || []).map((child) => (
                                             <tr key={child.id} className="border-t border-gray-100">
                                                 <td className="p-2 pl-8 font-bold uppercase text-gray-700">{child.name}</td>
-                                                {RBAC_ACTIONS.map((action) => (
+                                                {DISPLAY_ACTIONS.map((action) => (
                                                     <td key={`${child.id}-${action}`} className="text-center p-2">
                                                         <input
                                                             type="checkbox"

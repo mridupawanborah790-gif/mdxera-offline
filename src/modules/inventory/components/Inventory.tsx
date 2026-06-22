@@ -1,4 +1,4 @@
-﻿
+
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import Card from '@core/components/ui/Card';
 import AddProductModal from '@modules/inventory/components/AddProductModal';
@@ -7,7 +7,7 @@ import ExportInventoryModal from '../components/ExportInventoryModal';
 import MrpChangeLogModal from '../components/MrpChangeLogModal';
 import InventoryBatchDetailModal from '../components/InventoryBatchDetailModal';
 import SyncMaterialMasterModal from '../components/SyncMaterialMasterModal';
-import type { InventoryItem, RegisteredPharmacy, ModuleConfig, AppConfigurations, Medicine, MrpChangeLogEntry } from '@core/types';
+import type { InventoryItem, RegisteredPharmacy, ModuleConfig, AppConfigurations, Medicine, MrpChangeLogEntry, PermissionSet } from '@core/types';
 import { fuzzyMatch } from '@core/utils/search';
 import { formatExpiryToMMYY, normalizeImportDate } from '@core/utils/helpers';
 import { configurableModules } from '@core/utils/constants';
@@ -54,6 +54,7 @@ interface InventoryProps {
     addNotification?: (message: string, type: 'success' | 'error' | 'warning') => void;
     onRefresh?: () => Promise<void> | void;
     onAddMedicineMaster?: (med: Omit<Medicine, 'id'>) => Promise<Medicine | void> | Medicine | void;
+    permissions?: PermissionSet;
 }
 
 interface GroupedInventoryRow {
@@ -92,7 +93,19 @@ const Inventory: React.FC<InventoryProps> = ({
     addNotification,
     onRefresh,
     onAddMedicineMaster,
+    permissions,
 }) => {
+    const defaultPermissions: PermissionSet = {
+        view: true,
+        entry: true,
+        edit: true,
+        delete: true,
+        approve: true,
+        print: true,
+        export: true,
+        full: true,
+    };
+    const perms = permissions || defaultPermissions;
     const [searchTerm, setSearchTerm] = useState('');
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
@@ -328,10 +341,10 @@ const Inventory: React.FC<InventoryProps> = ({
                 e.preventDefault();
                 setCurrentPage(p => p - 1);
                 setSelectedIndex(0);
-            } else if (e.key === 'F2') {
+            } else if (e.key === 'F2' && perms.entry) {
                 e.preventDefault();
                 setIsAddModalOpen(true);
-            } else if (e.key === 'F3') {
+            } else if (e.key === 'F3' && perms.export) {
                 e.preventDefault();
                 setIsExportModalOpen(true);
             } else if (e.key === 'Enter') {
@@ -344,7 +357,7 @@ const Inventory: React.FC<InventoryProps> = ({
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [paginatedItems, selectedIndex, itemToEdit, isAddModalOpen, isExportModalOpen, isColumnSelectorOpen, currentPage, totalPages, detailRowKey]);
+    }, [paginatedItems, selectedIndex, itemToEdit, isAddModalOpen, isExportModalOpen, isColumnSelectorOpen, currentPage, totalPages, detailRowKey, perms.entry, perms.export]);
 
     const isFieldVisible = (fieldId: string) => config?.fields?.[fieldId] !== false;
 
@@ -681,15 +694,17 @@ const Inventory: React.FC<InventoryProps> = ({
                                 PRINT
                             </button>
 
-                            <button
-                                onClick={() => setIsSyncMasterModalOpen(true)}
-                                className="px-4 py-1.5 border border-gray-400 bg-white text-primary font-black uppercase text-xs tracking-widest hover:bg-gray-50 transition-all active:scale-95 shadow-sm"
-                                title="Reconcile inventory rows with Material Master"
-                            >
-                                Sync to Master
-                            </button>
+                            {perms.edit && (
+                                <button
+                                    onClick={() => setIsSyncMasterModalOpen(true)}
+                                    className="px-4 py-1.5 border border-gray-400 bg-white text-primary font-black uppercase text-xs tracking-widest hover:bg-gray-50 transition-all active:scale-95 shadow-sm"
+                                    title="Reconcile inventory rows with Material Master"
+                                >
+                                    Sync to Master
+                                </button>
+                            )}
 
-                            <button onClick={() => setIsAddModalOpen(true)} className="px-4 py-1.5 tally-button-accent text-xs font-black uppercase tracking-widest">F2: ADD INVENTORY</button>
+                            {perms.entry && <button onClick={() => setIsAddModalOpen(true)} className="px-4 py-1.5 tally-button-accent text-xs font-black uppercase tracking-widest">F2: ADD INVENTORY</button>}
                         </div>
                     </div>
 
@@ -806,7 +821,7 @@ const Inventory: React.FC<InventoryProps> = ({
                                                     }}
                                                     className={`font-black uppercase text-[10px] px-2 py-0.5 border transition-all ${isSelected ? 'bg-white text-primary border-white' : 'bg-primary/5 text-primary border-primary/20 group-hover:bg-white group-hover:text-primary group-hover:border-white'}`}
                                                 >
-                                                    Alter
+                                                    {perms.edit ? 'Alter' : 'View'}
                                                 </button>
                                             </td>
                                         </tr>
@@ -887,6 +902,7 @@ const Inventory: React.FC<InventoryProps> = ({
                     addNotification={addNotification}
                     onRefresh={onRefresh}
                     onAddMedicineMaster={onAddMedicineMaster}
+                    isReadOnly={!perms.edit}
                 />
             )}
             {isExportModalOpen && (
@@ -915,6 +931,7 @@ const Inventory: React.FC<InventoryProps> = ({
                 itemName={detailRow?.name || ''}
                 rows={detailRow?.items || []}
                 onSaveRow={onUpdateProduct}
+                allowBatchEdit={perms.edit}
             />
         </main>
     );

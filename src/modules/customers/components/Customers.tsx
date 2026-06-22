@@ -1,4 +1,4 @@
-﻿
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Card from '@core/components/ui/Card';
 import Modal from '@core/components/ui/Modal';
@@ -9,7 +9,7 @@ import PriceListImportModal from '../components/PriceListImportModal';
 import AddCustomerModal from '@modules/customers/components/AddCustomerModal'; 
 import { EditCustomerModal } from '../components/EditCustomerModal'; 
 import ExportCustomersModal from '../components/ExportCustomersModal';
-import type { Customer, RegisteredPharmacy, ModuleConfig, InventoryItem, CustomerPriceListEntry, OrganizationMember } from '@core/types';
+import type { Customer, RegisteredPharmacy, ModuleConfig, InventoryItem, CustomerPriceListEntry, OrganizationMember, PermissionSet } from '@core/types';
 import { downloadCsv, arrayToCsvRow } from '@core/utils/csv';
 import { handleEnterToNextField } from '@core/utils/navigation';
 import { fetchCustomerPriceList, saveCustomerPriceList, fetchInventory } from '@core/services/storageService';
@@ -44,9 +44,22 @@ interface CustomersProps {
     config: ModuleConfig;
     inventory: InventoryItem[];
     defaultCustomerControlGlId?: string;
+    permissions?: PermissionSet;
 }
 
-const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], onAddCustomer, onBulkAddCustomers, onRecordPayment, onUpdateCustomer, onBlockCustomer, onUnblockCustomer, onDeleteCustomer, currentUser, config, inventory, defaultCustomerControlGlId }) => {
+const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], onAddCustomer, onBulkAddCustomers, onRecordPayment, onUpdateCustomer, onBlockCustomer, onUnblockCustomer, onDeleteCustomer, currentUser, config, inventory, defaultCustomerControlGlId, permissions }) => {
+    const defaultPermissions: PermissionSet = {
+        view: true,
+        entry: true,
+        edit: true,
+        delete: true,
+        approve: true,
+        print: true,
+        export: true,
+        full: true,
+    };
+    const perms = permissions || defaultPermissions;
+
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
@@ -70,10 +83,10 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (!shouldHandleScreenShortcut(e, 'customers')) return;
-            if (e.key === 'F2') {
+            if (e.key === 'F2' && perms.entry) {
                 e.preventDefault();
                 setIsAddModalOpen(true);
-            } else if (e.key === 'F3') {
+            } else if (e.key === 'F3' && perms.export) {
                 e.preventDefault();
                 if (filteredCustomers.length > 0) {
                     setIsExportModalOpen(true);
@@ -127,8 +140,8 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
                         ))}
                     </div>
                     <div className="p-3 border-t border-gray-400 bg-gray-50 flex gap-2 flex-shrink-0">
-                        <button onClick={() => setIsAddModalOpen(true)} className="flex-1 py-2 tally-button-primary text-[10px] uppercase">F2: Create</button>
-                        <button onClick={handleExportClick} className="flex-1 py-2 tally-border bg-white font-bold uppercase text-[10px]">F3: Export</button>
+                        {perms.entry && <button onClick={() => setIsAddModalOpen(true)} className="flex-1 py-2 tally-button-primary text-[10px] uppercase">F2: Create</button>}
+                        {perms.export && <button onClick={handleExportClick} className="flex-1 py-2 tally-border bg-white font-bold uppercase text-[10px]">F3: Export</button>}
                     </div>
                 </Card>
 
@@ -146,23 +159,27 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
                                 </div>
                                 <div className="flex gap-2 ml-4 flex-shrink-0">
                                     <button onClick={() => setIsPriceListModalOpen(true)} className="px-4 py-2 tally-border bg-white font-black text-[10px] uppercase shadow-sm">Price List</button>
-                                    <button onClick={() => setIsEditModalOpen(true)} className="px-4 py-2 tally-border bg-white font-black text-[10px] uppercase shadow-sm">Alter</button>
-                                    {(selectedCustomer.is_blocked || selectedCustomer.is_active === false) ? (
-                                        <button onClick={() => { if (window.confirm('Unblock this customer?')) void onUnblockCustomer(selectedCustomer); }} className="px-4 py-2 border border-emerald-700 bg-emerald-50 text-emerald-700 font-black text-[10px] uppercase shadow-sm">Unblock Customer</button>
-                                    ) : (
-                                        <button onClick={() => { if (window.confirm('Block this customer?')) void onBlockCustomer(selectedCustomer); }} className="px-4 py-2 border border-amber-700 bg-amber-50 text-amber-700 font-black text-[10px] uppercase shadow-sm">Block Customer</button>
+                                    <button onClick={() => setIsEditModalOpen(true)} className="px-4 py-2 tally-border bg-white font-black text-[10px] uppercase shadow-sm">{perms.edit ? 'Alter' : 'View'}</button>
+                                    {perms.edit && (
+                                        <>
+                                            {(selectedCustomer.is_blocked || selectedCustomer.is_active === false) ? (
+                                                <button onClick={() => { if (window.confirm('Unblock this customer?')) void onUnblockCustomer(selectedCustomer); }} className="px-4 py-2 border border-emerald-700 bg-emerald-50 text-emerald-700 font-black text-[10px] uppercase shadow-sm">Unblock Customer</button>
+                                            ) : (
+                                                <button onClick={() => { if (window.confirm('Block this customer?')) void onBlockCustomer(selectedCustomer); }} className="px-4 py-2 border border-amber-700 bg-amber-50 text-amber-700 font-black text-[10px] uppercase shadow-sm">Block Customer</button>
+                                            )}
+                                            <button
+                                                onClick={async () => {
+                                                    if (!window.confirm('Delete this customer?')) return;
+                                                    const result = await onDeleteCustomer(selectedCustomer);
+                                                    alert(result.message);
+                                                    if (result.success) setSelectedCustomer(null);
+                                                }}
+                                                className="px-4 py-2 border border-red-700 bg-red-50 text-red-700 font-black text-[10px] uppercase shadow-sm"
+                                            >
+                                                Delete Customer
+                                            </button>
+                                        </>
                                     )}
-                                    <button
-                                        onClick={async () => {
-                                            if (!window.confirm('Delete this customer?')) return;
-                                            const result = await onDeleteCustomer(selectedCustomer);
-                                            alert(result.message);
-                                            if (result.success) setSelectedCustomer(null);
-                                        }}
-                                        className="px-4 py-2 border border-red-700 bg-red-50 text-red-700 font-black text-[10px] uppercase shadow-sm"
-                                    >
-                                        Delete Customer
-                                    </button>
                                 </div>
                             </div>
 
@@ -256,6 +273,7 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
                         config={config}
                         teamMembers={teamMembers}
                         defaultControlGlId={defaultCustomerControlGlId}
+                        isReadOnly={!perms.edit}
                     />
                     <PriceListManagementModal 
                         isOpen={isPriceListModalOpen}

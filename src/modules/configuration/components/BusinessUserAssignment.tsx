@@ -6,7 +6,10 @@ import InviteUserModal from '../components/InviteUserModal';
 import ConfirmModal from '@core/components/ui/ConfirmModal';
 import { RegisteredPharmacy, OrganizationMember, WorkCenter, SoDConflict, BusinessRole } from '@core/types';
 import { addTeamMember, saveData, getData, removeTeamMember } from '@core/services/storageService';
-import { mergePermissionsForRoleIds } from '@core/utils/rbac';
+import { mergePermissionsForRoleIds, RBAC_ACTIONS, RBAC_MODULES } from '@core/utils/rbac';
+
+const DISPLAY_ACTIONS = RBAC_ACTIONS.filter(action => action !== 'approve' && action !== 'delete');
+const DISPLAY_MODULES = RBAC_MODULES.filter(module => module.id !== 'dashboard');
 
 interface BusinessUserAssignmentProps {
     currentUser: RegisteredPharmacy;
@@ -16,40 +19,10 @@ interface BusinessUserAssignmentProps {
     isActive?: boolean;
 }
 
-const DEFAULT_WORK_CENTERS: WorkCenter[] = [
-    {
-        id: 'sales',
-        name: 'Sales & Distribution',
-        views: [
-            { id: 'pos', name: 'POS Billing', assigned: false },
-            { id: 'returns', name: 'Sales Returns', assigned: false },
-            { id: 'history', name: 'Sales History', assigned: false },
-        ]
-    },
-    {
-        id: 'purchasing',
-        name: 'Purchasing',
-        views: [
-            { id: 'pur_entry', name: 'Purchase Entry', assigned: false },
-            { id: 'orders', name: 'Purchase Orders', assigned: false },
-            { id: 'suppliers', name: 'Supplier Management', assigned: false },
-        ]
-    },
-    {
-        id: 'inventory',
-        name: 'Inventory Management',
-        views: [
-            { id: 'inv_list', name: 'Current Inventory', assigned: false },
-            { id: 'audit', name: 'Stock Audit', assigned: false },
-            { id: 'master', name: 'Material Master', assigned: false },
-        ]
-    }
-];
-
 const BusinessUserAssignment: React.FC<BusinessUserAssignmentProps> = ({ currentUser, addNotification, members, onRefresh, isActive }) => {
     const [businessRoles, setBusinessRoles] = useState<BusinessRole[]>([]);
     const [selectedUser, setSelectedUser] = useState<OrganizationMember | null>(null);
-    const [activeTab, setActiveTab] = useState<'general' | 'roles' | 'workcenters' | 'sod'>('general');
+    const [activeTab, setActiveTab] = useState<'general' | 'roles' | 'sod'>('general');
     const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
     const [isLoadingRoles, setIsLoadingRoles] = useState(true);
@@ -165,11 +138,26 @@ const BusinessUserAssignment: React.FC<BusinessUserAssignmentProps> = ({ current
     };
 
     const sodConflicts = useMemo<SoDConflict[]>(() => {
-        if (!selectedUser || !selectedUser.workCenters) return [];
+        if (!selectedUser) return [];
         const conflicts: SoDConflict[] = [];
-        const assignedViews = selectedUser.workCenters.flatMap(wc => wc.views.filter(v => v.assigned).map(v => v.id));
-        
-        if (assignedViews.includes('pur_entry') && assignedViews.includes('audit')) {
+
+        // Check legacy user-level workCenters (if they exist)
+        let hasPurEntry = false;
+        let hasStockAudit = false;
+        if (selectedUser.workCenters) {
+            const assignedViews = selectedUser.workCenters.flatMap(wc => wc.views.filter(v => v.assigned).map(v => v.id));
+            if (assignedViews.includes('pur_entry')) hasPurEntry = true;
+            if (assignedViews.includes('audit')) hasStockAudit = true;
+        }
+
+        // Check assigned business roles (merged permissions)
+        const merged = mergePermissionsForRoleIds(businessRoles, selectedUser.assignedRoles || []);
+        const hasRbacPurEntry = ['automatedPurchaseEntry', 'manualPurchaseEntry', 'manualSupplierInvoice'].some(
+            id => merged[id]?.entry || merged[id]?.edit || merged[id]?.full
+        );
+        const hasRbacStockAudit = merged['physicalInventory']?.entry || merged['physicalInventory']?.edit || merged['physicalInventory']?.full;
+
+        if ((hasPurEntry && hasStockAudit) || (hasRbacPurEntry && hasRbacStockAudit)) {
             conflicts.push({
                 id: '1',
                 viewA: 'Purchase Entry',
@@ -180,7 +168,7 @@ const BusinessUserAssignment: React.FC<BusinessUserAssignmentProps> = ({ current
             });
         }
         return conflicts;
-    }, [selectedUser]);
+    }, [selectedUser, businessRoles]);
 
     // Keyboard Navigation for list
     useEffect(() => {
@@ -304,7 +292,6 @@ const BusinessUserAssignment: React.FC<BusinessUserAssignmentProps> = ({ current
                                 {[
                                     { id: 'general', name: 'Identity Profile' },
                                     { id: 'roles', name: 'Assigned Roles' },
-                                    { id: 'workcenters', name: 'Access Rights' },
                                     { id: 'sod', name: `Compliance Audit ${sodConflicts.length ? `(${sodConflicts.length})` : ''}` },
                                 ].map(tab => (
                                     <button 
@@ -382,53 +369,114 @@ const BusinessUserAssignment: React.FC<BusinessUserAssignmentProps> = ({ current
                                                 </label>
                                             ))}
                                         </div>
-                                        <div className="bg-slate-100 border border-gray-200 p-4">
-                                            <p className="text-[10px] font-black uppercase text-gray-500 mb-2">Merged Effective Permissions (highest permission wins)</p>
-                                            <pre className="text-[10px] overflow-auto max-h-64 whitespace-pre-wrap">{JSON.stringify(mergePermissionsForRoleIds(businessRoles, selectedUser.assignedRoles || []), null, 2)}</pre>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {activeTab === 'workcenters' && (
-                                    <div className="space-y-6 animate-in fade-in duration-200">
-                                        <div className="bg-primary/5 p-4 border-l-4 border-primary rounded-none mb-8">
-                                            <p className="text-[10px] font-black text-primary uppercase tracking-widest leading-relaxed">
-                                                {selectedUser.email === currentUser.email 
-                                                    ? "You are the Super User. Your access matrix is pre-authorized for all organizational nodes." 
-                                                    : "The Rights Matrix defines which screens and actions are visible to this user. As a Super User, you can restrict other staff to specific functional clusters."}
-                                            </p>
-                                        </div>
                                         
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                            {(!selectedUser.workCenters || selectedUser.workCenters.length === 0 ? DEFAULT_WORK_CENTERS : selectedUser.workCenters).map((wc, wcIdx) => (
-                                                <Card key={wc.id} className="p-0 border-2 border-gray-200 bg-white !rounded-none shadow-md">
-                                                    <div className="bg-gray-100 p-3 border-b border-gray-200 flex justify-between items-center">
-                                                        <span className="text-xs font-black uppercase text-primary">{wc.name}</span>
-                                                        <span className="text-[8px] font-black text-gray-400 uppercase tracking-widest">Access Node</span>
+                                        {(() => {
+                                            const mergedPermissions = mergePermissionsForRoleIds(businessRoles, selectedUser.assignedRoles || []);
+                                            const hasAnyPermission = Object.values(mergedPermissions).some(perms => 
+                                                DISPLAY_ACTIONS.some(act => perms[act])
+                                            );
+
+                                            return (
+                                                <div className="bg-white border border-slate-200 shadow-sm p-5 rounded-none">
+                                                    <div className="flex justify-between items-center border-b border-slate-200 pb-3 mb-4">
+                                                        <div>
+                                                            <h4 className="text-xs font-black uppercase tracking-wider text-slate-800">
+                                                                Merged Effective Permissions
+                                                            </h4>
+                                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tight mt-1">
+                                                                Highest permission wins across all assigned roles
+                                                            </p>
+                                                        </div>
+                                                        {selectedUser.assignedRoles?.length ? (
+                                                            <span className="text-[9px] font-black uppercase px-2.5 py-1 bg-blue-50 border border-blue-200 text-blue-700">
+                                                                {selectedUser.assignedRoles.length} Roles Active
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-[9px] font-black uppercase px-2.5 py-1 bg-amber-50 border border-amber-200 text-amber-700">
+                                                                No Roles Assigned
+                                                            </span>
+                                                        )}
                                                     </div>
-                                                    <div className="p-4 space-y-2">
-                                                        {wc.views.map((view, vIdx) => (
-                                                            <div 
-                                                                key={view.id} 
-                                                                onClick={() => {
-                                                                    if (selectedUser.email === currentUser.email) return; // Prevent disabling own access in UI
-                                                                    const currentWc = !selectedUser.workCenters || selectedUser.workCenters.length === 0 ? DEFAULT_WORK_CENTERS : selectedUser.workCenters;
-                                                                    const newWc = JSON.parse(JSON.stringify(currentWc));
-                                                                    newWc[wcIdx].views[vIdx].assigned = !newWc[wcIdx].views[vIdx].assigned;
-                                                                    setSelectedUser({...selectedUser, workCenters: newWc});
-                                                                }}
-                                                                className={`p-3 flex justify-between items-center transition-colors ${view.assigned || selectedUser.email === currentUser.email ? 'bg-primary/5 text-primary border border-primary/10' : 'text-gray-300 border border-transparent'} ${selectedUser.email === currentUser.email ? 'cursor-default' : 'cursor-pointer'}`}
-                                                            >
-                                                                <span className="text-[11px] font-black uppercase">{view.name}</span>
-                                                                <div className={`w-5 h-5 border-2 flex items-center justify-center transition-all ${view.assigned || selectedUser.email === currentUser.email ? 'bg-primary border-primary scale-110 shadow-lg' : 'bg-white border-gray-300'}`}>
-                                                                    {(view.assigned || selectedUser.email === currentUser.email) && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="4"><polyline points="20 6 9 17 4 12"/></svg>}
-                                                                </div>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                </Card>
-                                            ))}
-                                        </div>
+
+                                                    {!hasAnyPermission ? (
+                                                        <div className="text-center py-8 bg-slate-50 border border-dashed border-slate-200">
+                                                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">No permissions active for this configuration</p>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="overflow-x-auto max-h-[450px] custom-scrollbar border border-slate-200">
+                                                            <table className="w-full text-[11px] bg-white border-collapse">
+                                                                <thead className="bg-slate-100 text-slate-700 uppercase font-black tracking-wider text-left border-b border-slate-300 sticky top-0 z-10">
+                                                                    <tr>
+                                                                        <th className="p-3 text-left w-1/3 min-w-[160px]">Module / Sub-Module</th>
+                                                                        {DISPLAY_ACTIONS.map(action => (
+                                                                            <th key={action} className="p-3 text-center uppercase tracking-tighter text-[10px]">
+                                                                                {action}
+                                                                            </th>
+                                                                        ))}
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody className="divide-y divide-slate-100">
+                                                                    {DISPLAY_MODULES.map(module => {
+                                                                        const modulePerms = mergedPermissions[module.id] || {};
+                                                                        const hasAnyModulePerm = DISPLAY_ACTIONS.some(act => modulePerms[act]);
+                                                                        
+                                                                        return (
+                                                                            <React.Fragment key={module.id}>
+                                                                                <tr className={`border-t border-slate-200 ${hasAnyModulePerm ? 'bg-slate-50/70 font-black text-slate-900' : 'bg-slate-50/20 text-slate-400'}`}>
+                                                                                    <td className="p-3 uppercase font-extrabold flex items-center gap-1.5">
+                                                                                        <span>{module.name}</span>
+                                                                                    </td>
+                                                                                    {DISPLAY_ACTIONS.map(action => {
+                                                                                        const isAllowed = !!modulePerms[action];
+                                                                                        return (
+                                                                                            <td key={`${module.id}-${action}`} className="p-3 text-center">
+                                                                                                {isAllowed ? (
+                                                                                                    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 font-extrabold text-[10px]">
+                                                                                                        ✓
+                                                                                                    </span>
+                                                                                                ) : (
+                                                                                                    <span className="text-slate-300 font-normal">—</span>
+                                                                                                )}
+                                                                                            </td>
+                                                                                        );
+                                                                                    })}
+                                                                                </tr>
+                                                                                {(module.children || []).map(child => {
+                                                                                    const childPerms = mergedPermissions[child.id] || {};
+                                                                                    const hasAnyChildPerm = DISPLAY_ACTIONS.some(act => childPerms[act]);
+                                                                                    
+                                                                                    return (
+                                                                                        <tr key={child.id} className={`border-t border-slate-100 hover:bg-slate-50/30 ${hasAnyChildPerm ? 'text-slate-800 font-bold' : 'text-slate-400'}`}>
+                                                                                            <td className="p-3 pl-8 uppercase tracking-tight text-slate-600">
+                                                                                                {child.name}
+                                                                                            </td>
+                                                                                            {DISPLAY_ACTIONS.map(action => {
+                                                                                                const isAllowed = !!childPerms[action];
+                                                                                                return (
+                                                                                                    <td key={`${child.id}-${action}`} className="p-3 text-center">
+                                                                                                        {isAllowed ? (
+                                                                                                            <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-50 text-emerald-600 font-bold text-[10px]">
+                                                                                                                ✓
+                                                                                                            </span>
+                                                                                                        ) : (
+                                                                                                            <span className="text-slate-200 font-normal">—</span>
+                                                                                                        )}
+                                                                                                    </td>
+                                                                                                );
+                                                                                            })}
+                                                                                        </tr>
+                                                                                    );
+                                                                                })}
+                                                                            </React.Fragment>
+                                                                        );
+                                                                    })}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })()}
                                     </div>
                                 )}
 

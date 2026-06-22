@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Modal from '@core/components/ui/Modal';
 import ConfirmModal from '@core/components/ui/ConfirmModal';
 import type { Supplier } from '@core/types';
@@ -329,7 +329,8 @@ export const EditSupplierModal: React.FC<{
     onSave: (supplier: Supplier) => void;
     supplier: Supplier;
     defaultControlGlId?: string;
-}> = ({ isOpen, onClose, onSave, supplier, defaultControlGlId }) => {
+    isReadOnly?: boolean;
+}> = ({ isOpen, onClose, onSave, supplier, defaultControlGlId, isReadOnly = false }) => {
     const [form, setForm] = useState<Supplier>(() => ({
         ...supplier,
         payment_details: { 
@@ -374,6 +375,7 @@ export const EditSupplierModal: React.FC<{
     }, [isOpen, supplier, defaultControlGlId]);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+        if (isReadOnly) return;
         const { name, value, type } = e.target;
         
         if (name.startsWith('payment_details.')) {
@@ -412,6 +414,7 @@ export const EditSupplierModal: React.FC<{
     };
 
     const handleSubmit = () => {
+        if (isReadOnly) return;
         if (!form.name.trim()) {
             alert('Supplier Name is mandatory.');
             return;
@@ -425,28 +428,28 @@ export const EditSupplierModal: React.FC<{
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title={`Alter Supplier: ${supplier.name}`} widthClass="max-w-4xl">
+        <Modal isOpen={isOpen} onClose={onClose} title={isReadOnly ? `View Supplier: ${supplier.name}` : `Alter Supplier: ${supplier.name}`} widthClass="max-w-4xl">
             <div className="p-6 overflow-y-auto max-h-[75vh] space-y-6" onKeyDown={handleEnterToNextField}>
                 <section className="space-y-4">
                     <h4 className="text-[11px] font-black text-primary uppercase tracking-[0.2em] border-b border-gray-200 pb-1 mb-4">Core Identity</h4>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="md:col-span-2">
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Supplier Trade Name *</label>
-                            <input type="text" name="name" value={form.name} onChange={handleChange} autoFocus className="w-full border border-gray-400 p-2 font-bold text-sm uppercase focus:bg-yellow-50 outline-none" placeholder="e.g. GLOBAL PHARMA DISTRIBUTORS" />
+                            <input type="text" name="name" value={form.name} onChange={handleChange} disabled={isReadOnly} autoFocus className="w-full border border-gray-400 p-2 font-bold text-sm uppercase focus:bg-yellow-50 outline-none disabled:bg-gray-100" placeholder="e.g. GLOBAL PHARMA DISTRIBUTORS" />
                         </div>
                         <div>
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Contact Person</label>
-                            <input type="text" name="contact_person" value={form.contact_person || ''} onChange={handleChange} className="w-full border border-gray-400 p-2 font-bold text-sm uppercase focus:bg-yellow-50 outline-none" />
+                            <input type="text" name="contact_person" value={form.contact_person || ''} onChange={handleChange} disabled={isReadOnly} className="w-full border border-gray-400 p-2 font-bold text-sm uppercase focus:bg-yellow-50 outline-none disabled:bg-gray-100" />
                         </div>
                         <div>
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Supplier Category</label>
-                            <select name="category" value={form.category} onChange={handleChange} className="w-full border border-gray-400 p-2 font-bold text-sm focus:bg-yellow-50 outline-none">
+                            <select name="category" value={form.category} onChange={handleChange} disabled={isReadOnly} className="w-full border border-gray-400 p-2 font-bold text-sm focus:bg-yellow-50 outline-none disabled:bg-gray-100">
                                 {supplierCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
                             </select>
                         </div>
                         <div>
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Supplier Group *</label>
-                            <select name="supplier_group" value={form.supplier_group || 'Sundry Creditors'} onChange={handleChange} className="w-full border border-gray-400 p-2 font-bold text-sm focus:bg-yellow-50 outline-none">
+                            <select name="supplier_group" value={form.supplier_group || 'Sundry Creditors'} onChange={handleChange} disabled={isReadOnly} className="w-full border border-gray-400 p-2 font-bold text-sm focus:bg-yellow-50 outline-none disabled:bg-gray-100">
                                 {supplierGroupOptions.map(group => <option key={group} value={group}>{group}</option>)}
                             </select>
                         </div>
@@ -459,8 +462,9 @@ export const EditSupplierModal: React.FC<{
                             <select
                                 name="is_blocked"
                                 value={form.is_blocked ? 'blocked' : 'active'}
-                                onChange={(e) => setForm(prev => ({ ...prev, is_blocked: e.target.value === 'blocked', is_active: e.target.value !== 'blocked' }))}
-                                className="w-full border border-gray-400 p-2 font-bold text-sm focus:bg-yellow-50 outline-none"
+                                onChange={(e) => { if (isReadOnly) return; setForm(prev => ({ ...prev, is_blocked: e.target.value === 'blocked', is_active: e.target.value !== 'blocked' })); }}
+                                disabled={isReadOnly}
+                                className="w-full border border-gray-400 p-2 font-bold text-sm focus:bg-yellow-50 outline-none disabled:bg-gray-100"
                             >
                                 <option value="active">Active</option>
                                 <option value="blocked">Blocked</option>
@@ -474,19 +478,19 @@ export const EditSupplierModal: React.FC<{
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Office Phone</label>
-                            <input type="text" name="phone" value={form.phone || ''} onChange={handleChange} className="w-full border border-gray-400 p-2 font-bold text-sm focus:bg-yellow-50 outline-none" />
+                            <input type="text" name="phone" value={form.phone || ''} onChange={handleChange} disabled={isReadOnly} className="w-full border border-gray-400 p-2 font-bold text-sm focus:bg-yellow-50 outline-none disabled:bg-gray-100" />
                         </div>
                         <div>
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Mobile No.</label>
-                            <input type="text" name="mobile" value={form.mobile || ''} onChange={handleChange} className="w-full border border-gray-400 p-2 font-bold text-sm focus:bg-yellow-50 outline-none" />
+                            <input type="text" name="mobile" value={form.mobile || ''} onChange={handleChange} disabled={isReadOnly} className="w-full border border-gray-400 p-2 font-bold text-sm focus:bg-yellow-50 outline-none disabled:bg-gray-100" />
                         </div>
                         <div>
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Email ID</label>
-                            <input type="email" name="email" value={form.email || ''} onChange={handleChange} className="w-full border border-gray-400 p-2 font-bold text-sm focus:bg-yellow-50 outline-none" />
+                            <input type="email" name="email" value={form.email || ''} onChange={handleChange} disabled={isReadOnly} className="w-full border border-gray-400 p-2 font-bold text-sm focus:bg-yellow-50 outline-none disabled:bg-gray-100" />
                         </div>
                         <div>
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">GSTIN</label>
-                            <input type="text" name="gst_number" value={form.gst_number || ''} onChange={handleChange} className="w-full border border-gray-400 p-2 font-bold text-sm uppercase focus:bg-yellow-50 outline-none" />
+                            <input type="text" name="gst_number" value={form.gst_number || ''} onChange={handleChange} disabled={isReadOnly} className="w-full border border-gray-400 p-2 font-bold text-sm uppercase focus:bg-yellow-50 outline-none disabled:bg-gray-100" />
                         </div>
                     </div>
                 </section>
@@ -496,11 +500,11 @@ export const EditSupplierModal: React.FC<{
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Drug License No.</label>
-                            <input type="text" name="drug_license" value={form.drug_license || ''} onChange={handleChange} className="w-full border border-gray-400 p-2 font-bold text-sm uppercase focus:bg-yellow-50 outline-none" />
+                            <input type="text" name="drug_license" value={form.drug_license || ''} onChange={handleChange} disabled={isReadOnly} className="w-full border border-gray-400 p-2 font-bold text-sm uppercase focus:bg-yellow-50 outline-none disabled:bg-gray-100" />
                         </div>
                         <div>
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Food License No.</label>
-                            <input type="text" name="food_license" value={form.food_license || ''} onChange={handleChange} className="w-full border border-gray-400 p-2 font-bold text-sm uppercase focus:bg-yellow-50 outline-none" />
+                            <input type="text" name="food_license" value={form.food_license || ''} onChange={handleChange} disabled={isReadOnly} className="w-full border border-gray-400 p-2 font-bold text-sm uppercase focus:bg-yellow-50 outline-none disabled:bg-gray-100" />
                         </div>
                     </div>
                 </section>
@@ -510,32 +514,32 @@ export const EditSupplierModal: React.FC<{
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="md:col-span-2">
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Address Line 1</label>
-                            <input type="text" name="address_line1" value={form.address_line1 || form.address || ''} onChange={handleChange} className="w-full border border-gray-400 p-2 font-bold text-sm uppercase focus:bg-yellow-50 outline-none" />
+                            <input type="text" name="address_line1" value={form.address_line1 || form.address || ''} onChange={handleChange} disabled={isReadOnly} className="w-full border border-gray-400 p-2 font-bold text-sm uppercase focus:bg-yellow-50 outline-none disabled:bg-gray-100" />
                         </div>
                         <div className="md:col-span-2">
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Address Line 2</label>
-                            <input type="text" name="address_line2" value={form.address_line2 || ''} onChange={handleChange} className="w-full border border-gray-400 p-2 font-bold text-sm uppercase focus:bg-yellow-50 outline-none" />
+                            <input type="text" name="address_line2" value={form.address_line2 || ''} onChange={handleChange} disabled={isReadOnly} className="w-full border border-gray-400 p-2 font-bold text-sm uppercase focus:bg-yellow-50 outline-none disabled:bg-gray-100" />
                         </div>
                         <div>
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Area / Locality</label>
-                            <input type="text" name="area" value={form.area || ''} onChange={handleChange} className="w-full border border-gray-400 p-2 font-bold text-sm uppercase focus:bg-yellow-50 outline-none" />
+                            <input type="text" name="area" value={form.area || ''} onChange={handleChange} disabled={isReadOnly} className="w-full border border-gray-400 p-2 font-bold text-sm uppercase focus:bg-yellow-50 outline-none disabled:bg-gray-100" />
                         </div>
                         <div>
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1 flex items-center">Pincode
                                 {isPincodeLoading && <svg className="animate-spin ml-2 h-3 w-3 text-primary" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>}
                             </label>
-                            <input type="text" name="pincode" value={form.pincode || ''} onChange={handleChange} className="w-full border border-gray-400 p-2 font-bold text-sm focus:bg-yellow-50 outline-none" />
+                            <input type="text" name="pincode" value={form.pincode || ''} onChange={handleChange} disabled={isReadOnly} className="w-full border border-gray-400 p-2 font-bold text-sm focus:bg-yellow-50 outline-none disabled:bg-gray-100" />
                         </div>
                         <div>
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">District</label>
-                            <select name="district" value={form.district || ''} onChange={handleChange} disabled={!form.state} className="w-full border border-gray-400 p-2 font-bold text-sm focus:bg-yellow-50 outline-none disabled:bg-gray-100">
+                            <select name="district" value={form.district || ''} onChange={handleChange} disabled={isReadOnly || !form.state} className="w-full border border-gray-400 p-2 font-bold text-sm focus:bg-yellow-50 outline-none disabled:bg-gray-100">
                                 <option value="">Select District</option>
                                 {form.state && STATE_DISTRICT_MAP[form.state]?.map(d => <option key={d} value={d}>{d}</option>)}
                             </select>
                         </div>
                         <div>
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">State</label>
-                            <select name="state" value={form.state || ''} onChange={handleChange} className="w-full border border-gray-400 p-2 font-bold text-sm focus:bg-yellow-50 outline-none">
+                            <select name="state" value={form.state || ''} onChange={handleChange} disabled={isReadOnly} className="w-full border border-gray-400 p-2 font-bold text-sm focus:bg-yellow-50 outline-none disabled:bg-gray-100">
                                 <option value="">Select State</option>
                                 {states.map(s => <option key={s} value={s}>{s}</option>)}
                             </select>
@@ -548,19 +552,19 @@ export const EditSupplierModal: React.FC<{
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">UPI ID for QR</label>
-                            <input type="text" name="payment_details.upi_id" value={form.payment_details?.upi_id || ''} onChange={handleChange} placeholder="e.g. supplier@upi" className="w-full border border-gray-400 p-2 font-bold text-sm focus:bg-yellow-50 outline-none" />
+                            <input type="text" name="payment_details.upi_id" value={form.payment_details?.upi_id || ''} onChange={handleChange} disabled={isReadOnly} placeholder="e.g. supplier@upi" className="w-full border border-gray-400 p-2 font-bold text-sm focus:bg-yellow-50 outline-none disabled:bg-gray-100" />
                         </div>
                         <div>
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Bank Name</label>
-                            <input type="text" name="payment_details.bank_name" value={form.payment_details?.bank_name || ''} onChange={handleChange} className="w-full border border-gray-400 p-2 font-bold text-sm focus:bg-yellow-50 outline-none" />
+                            <input type="text" name="payment_details.bank_name" value={form.payment_details?.bank_name || ''} onChange={handleChange} disabled={isReadOnly} className="w-full border border-gray-400 p-2 font-bold text-sm focus:bg-yellow-50 outline-none disabled:bg-gray-100" />
                         </div>
                         <div>
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">A/c Number</label>
-                            <input type="text" name="payment_details.account_number" value={form.payment_details?.account_number || ''} onChange={handleChange} className="w-full border border-gray-400 p-2 font-bold text-sm focus:bg-yellow-50 outline-none" />
+                            <input type="text" name="payment_details.account_number" value={form.payment_details?.account_number || ''} onChange={handleChange} disabled={isReadOnly} className="w-full border border-gray-400 p-2 font-bold text-sm focus:bg-yellow-50 outline-none disabled:bg-gray-100" />
                         </div>
                         <div>
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">IFSC Code</label>
-                            <input type="text" name="payment_details.ifsc_code" value={form.payment_details?.ifsc_code || ''} onChange={handleChange} className="w-full border border-gray-400 p-2 font-bold text-sm uppercase focus:bg-yellow-50 outline-none" />
+                            <input type="text" name="payment_details.ifsc_code" value={form.payment_details?.ifsc_code || ''} onChange={handleChange} disabled={isReadOnly} className="w-full border border-gray-400 p-2 font-bold text-sm uppercase focus:bg-yellow-50 outline-none disabled:bg-gray-100" />
                         </div>
                     </div>
                 </section>
@@ -570,18 +574,18 @@ export const EditSupplierModal: React.FC<{
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Opening Amount (₹)</label>
-                            <input type="number" name="opening_balance" value={form.opening_balance || 0} onChange={handleChange} className="w-full border border-gray-400 p-2 font-black text-base text-red-700 outline-none focus:bg-yellow-50" />
+                            <input type="number" name="opening_balance" value={form.opening_balance || 0} onChange={handleChange} disabled={isReadOnly} className="w-full border border-gray-400 p-2 font-black text-base text-red-700 outline-none focus:bg-yellow-50 disabled:bg-gray-100" />
                         </div>
                         <div>
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Opening Date</label>
-                            <input type="date" value={asOfDate} onChange={e => setAsOfDate(e.target.value)} className="w-full border border-gray-400 p-2 font-bold text-sm outline-none" />
+                            <input type="date" value={asOfDate} onChange={e => { if (isReadOnly) return; setAsOfDate(e.target.value); }} disabled={isReadOnly} className="w-full border border-gray-400 p-2 font-bold text-sm outline-none disabled:bg-gray-100" />
                         </div>
                     </div>
                 </section>
             </div>
             <div className="flex justify-end p-5 bg-gray-100 border-t border-gray-300 gap-3">
-                <button onClick={onClose} className="px-6 py-2 text-[10px] font-black uppercase border border-gray-400 bg-white hover:bg-red-50 text-red-600 transition-colors">Cancel</button>
-                <button onClick={handleSubmit} className="px-14 py-2 tally-button-primary shadow-xl tracking-widest text-[11px]">Update Ledger</button>
+                <button onClick={onClose} className={`px-6 py-2 text-[10px] font-black uppercase border border-gray-400 bg-white transition-colors ${isReadOnly ? 'hover:bg-gray-50 text-gray-700' : 'hover:bg-red-50 text-red-600'}`}>{isReadOnly ? 'Close' : 'Cancel'}</button>
+                {!isReadOnly && <button onClick={handleSubmit} className="px-14 py-2 tally-button-primary shadow-xl tracking-widest text-[11px]">Update Ledger</button>}
             </div>
         </Modal>
     );

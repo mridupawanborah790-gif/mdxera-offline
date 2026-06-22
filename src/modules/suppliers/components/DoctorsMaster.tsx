@@ -1,13 +1,14 @@
-﻿import React, { useMemo, useState, useRef, useEffect } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import Card from '@core/components/ui/Card';
 import Modal from '@core/components/ui/Modal';
-import type { DoctorMaster } from '@core/types';
+import type { DoctorMaster, PermissionSet } from '@core/types';
 import { fuzzyMatch } from '@core/utils/search';
 
 interface DoctorsMasterProps {
   doctors: DoctorMaster[];
   onSaveDoctor: (doctor: DoctorMaster, isUpdate: boolean) => Promise<void>;
   onToggleDoctorStatus: (doctor: DoctorMaster, nextActive: boolean) => Promise<void>;
+  permissions?: PermissionSet;
 }
 
 const emptyDoctor: DoctorMaster = {
@@ -31,7 +32,19 @@ const emptyDoctor: DoctorMaster = {
   notes: '',
 };
 
-const DoctorsMaster: React.FC<DoctorsMasterProps> = ({ doctors, onSaveDoctor, onToggleDoctorStatus }) => {
+const DoctorsMaster: React.FC<DoctorsMasterProps> = ({ doctors, onSaveDoctor, onToggleDoctorStatus, permissions }) => {
+  const defaultPermissions: PermissionSet = {
+    view: true,
+    entry: true,
+    edit: true,
+    delete: true,
+    approve: true,
+    print: true,
+    export: true,
+    full: true,
+  };
+  const perms = permissions || defaultPermissions;
+
   const [searchTerm, setSearchTerm] = useState('');
   const [specializationFilter, setSpecializationFilter] = useState('');
   const [activeOnly, setActiveOnly] = useState(true);
@@ -100,6 +113,8 @@ const DoctorsMaster: React.FC<DoctorsMasterProps> = ({ doctors, onSaveDoctor, on
     }
   };
 
+  const isReadOnly = selectedDoctor ? !perms.edit : !perms.entry;
+
   return (
     <main className="flex-1 overflow-hidden flex flex-col page-fade-in bg-app-bg">
       {/* Tally Style Header */}
@@ -129,9 +144,11 @@ const DoctorsMaster: React.FC<DoctorsMasterProps> = ({ doctors, onSaveDoctor, on
             <input type="checkbox" checked={activeOnly} onChange={e => setActiveOnly(e.target.checked)} className="w-4 h-4" />
             Active only
           </label>
-          <button onClick={openCreateModal} className="h-9 bg-primary text-white text-xs font-black uppercase hover:bg-primary-dark transition-colors shadow-sm">
-            + Add Doctor
-          </button>
+          {perms.entry && (
+            <button onClick={openCreateModal} className="h-9 bg-primary text-white text-xs font-black uppercase hover:bg-primary-dark transition-colors shadow-sm">
+              + Add Doctor
+            </button>
+          )}
         </Card>
 
         {/* Data Table Card */}
@@ -162,13 +179,15 @@ const DoctorsMaster: React.FC<DoctorsMasterProps> = ({ doctors, onSaveDoctor, on
                         </span>
                       </td>
                       <td className="p-2.5 text-right space-x-1">
-                        <button onClick={() => openEditModal(doc)} className="px-2 py-1 border border-gray-400 font-black text-[9px] uppercase hover:bg-primary hover:text-white transition-all">Edit</button>
-                        <button
-                          onClick={() => onToggleDoctorStatus(doc, doc.is_active === false)}
-                          className={`px-2 py-1 border border-gray-400 font-black text-[9px] uppercase transition-all ${doc.is_active === false ? 'hover:bg-emerald-600' : 'hover:bg-red-600'} hover:text-white`}
-                        >
-                          {doc.is_active === false ? 'Enable' : 'Disable'}
-                        </button>
+                        <button onClick={() => openEditModal(doc)} className="px-2 py-1 border border-gray-400 font-black text-[9px] uppercase hover:bg-primary hover:text-white transition-all">{perms.edit ? 'Edit' : 'View'}</button>
+                        {perms.edit && (
+                          <button
+                            onClick={() => onToggleDoctorStatus(doc, doc.is_active === false)}
+                            className={`px-2 py-1 border border-gray-400 font-black text-[9px] uppercase transition-all ${doc.is_active === false ? 'hover:bg-emerald-600' : 'hover:bg-red-600'} hover:text-white`}
+                          >
+                            {doc.is_active === false ? 'Enable' : 'Disable'}
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -188,7 +207,7 @@ const DoctorsMaster: React.FC<DoctorsMasterProps> = ({ doctors, onSaveDoctor, on
         <Modal 
           isOpen={isModalOpen} 
           onClose={() => setIsModalOpen(false)} 
-          title={selectedDoctor ? 'Edit Doctor Details' : 'Register New Doctor'}
+          title={isReadOnly ? 'View Doctor Details' : (selectedDoctor ? 'Edit Doctor Details' : 'Register New Doctor')}
           widthClass="max-w-2xl"
         >
           <div className="flex flex-col h-full max-h-[70vh]">
@@ -216,8 +235,9 @@ const DoctorsMaster: React.FC<DoctorsMasterProps> = ({ doctors, onSaveDoctor, on
                       ref={key === 'name' ? nameInputRef : null}
                       type={type}
                       value={String((formState as any)[key] || '')}
-                      onChange={e => setFormState(prev => ({ ...prev, [key]: e.target.value }))}
-                      className="w-full h-9 border border-gray-400 p-2 text-xs font-bold uppercase outline-none focus:bg-yellow-50 focus:border-primary transition-colors"
+                      onChange={e => { if (isReadOnly) return; setFormState(prev => ({ ...prev, [key]: e.target.value })); }}
+                      disabled={isReadOnly}
+                      className="w-full h-9 border border-gray-400 p-2 text-xs font-bold uppercase outline-none focus:bg-yellow-50 focus:border-primary transition-colors disabled:bg-gray-100"
                     />
                   </div>
                 ))}
@@ -226,8 +246,9 @@ const DoctorsMaster: React.FC<DoctorsMasterProps> = ({ doctors, onSaveDoctor, on
                   <input
                     type="number"
                     value={formState.commissionPercent || 0}
-                    onChange={e => setFormState(prev => ({ ...prev, commissionPercent: Number(e.target.value || 0) }))}
-                    className="w-full h-9 border border-gray-400 p-2 text-xs font-bold uppercase outline-none focus:bg-yellow-50 focus:border-primary transition-colors"
+                    onChange={e => { if (isReadOnly) return; setFormState(prev => ({ ...prev, commissionPercent: Number(e.target.value || 0) })); }}
+                    disabled={isReadOnly}
+                    className="w-full h-9 border border-gray-400 p-2 text-xs font-bold uppercase outline-none focus:bg-yellow-50 focus:border-primary transition-colors disabled:bg-gray-100"
                   />
                 </div>
                 <div className="flex items-center gap-2 pt-5">
@@ -235,7 +256,8 @@ const DoctorsMaster: React.FC<DoctorsMasterProps> = ({ doctors, onSaveDoctor, on
                     id="isActiveCheck"
                     type="checkbox"
                     checked={formState.is_active !== false}
-                    onChange={e => setFormState(prev => ({ ...prev, is_active: e.target.checked }))}
+                    onChange={e => { if (isReadOnly) return; setFormState(prev => ({ ...prev, is_active: e.target.checked })); }}
+                    disabled={isReadOnly}
                     className="w-5 h-5 cursor-pointer"
                   />
                   <label htmlFor="isActiveCheck" className="font-black uppercase text-[10px] cursor-pointer select-none text-gray-700">Is Active Status</label>
@@ -244,8 +266,9 @@ const DoctorsMaster: React.FC<DoctorsMasterProps> = ({ doctors, onSaveDoctor, on
                   <label className="block mb-1 font-black uppercase text-[10px] text-gray-500 tracking-tighter">Internal Notes</label>
                   <textarea
                     value={formState.notes || ''}
-                    onChange={e => setFormState(prev => ({ ...prev, notes: e.target.value }))}
-                    className="w-full h-20 border border-gray-400 p-2 text-xs font-bold uppercase outline-none focus:bg-yellow-50 focus:border-primary transition-colors resize-none"
+                    onChange={e => { if (isReadOnly) return; setFormState(prev => ({ ...prev, notes: e.target.value })); }}
+                    disabled={isReadOnly}
+                    className="w-full h-20 border border-gray-400 p-2 text-xs font-bold uppercase outline-none focus:bg-yellow-50 focus:border-primary transition-colors resize-none disabled:bg-gray-100"
                   />
                 </div>
               </div>
@@ -257,16 +280,18 @@ const DoctorsMaster: React.FC<DoctorsMasterProps> = ({ doctors, onSaveDoctor, on
                 onClick={() => setIsModalOpen(false)} 
                 className="px-6 py-2 border-2 border-gray-400 text-xs font-black uppercase hover:bg-gray-100 transition-colors"
               >
-                Cancel
+                {isReadOnly ? 'Close' : 'Cancel'}
               </button>
-              <button 
-                onClick={handleSave} 
-                disabled={isSaving}
-                className="px-8 py-2 bg-primary text-white text-xs font-black uppercase hover:bg-primary-dark transition-all shadow-md disabled:opacity-50 flex items-center gap-2"
-              >
-                {isSaving && <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>}
-                {selectedDoctor ? 'Update (Ctrl+S)' : 'Save (Enter)'}
-              </button>
+              {!isReadOnly && (
+                <button 
+                  onClick={handleSave} 
+                  disabled={isSaving}
+                  className="px-8 py-2 bg-primary text-white text-xs font-black uppercase hover:bg-primary-dark transition-all shadow-md disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isSaving && <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>}
+                  {selectedDoctor ? 'Update (Ctrl+S)' : 'Save (Enter)'}
+                </button>
+              )}
             </div>
           </div>
         </Modal>

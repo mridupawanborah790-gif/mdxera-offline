@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Modal from '@core/components/ui/Modal';
 import type { InventoryItem, Medicine, RegisteredPharmacy } from '@core/types';
 import { renderBarcode, generateRandomBarcode } from '@core/utils/barcode';
@@ -28,6 +28,7 @@ interface EditProductModalProps {
     /** Bound to App.handleAddMedicineMaster — creates the master and
      *  auto-links sibling inventory rows by name+brand. */
     onAddMedicineMaster?: (med: Omit<Medicine, 'id'>) => Promise<Medicine | void> | Medicine | void;
+    isReadOnly?: boolean;
 }
 
 const matrixRowTextStyle = "text-2xl font-normal tracking-tight uppercase leading-tight";
@@ -48,6 +49,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
     addNotification,
     onRefresh,
     onAddMedicineMaster,
+    isReadOnly = false,
 }) => {
     const [product, setProduct] = useState<InventoryItem | null>(null);
     const [expiryDisplay, setExpiryDisplay] = useState('');
@@ -131,6 +133,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
     if (!isOpen || !product) return null;
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+        if (isReadOnly) return;
         const { name, value, type } = e.target;
         
         if (name === 'expiry') {
@@ -174,7 +177,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
     };
 
     const handleSave = () => {
-        if (!product) return;
+        if (isReadOnly || !product) return;
         // If a Material Master exists for this name+brand but no code is set
         // on the inventory row, stamp it now so the link actually persists.
         const codeToSave = (product.code || '').trim();
@@ -197,14 +200,14 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
         }
     };
 
-
-    const canLinkToMaster = !linkedMaster && !!currentUser && !!onAddMedicineMaster;
+    const canLinkToMaster = !linkedMaster && !!currentUser && !!onAddMedicineMaster && !isReadOnly;
 
     const unitsPerPack = resolveUnitsPerStrip(product.unitsPerPack, product.packType);
     const isLiquidOrWeight = isLiquidOrWeightPack(product.packType);
     const stockBreakup = getStockBreakup(product.stock, unitsPerPack, product.packType);
 
     const handleStockBreakupChange = (field: 'pack' | 'loose', value: string) => {
+        if (isReadOnly) return;
         const numericValue = Math.max(0, Math.floor(Number(value || 0)));
         const nextPack = field === 'pack' ? numericValue : stockBreakup.pack;
         const nextLoose = field === 'loose' ? numericValue : stockBreakup.loose;
@@ -213,7 +216,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title={`Alter Inventory: ${product.name}`} widthClass="max-w-5xl">
+        <Modal isOpen={isOpen} onClose={onClose} title={isReadOnly ? `View Inventory: ${product.name}` : `Alter Inventory: ${product.name}`} widthClass="max-w-5xl">
             <div className="flex flex-col h-full bg-white dark:bg-zinc-950 overflow-hidden" onKeyDown={handleKeyDown}>
                 {/* Navigation Bar */}
                 {(onNext || onPrevious) && (
@@ -283,11 +286,11 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
                             <div className="grid grid-cols-2 gap-6">
                                 <div>
                                     <label className="block text-[10px] font-black uppercase text-gray-400 tracking-widest mb-1.5 ml-1">Brand / MFR</label>
-                                    <input name="brand" value={product.brand || ''} onChange={handleChange} className="w-full tally-input" />
+                                    <input name="brand" value={product.brand || ''} onChange={handleChange} disabled={isReadOnly} className="w-full tally-input disabled:bg-gray-100 disabled:opacity-60" />
                                 </div>
                                 <div>
                                     <label className="block text-[10px] font-black uppercase text-gray-400 tracking-widest mb-1.5 ml-1">Category</label>
-                                    <input name="category" value={product.category || ''} onChange={handleChange} className="w-full tally-input" />
+                                    <input name="category" value={product.category || ''} onChange={handleChange} disabled={isReadOnly} className="w-full tally-input disabled:bg-gray-100 disabled:opacity-60" />
                                 </div>
                             </div>
                         </div>
@@ -296,7 +299,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
                                 <svg ref={barcodeRef} className="w-full h-16"></svg>
                             </div>
                             <div className="flex gap-2 w-full">
-                                <button onClick={() => setProduct(prev => prev ? ({...prev, barcode: generateRandomBarcode()}) : null)} className="flex-1 py-1.5 text-[9px] font-black uppercase border border-gray-400 hover:bg-gray-50">Generate</button>
+                                {!isReadOnly && <button onClick={() => setProduct(prev => prev ? ({...prev, barcode: generateRandomBarcode()}) : null)} className="flex-1 py-1.5 text-[9px] font-black uppercase border border-gray-400 hover:bg-gray-50">Generate</button>}
                                 <button onClick={() => onPrintBarcodeClick?.(product)} className="flex-1 py-1.5 text-[9px] font-black uppercase bg-primary text-white hover:bg-primary-dark">Print Labels</button>
                             </div>
                         </div>
@@ -306,11 +309,11 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
                         <div className="bg-primary/5 p-4 border border-primary/10">
                             <label className="block text-[10px] font-black uppercase text-primary tracking-widest mb-2">Batch Number</label>
-                            <input name="batch" value={product.batch} onChange={handleChange} className="w-full tally-input font-mono !text-lg uppercase" />
+                            <input name="batch" value={product.batch} onChange={handleChange} disabled={isReadOnly} className="w-full tally-input font-mono !text-lg uppercase disabled:bg-gray-100 disabled:opacity-60" />
                         </div>
                         <div className="bg-red-50 p-4 border border-red-100">
                             <label className="block text-[10px] font-black uppercase text-red-600 tracking-widest mb-2">Expiry (MM/YY)</label>
-                            <input name="expiry" value={expiryDisplay} onChange={handleChange} maxLength={5} placeholder="MM/YY" className="w-full tally-input !text-lg !text-red-700" />
+                            <input name="expiry" value={expiryDisplay} onChange={handleChange} maxLength={5} placeholder="MM/YY" disabled={isReadOnly} className="w-full tally-input !text-lg !text-red-700 disabled:bg-gray-100 disabled:opacity-60" />
                         </div>
                         <div className="bg-emerald-50 p-4 border border-emerald-100 md:col-span-2">
                             <label className="block text-[10px] font-black uppercase text-emerald-700 tracking-widest mb-2">Current Stock Breakup</label>
@@ -322,7 +325,8 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
                                         min={0}
                                         value={stockBreakup.pack}
                                         onChange={(e) => handleStockBreakupChange('pack', e.target.value)}
-                                        className="w-full tally-input !text-lg !text-emerald-800"
+                                        disabled={isReadOnly}
+                                        className="w-full tally-input !text-lg !text-emerald-800 disabled:opacity-60 disabled:cursor-not-allowed"
                                     />
                                 </div>
                                 <div>
@@ -332,7 +336,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
                                             min={0}
                                             value={stockBreakup.loose}
                                             onChange={(e) => handleStockBreakupChange('loose', e.target.value)}
-                                            disabled={isLiquidOrWeight}
+                                            disabled={isReadOnly || isLiquidOrWeight}
                                             className="w-full tally-input !text-lg !text-emerald-800 disabled:opacity-60 disabled:cursor-not-allowed"
                                         />
                                     </div>
@@ -348,7 +352,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
                         </div>
                         <div className="bg-gray-100 p-4 border border-gray-200">
                             <label className="block text-[10px] font-black uppercase text-gray-500 tracking-widest mb-2">Min. Limit</label>
-                            <input type="number" name="minStockLimit" value={product.minStockLimit} onChange={handleChange} className="w-full tally-input !text-lg" />
+                            <input type="number" name="minStockLimit" value={product.minStockLimit} onChange={handleChange} disabled={isReadOnly} className="w-full tally-input !text-lg disabled:bg-gray-100 disabled:opacity-60" />
                         </div>
                     </div>
 
@@ -361,27 +365,27 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
                             <div>
                                 <label className="block text-[9px] font-black uppercase text-gray-400 mb-1 ml-1">Landed Cost</label>
-                                <input type="number" name="purchasePrice" value={product.purchasePrice} onChange={handleChange} className="w-full tally-input !text-base" />
+                                <input type="number" name="purchasePrice" value={product.purchasePrice} onChange={handleChange} disabled={isReadOnly} className="w-full tally-input !text-base disabled:bg-gray-100 disabled:opacity-60" />
                             </div>
                             <div>
                                 <label className="block text-[9px] font-black uppercase text-gray-400 mb-1 ml-1">P.T.R</label>
-                                <input type="number" name="ptr" value={product.ptr || 0} onChange={handleChange} className="w-full tally-input !text-base" />
+                                <input type="number" name="ptr" value={product.ptr || 0} onChange={handleChange} disabled={isReadOnly} className="w-full tally-input !text-base disabled:bg-gray-100 disabled:opacity-60" />
                             </div>
                             <div className="bg-yellow-50/50 p-1">
                                 <label className="block text-[9px] font-black uppercase text-yellow-700 mb-1 ml-1">M.R.P</label>
-                                <input type="number" name="mrp" value={product.mrp} onChange={handleChange} className="w-full tally-input !text-lg border-yellow-400 !bg-white" />
+                                <input type="number" name="mrp" value={product.mrp} onChange={handleChange} disabled={isReadOnly} className="w-full tally-input !text-lg border-yellow-400 !bg-white disabled:bg-gray-100 disabled:opacity-60" />
                             </div>
                             <div>
                                 <label className="block text-[9px] font-black uppercase text-gray-400 mb-1 ml-1">Rate A</label>
-                                <input type="number" name="rateA" value={product.rateA || 0} onChange={handleChange} className="w-full tally-input !text-base" />
+                                <input type="number" name="rateA" value={product.rateA || 0} onChange={handleChange} disabled={isReadOnly} className="w-full tally-input !text-base disabled:bg-gray-100 disabled:opacity-60" />
                             </div>
                             <div>
                                 <label className="block text-[9px] font-black uppercase text-gray-400 mb-1 ml-1">Rate B</label>
-                                <input type="number" name="rateB" value={product.rateB || 0} onChange={handleChange} className="w-full tally-input !text-base" />
+                                <input type="number" name="rateB" value={product.rateB || 0} onChange={handleChange} disabled={isReadOnly} className="w-full tally-input !text-base disabled:bg-gray-100 disabled:opacity-60" />
                             </div>
                             <div>
                                 <label className="block text-[9px] font-black uppercase text-gray-400 mb-1 ml-1">Rate C</label>
-                                <input type="number" name="rateC" value={product.rateC || 0} onChange={handleChange} className="w-full tally-input !text-base" />
+                                <input type="number" name="rateC" value={product.rateC || 0} onChange={handleChange} disabled={isReadOnly} className="w-full tally-input !text-base disabled:bg-gray-100 disabled:opacity-60" />
                             </div>
                         </div>
                     </div>
@@ -396,8 +400,9 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
                                     name="packType"
                                     value={product.packType || ''}
                                     onChange={handleChange}
+                                    disabled={isReadOnly}
                                     placeholder="e.g. 10s, 100ml"
-                                    className="w-full tally-input"
+                                    className="w-full tally-input disabled:bg-gray-100 disabled:opacity-60"
                                 />
                             </div>
                         </div>
@@ -406,11 +411,11 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-[9px] font-black uppercase text-gray-400 mb-1 ml-1">G.S.T %</label>
-                                    <input type="number" name="gstPercent" value={product.gstPercent} onChange={handleChange} className="w-full tally-input" />
+                                    <input type="number" name="gstPercent" value={product.gstPercent} onChange={handleChange} disabled={isReadOnly} className="w-full tally-input disabled:bg-gray-100 disabled:opacity-60" />
                                 </div>
                                 <div>
                                     <label className="block text-[9px] font-black uppercase text-gray-400 mb-1 ml-1">H.S.N Code</label>
-                                    <input name="hsnCode" value={product.hsnCode || ''} onChange={handleChange} className="w-full tally-input font-mono" />
+                                    <input name="hsnCode" value={product.hsnCode || ''} onChange={handleChange} disabled={isReadOnly} className="w-full tally-input font-mono disabled:bg-gray-100 disabled:opacity-60" />
                                 </div>
                             </div>
                         </div>
@@ -431,14 +436,16 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
                 </div>
 
                 <div className="p-4 bg-gray-50 border-t border-app-border flex justify-end gap-3 flex-shrink-0">
-                    <button type="button" onClick={onClose} className="px-8 py-2 text-[10px] font-black uppercase tracking-widest text-gray-500 hover:text-black">Discard</button>
-                    <button 
-                        type="button"
-                        onClick={handleSave}
-                        className="px-16 py-4 bg-primary text-white text-[12px] font-black uppercase tracking-[0.3em] shadow-2xl hover:bg-primary-dark transition-all transform active:scale-95"
-                    >
-                        Accept Alteration (Enter)
-                    </button>
+                    <button type="button" onClick={onClose} className="px-8 py-2 text-[10px] font-black uppercase tracking-widest text-gray-500 hover:text-black">{isReadOnly ? 'Close' : 'Discard'}</button>
+                    {!isReadOnly && (
+                        <button 
+                            type="button"
+                            onClick={handleSave}
+                            className="px-16 py-4 bg-primary text-white text-[12px] font-black uppercase tracking-[0.3em] shadow-2xl hover:bg-primary-dark transition-all transform active:scale-95"
+                        >
+                            Accept Alteration (Enter)
+                        </button>
+                    )}
                 </div>
             </div>
             {isAddMasterOpen && onAddMedicineMaster && currentUser && (

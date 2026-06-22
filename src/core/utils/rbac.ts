@@ -182,10 +182,37 @@ export const canAccessScreen = (
 
     const member = getCurrentMember(members, currentUser);
     if (!member || member.isLocked) return false;
+    if (screenId === 'dashboard') return true;
 
     const merged = mergePermissionsForRoleIds(roles, getMemberRoleIds(member));
     const screenPermission = merged[screenId] || createEmptyPermissionSet();
     return Boolean(screenPermission.full || screenPermission[action] || (action !== 'view' && screenPermission.view));
+};
+
+export const getScreenPermissions = (
+    screenId: string,
+    currentUser: RegisteredPharmacy | null,
+    members: OrganizationMember[],
+    roles: BusinessRole[],
+): PermissionSet => {
+    if (!currentUser) return createEmptyPermissionSet();
+    if (isAdminUser(currentUser)) {
+        return {
+            view: true,
+            entry: true,
+            edit: true,
+            delete: true,
+            approve: true,
+            print: true,
+            export: true,
+            full: true,
+        };
+    }
+    const member = getCurrentMember(members, currentUser);
+    if (!member || member.isLocked) return createEmptyPermissionSet();
+
+    const merged = mergePermissionsForRoleIds(roles, getMemberRoleIds(member));
+    return merged[screenId] || createEmptyPermissionSet();
 };
 
 export const filterNavigationByPermissions = (

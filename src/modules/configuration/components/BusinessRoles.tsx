@@ -8,6 +8,9 @@ import { normalizeRolePermissionMatrix, RBAC_ACTIONS, RBAC_MODULES } from '@core
 
 const uniformTextStyle = 'text-2xl font-normal tracking-tight uppercase leading-tight';
 
+const DISPLAY_ACTIONS = RBAC_ACTIONS.filter(action => action !== 'approve' && action !== 'delete');
+const DISPLAY_MODULES = RBAC_MODULES.filter(module => module.id !== 'dashboard');
+
 interface BusinessRolesProps {
     currentUser: RegisteredPharmacy;
     addNotification: (message: string, type?: 'success' | 'error') => void;
@@ -159,20 +162,20 @@ const BusinessRoles: React.FC<BusinessRolesProps> = ({ currentUser, addNotificat
                                         <thead className="bg-gray-100">
                                             <tr>
                                                 <th className="p-2 text-left uppercase">Module</th>
-                                                {RBAC_ACTIONS.map((action) => <th key={action} className="p-2 uppercase">{action}</th>)}
+                                                {DISPLAY_ACTIONS.map((action) => <th key={action} className="p-2 uppercase">{action}</th>)}
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {RBAC_MODULES.map((module) => (
+                                            {DISPLAY_MODULES.map((module) => (
                                                 <React.Fragment key={module.id}>
                                                     <tr className="border-t border-gray-200 bg-slate-50">
                                                         <td className="p-2 font-black uppercase">{module.name}</td>
-                                                        {RBAC_ACTIONS.map((action) => <td key={`${module.id}-${action}`} className="text-center">{matrix[module.id]?.[action] ? '✓' : '—'}</td>)}
+                                                        {DISPLAY_ACTIONS.map((action) => <td key={`${module.id}-${action}`} className="text-center">{matrix[module.id]?.[action] ? '✓' : '—'}</td>)}
                                                     </tr>
                                                     {(module.children || []).map((child) => (
                                                         <tr key={child.id} className="border-t border-gray-100">
                                                             <td className="p-2 pl-8 font-bold uppercase text-gray-600">{child.name}</td>
-                                                            {RBAC_ACTIONS.map((action) => <td key={`${child.id}-${action}`} className="text-center">{matrix[child.id]?.[action] ? '✓' : '—'}</td>)}
+                                                            {DISPLAY_ACTIONS.map((action) => <td key={`${child.id}-${action}`} className="text-center">{matrix[child.id]?.[action] ? '✓' : '—'}</td>)}
                                                         </tr>
                                                     ))}
                                                 </React.Fragment>

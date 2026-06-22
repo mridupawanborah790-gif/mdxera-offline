@@ -1,9 +1,9 @@
-﻿import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import Card from '@core/components/ui/Card';
 import EditMedicineModal from '@modules/inventory/components/EditMedicineModal';
 import AddMedicineModal from '@modules/inventory/components/AddMedicineModal';
 import SupplierSyncView from '@modules/suppliers/components/SupplierSyncView';
-import type { Medicine, RegisteredPharmacy, Supplier, Purchase, SupplierProductMap, InventoryItem } from '@core/types';
+import type { Medicine, RegisteredPharmacy, Supplier, Purchase, SupplierProductMap, InventoryItem, PermissionSet } from '@core/types';
 import { fuzzyMatch } from '@core/utils/search';
 import { shouldHandleScreenShortcut } from '@core/utils/screenShortcuts';
 
@@ -48,6 +48,7 @@ interface MaterialMasterProps {
     mappings: SupplierProductMap[];
     initialSubModule?: SubModule;
     addNotification?: (message: string, type?: 'success' | 'error' | 'warning') => void;
+    permissions?: PermissionSet;
 }
 
 type SubModule = 'master' | 'sync' | 'bulk' | 'pricing';
@@ -56,8 +57,20 @@ const MaterialMaster: React.FC<MaterialMasterProps> = ({
     medicines, inventory, onAddMedicine, onUpdateMedicine, currentUser, 
     suppliers, onAddPurchase, onBulkAddMedicines, onSearchMedicines, 
     onMassUpdateClick, onSaveMapping, onDeleteMapping, mappings,
-    initialSubModule = 'master'
+    initialSubModule = 'master', permissions
 }) => {
+    const defaultPermissions: PermissionSet = {
+        view: true,
+        entry: true,
+        edit: true,
+        delete: true,
+        approve: true,
+        print: true,
+        export: true,
+        full: true,
+    };
+    const perms = permissions || defaultPermissions;
+
     const [activeSubModule, setActiveSubModule] = useState<SubModule>(initialSubModule);
     const [medSearchTerm, setMedSearchTerm] = useState('');
     const [medSortConfig, setMedSortConfig] = useState<{ key: MedicineSortableKeys; direction: 'ascending' | 'descending' }>({ key: 'name', direction: 'ascending' });
@@ -244,12 +257,14 @@ const MaterialMaster: React.FC<MaterialMasterProps> = ({
                                     <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
                                     <input type="text" placeholder="Search by SKU Name, Code, Brand..." value={medSearchTerm} onChange={e => setMedSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-gray-400 text-sm font-bold focus:bg-yellow-50 outline-none shadow-sm" />
                                 </div>
-                                <div className="flex items-center gap-3">
-                                    <button onClick={() => setIsAddModalOpen(true)} className="px-6 py-2 tally-button-primary text-[10px] shadow-md flex items-center gap-2 flex-shrink-0">
-                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                                        Create Material (F2)
-                                    </button>
-                                </div>
+                                {perms.entry && (
+                                    <div className="flex items-center gap-3">
+                                        <button onClick={() => setIsAddModalOpen(true)} className="px-6 py-2 tally-button-primary text-[10px] shadow-md flex items-center gap-2 flex-shrink-0">
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                            Create Material (F2)
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                             <div className="overflow-auto flex-1" ref={tableScrollRef}>
                                 <table className="min-w-full border-collapse">
@@ -290,7 +305,7 @@ const MaterialMaster: React.FC<MaterialMasterProps> = ({
                                                         onClick={() => handleOpenEditModal(med)}
                                                         className="text-primary font-black uppercase text-[10px] px-2 py-0.5 bg-primary/5 border border-primary/20 hover:bg-white hover:text-primary transition-all group-hover:bg-white group-hover:text-primary"
                                                     >
-                                                        Alter
+                                                        {perms.edit ? 'Alter' : 'View'}
                                                     </button>
                                                 </td>
                                             </tr>
@@ -383,6 +398,7 @@ const MaterialMaster: React.FC<MaterialMasterProps> = ({
                     organizationType={currentUser?.organization_type || null}
                     existingMedicines={medicines}
                     inventoryItems={inventory}
+                    isReadOnly={!perms.edit}
                 />
             )}
         </main>

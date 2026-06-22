@@ -11,6 +11,7 @@ interface EditMedicineModalProps {
     organizationType?: string | null;
     existingMedicines?: Medicine[];
     inventoryItems?: InventoryItem[];
+    isReadOnly?: boolean;
 }
 
 const calculateMovingAverageRate = (medicine: Medicine, inventoryItems: InventoryItem[]): number => {
@@ -33,7 +34,7 @@ const calculateMovingAverageRate = (medicine: Medicine, inventoryItems: Inventor
     return Number((totals.totalValue / totals.totalQty).toFixed(2));
 };
 
-const EditMedicineModal: React.FC<EditMedicineModalProps> = ({ isOpen, onClose, onSave, medicine, organizationType, existingMedicines = [], inventoryItems = [] }) => {
+const EditMedicineModal: React.FC<EditMedicineModalProps> = ({ isOpen, onClose, onSave, medicine, organizationType, existingMedicines = [], inventoryItems = [], isReadOnly = false }) => {
     const [formState, setFormState] = useState<Medicine | null>(null);
     const [errors, setErrors] = useState<Partial<Record<keyof Medicine, string>>>({});
 
@@ -67,22 +68,20 @@ const EditMedicineModal: React.FC<EditMedicineModalProps> = ({ isOpen, onClose, 
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (isReadOnly) return;
         if (formState && validate()) {
             try {
                 await onSave(formState);
                 onClose();
             } catch (err: any) {
                 console.error('[EditMedicineModal] onSave failed:', err);
-                // If the error isn't a fatal "session expired" error, we still want to keep the modal open.
-                // It was likely enqueued offline and threw an unhandled lock timeout before we fixed ensureLiveAuth,
-                // or some other validation error occurred.
                 alert(err.message || 'Failed to save medicine');
             }
         }
     };
     
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-        if (!formState) return;
+        if (!formState || isReadOnly) return;
         const { name, value, type } = e.target;
         if (name === 'materialMasterType') {
             const policy = getResolvedMedicinePolicy({ materialMasterType: value as MaterialMasterType });
@@ -105,23 +104,26 @@ const EditMedicineModal: React.FC<EditMedicineModalProps> = ({ isOpen, onClose, 
 
     const materialPolicy = getResolvedMedicinePolicy(formState);
 
-    const renderInput = (name: keyof Medicine, label: string, type = 'text', isOptional = true, readOnly = false) => (
-        <div>
-            <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">{label} {!isOptional && '*'}</label>
-            <input
-                type={type}
-                name={name}
-                value={(formState[name] as string | number) ?? ''}
-                onChange={readOnly ? undefined : handleChange}
-                readOnly={readOnly}
-                className={`mt-1 block w-full p-2 border font-bold text-sm text-app-text-primary ${readOnly ? 'bg-gray-100 border-gray-300 text-gray-500 cursor-not-allowed select-none' : `bg-input-bg border-gray-400 ${errors[name] ? 'border-red-500' : 'focus:bg-yellow-50 outline-none'}`}`}
-            />
-            {errors[name] && <p className="text-[10px] text-red-500 mt-1 uppercase font-bold">{errors[name]}</p>}
-        </div>
-    );
+    const renderInput = (name: keyof Medicine, label: string, type = 'text', isOptional = true, readOnly = false) => {
+        const actualReadOnly = readOnly || isReadOnly;
+        return (
+            <div>
+                <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">{label} {!isOptional && '*'}</label>
+                <input
+                    type={type}
+                    name={name}
+                    value={(formState[name] as string | number) ?? ''}
+                    onChange={actualReadOnly ? undefined : handleChange}
+                    readOnly={actualReadOnly}
+                    className={`mt-1 block w-full p-2 border font-bold text-sm text-app-text-primary ${actualReadOnly ? 'bg-gray-100 border-gray-300 text-gray-500 cursor-not-allowed select-none' : `bg-input-bg border-gray-400 ${errors[name] ? 'border-red-500' : 'focus:bg-yellow-50 outline-none'}`}`}
+                />
+                {errors[name] && <p className="text-[10px] text-red-500 mt-1 uppercase font-bold">{errors[name]}</p>}
+            </div>
+        );
+    };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title={`Alter Material Record: ${medicine?.name}`} widthClass="max-w-6xl">
+        <Modal isOpen={isOpen} onClose={onClose} title={`${isReadOnly ? 'View' : 'Alter'} Material Record: ${medicine?.name}`} widthClass="max-w-6xl">
             <form onSubmit={handleSubmit} className="flex flex-col h-full overflow-hidden">
                 <div className="p-6 overflow-y-auto space-y-6 flex-1 bg-[var(--modal-bg-light)] dark:bg-[var(--modal-bg-dark)]">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -138,7 +140,8 @@ const EditMedicineModal: React.FC<EditMedicineModalProps> = ({ isOpen, onClose, 
                                 name="materialMasterType"
                                 value={formState.materialMasterType || 'trading_goods'}
                                 onChange={handleChange}
-                                className="mt-1 block w-full p-2 border border-gray-400 font-bold text-sm bg-white text-app-text-primary focus:bg-yellow-50 outline-none"
+                                disabled={isReadOnly}
+                                className={`mt-1 block w-full p-2 border border-gray-400 font-bold text-sm bg-white text-app-text-primary ${isReadOnly ? 'bg-gray-100 border-gray-300 text-gray-500 cursor-not-allowed select-none' : 'focus:bg-yellow-50 outline-none'}`}
                             >
                                 {Object.entries(MATERIAL_TYPE_RULES).map(([value, rule]) => (
                                     <option key={value} value={value}>{rule.label}</option>
@@ -150,15 +153,15 @@ const EditMedicineModal: React.FC<EditMedicineModalProps> = ({ isOpen, onClose, 
 
                     <div className="bg-blue-50 p-4 border border-blue-100 grid grid-cols-1 md:grid-cols-3 gap-3">
                         <label className="text-xs font-bold uppercase text-blue-900 flex items-center gap-2">
-                            <input type="checkbox" checked={Boolean(formState.isInventorised ?? materialPolicy.inventorised)} onChange={(e) => setFormState(p => p ? ({ ...p, isInventorised: e.target.checked }) : null)} className="w-4 h-4 text-primary" />
+                            <input type="checkbox" checked={Boolean(formState.isInventorised ?? materialPolicy.inventorised)} onChange={(e) => !isReadOnly && setFormState(p => p ? ({ ...p, isInventorised: e.target.checked }) : null)} disabled={isReadOnly} className="w-4 h-4 text-primary" />
                             Inventorised
                         </label>
                         <label className="text-xs font-bold uppercase text-blue-900 flex items-center gap-2">
-                            <input type="checkbox" checked={Boolean(formState.isSalesEnabled ?? materialPolicy.salesEnabled)} onChange={(e) => setFormState(p => p ? ({ ...p, isSalesEnabled: e.target.checked }) : null)} className="w-4 h-4 text-primary" />
+                            <input type="checkbox" checked={Boolean(formState.isSalesEnabled ?? materialPolicy.salesEnabled)} onChange={(e) => !isReadOnly && setFormState(p => p ? ({ ...p, isSalesEnabled: e.target.checked }) : null)} disabled={isReadOnly} className="w-4 h-4 text-primary" />
                             Sales Enabled
                         </label>
                         <label className="text-xs font-bold uppercase text-blue-900 flex items-center gap-2">
-                            <input type="checkbox" checked={Boolean(formState.isPurchaseEnabled ?? materialPolicy.purchaseEnabled)} onChange={(e) => setFormState(p => p ? ({ ...p, isPurchaseEnabled: e.target.checked }) : null)} className="w-4 h-4 text-primary" />
+                            <input type="checkbox" checked={Boolean(formState.isPurchaseEnabled ?? materialPolicy.purchaseEnabled)} onChange={(e) => !isReadOnly && setFormState(p => p ? ({ ...p, isPurchaseEnabled: e.target.checked }) : null)} disabled={isReadOnly} className="w-4 h-4 text-primary" />
                             Purchase Enabled
                         </label>
                     </div>
@@ -166,15 +169,15 @@ const EditMedicineModal: React.FC<EditMedicineModalProps> = ({ isOpen, onClose, 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="md:col-span-1">
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Chemical Composition</label>
-                            <textarea name="composition" value={formState.composition || ''} onChange={handleChange} rows={2} className="w-full p-2 border border-gray-400 font-bold text-sm bg-input-bg focus:bg-yellow-50 outline-none" />
+                            <textarea name="composition" value={formState.composition || ''} onChange={handleChange} readOnly={isReadOnly} rows={2} className={`w-full p-2 border border-gray-400 font-bold text-sm bg-input-bg ${isReadOnly ? 'bg-gray-100 border-gray-300 text-gray-500 cursor-not-allowed select-none' : 'focus:bg-yellow-50 outline-none'}`} />
                         </div>
                         <div className="md:col-span-1">
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Description</label>
-                            <textarea name="description" value={formState.description || ''} onChange={handleChange} rows={2} className="w-full p-2 border border-gray-400 font-bold text-sm bg-input-bg focus:bg-yellow-50 outline-none" />
+                            <textarea name="description" value={formState.description || ''} onChange={handleChange} readOnly={isReadOnly} rows={2} className={`w-full p-2 border border-gray-400 font-bold text-sm bg-input-bg ${isReadOnly ? 'bg-gray-100 border-gray-300 text-gray-500 cursor-not-allowed select-none' : 'focus:bg-yellow-50 outline-none'}`} />
                         </div>
                         <div className="md:col-span-2">
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Usage Directions</label>
-                            <textarea name="directions" value={formState.directions || ''} onChange={handleChange} rows={2} className="w-full p-2 border border-gray-400 font-bold text-sm bg-input-bg focus:bg-yellow-50 outline-none" />
+                            <textarea name="directions" value={formState.directions || ''} onChange={handleChange} readOnly={isReadOnly} rows={2} className={`w-full p-2 border border-gray-400 font-bold text-sm bg-input-bg ${isReadOnly ? 'bg-gray-100 border-gray-300 text-gray-500 cursor-not-allowed select-none' : 'focus:bg-yellow-50 outline-none'}`} />
                         </div>
                     </div>
 
@@ -183,7 +186,7 @@ const EditMedicineModal: React.FC<EditMedicineModalProps> = ({ isOpen, onClose, 
                         <div className="grid grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">GST Rate (%)</label>
-                                <select name="gstRate" value={formState.gstRate} onChange={handleChange} className="w-full p-2 border border-gray-400 font-bold text-sm bg-white outline-none">
+                                <select name="gstRate" value={formState.gstRate} onChange={handleChange} disabled={isReadOnly} className={`w-full p-2 border border-gray-400 font-bold text-sm bg-white ${isReadOnly ? 'bg-gray-100 border-gray-300 text-gray-500 cursor-not-allowed select-none' : 'focus:bg-yellow-50 outline-none'}`}>
                                     <option value={0}>0%</option>
                                     <option value={5}>5%</option>
                                     <option value={12}>12%</option>
@@ -201,14 +204,14 @@ const EditMedicineModal: React.FC<EditMedicineModalProps> = ({ isOpen, onClose, 
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div>
                                 <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Valuation Method</label>
-                                <select name="valuationMethod" value={formState.valuationMethod || 'standard'} onChange={handleChange} className="w-full p-2 border border-gray-400 font-bold text-sm bg-white outline-none">
+                                <select name="valuationMethod" value={formState.valuationMethod || 'standard'} onChange={handleChange} disabled={isReadOnly} className={`w-full p-2 border border-gray-400 font-bold text-sm bg-white ${isReadOnly ? 'bg-gray-100 border-gray-300 text-gray-500 cursor-not-allowed select-none' : 'focus:bg-yellow-50 outline-none'}`}>
                                     <option value="standard">Standard</option>
                                     <option value="moving_average">Moving Average</option>
                                 </select>
                             </div>
                             <div>
                                 <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Standard Price Rate</label>
-                                <input type="number" step="0.01" name="standardPriceRate" value={Number(formState.standardPriceRate || 0)} onChange={handleChange} disabled={(formState.valuationMethod || 'standard') !== 'standard'} className="w-full p-2 border border-gray-400 font-bold text-sm bg-input-bg disabled:bg-gray-100 disabled:text-gray-500 outline-none" />
+                                <input type="number" step="0.01" name="standardPriceRate" value={Number(formState.standardPriceRate || 0)} onChange={handleChange} disabled={isReadOnly || (formState.valuationMethod || 'standard') !== 'standard'} className="w-full p-2 border border-gray-400 font-bold text-sm bg-input-bg disabled:bg-gray-100 disabled:text-gray-500 outline-none" />
                             </div>
                             <div>
                                 <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Moving Average Rate</label>
@@ -219,18 +222,20 @@ const EditMedicineModal: React.FC<EditMedicineModalProps> = ({ isOpen, onClose, 
 
                     <div className="pt-4 border-t border-gray-100 flex gap-4">
                         <div className="flex items-center gap-2 bg-blue-50 p-3 border border-blue-100 flex-1">
-                            <input type="checkbox" id="prescReqEdit" checked={!!formState.isPrescriptionRequired} onChange={e => setFormState(p => p ? ({ ...p, isPrescriptionRequired: e.target.checked }) : null)} className="w-4 h-4 text-primary" />
+                            <input type="checkbox" id="prescReqEdit" checked={!!formState.isPrescriptionRequired} onChange={e => !isReadOnly && setFormState(p => p ? ({ ...p, isPrescriptionRequired: e.target.checked }) : null)} disabled={isReadOnly} className="w-4 h-4 text-primary" />
                             <label htmlFor="prescReqEdit" className="text-xs font-bold text-blue-900 uppercase">Prescription Required</label>
                         </div>
                         <div className="flex items-center gap-2 bg-gray-50 p-3 border border-gray-100 flex-1">
-                            <input type="checkbox" id="isActiveEdit" checked={!!formState.is_active} onChange={e => setFormState(p => p ? ({ ...p, is_active: e.target.checked }) : null)} className="w-4 h-4 text-primary" />
+                            <input type="checkbox" id="isActiveEdit" checked={!!formState.is_active} onChange={e => !isReadOnly && setFormState(p => p ? ({ ...p, is_active: e.target.checked }) : null)} disabled={isReadOnly} className="w-4 h-4 text-primary" />
                             <label htmlFor="isActiveEdit" className="text-xs font-bold text-gray-700 uppercase">Active Record</label>
                         </div>
                     </div>
                 </div>
                 <div className="p-4 bg-[var(--modal-footer-bg-light)] dark:bg-[var(--modal-footer-bg-dark)] border-t border-[var(--modal-footer-border-light)] dark:border-[var(--modal-footer-border-dark)] flex justify-end gap-3 flex-shrink-0">
-                    <button type="button" onClick={onClose} className="px-8 py-2 text-[10px] font-black uppercase tracking-widest text-gray-500 hover:text-black">Cancel</button>
-                    <button type="submit" className="px-12 py-3 bg-[var(--modal-header-bg-light)] dark:bg-[var(--modal-header-bg-dark)] text-white text-[11px] font-black uppercase tracking-[0.2em] shadow-xl hover:bg-primary-dark transition-all transform active:scale-95">Update Master Record</button>
+                    <button type="button" onClick={onClose} className="px-8 py-2 text-[10px] font-black uppercase tracking-widest text-gray-500 hover:text-black">{isReadOnly ? 'Close' : 'Cancel'}</button>
+                    {!isReadOnly && (
+                        <button type="submit" className="px-12 py-3 bg-[var(--modal-header-bg-light)] dark:bg-[var(--modal-header-bg-dark)] text-white text-[11px] font-black uppercase tracking-[0.2em] shadow-xl hover:bg-primary-dark transition-all transform active:scale-95">Update Master Record</button>
+                    )}
                 </div>
             </form>
         </Modal>

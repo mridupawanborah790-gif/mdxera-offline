@@ -66,7 +66,7 @@ import { getInventoryPolicy } from '@core/utils/materialType';
 import { extractPackMultiplier, resolveUnitsPerStrip } from '@core/utils/pack';
 import { setActiveScreenScope, shouldHandleScreenShortcut } from '@core/utils/screenShortcuts';
 import { createSupplierQuick, formatSupplierApiError, SupplierQuickResult } from './services/supplierService';
-import { canAccessScreen, filterNavigationByPermissions } from '@core/utils/rbac';
+import { canAccessScreen, filterNavigationByPermissions, getScreenPermissions } from '@core/utils/rbac';
 import { useModuleVisibilityStore } from '@core/visibility/moduleVisibilityStore';
 import { filterNavByVisibility } from '@core/visibility/useModuleVisibility';
 import ModuleVisibility from '@modules/configuration/components/ModuleVisibility';
@@ -3059,6 +3059,7 @@ const App: React.FC = () => {
                         addNotification={addNotification}
                         onRefresh={() => currentUser ? loadData(currentUser, 'background') : Promise.resolve()}
                         onAddMedicineMaster={handleAddMedicineMaster}
+                        permissions={getScreenPermissions(pageId, currentUser, teamMembers, businessRoles)}
                     />;
                 case 'physicalInventory':
                     return <PhysicalInventory
@@ -3153,6 +3154,7 @@ const App: React.FC = () => {
                         onUnblockSupplier={(supplier) => handleSetSupplierBlocked(supplier, false)}
                         onDeleteSupplier={handleDeleteSupplier}
                         config={config} currentUser={currentUser} defaultSupplierControlGlId={defaultSupplierControlGlId}
+                        permissions={getScreenPermissions(pageId, currentUser, teamMembers, businessRoles)}
                     />;
                 case 'customers':
                     return <Customers
@@ -3164,6 +3166,7 @@ const App: React.FC = () => {
                         onUnblockCustomer={(customer) => handleSetCustomerBlocked(customer, false)}
                         onDeleteCustomer={handleDeleteCustomer}
                         currentUser={currentUser} config={config} inventory={inventory} defaultCustomerControlGlId={defaultCustomerControlGlId}
+                        permissions={getScreenPermissions(pageId, currentUser, teamMembers, businessRoles)}
                     />;
                 case 'doctorsMaster':
                     return <DoctorsMaster
@@ -3194,6 +3197,7 @@ const App: React.FC = () => {
                             });
                             await loadData(currentUser!, 'targeted', 'doctor_master');
                         }}
+                        permissions={getScreenPermissions(pageId, currentUser, teamMembers, businessRoles)}
                     />;
                 case 'mbcCardDashboard':
                 case 'mbcCardList':
@@ -3217,6 +3221,7 @@ const App: React.FC = () => {
                         mappings={mappings}
                         initialSubModule={pageId === 'vendorNomenclature' ? 'sync' : pageId === 'bulkUtility' ? 'bulk' : pageId === 'masterPriceMaintain' ? 'pricing' : 'master'}
                         addNotification={addNotification}
+                        permissions={getScreenPermissions(pageId, currentUser, teamMembers, businessRoles)}
                     />;
                 case 'substituteFinder':
                     return <SubstituteFinder inventory={inventory} />;

@@ -228,7 +228,18 @@ export const hydrateMemoryCacheFromSqlite = async (organizationId: string): Prom
     return promise;
 };
 
-    export const generateUUID = () => crypto.randomUUID();
+    export const safeRandomUUID = (): string => {
+        if (typeof window !== 'undefined' && window.crypto && typeof window.crypto.randomUUID === 'function') {
+            return window.crypto.randomUUID();
+        }
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+            const r = (Math.random() * 16) | 0;
+            const v = c === 'x' ? r : (r & 0x3) | 0x8;
+            return v.toString(16);
+        });
+    };
+
+    export const generateUUID = () => safeRandomUUID();
 
     // Memory cache to fallback when IndexedDB is disabled
     const memoryCache: Record<string, any[]> = {};
@@ -4439,7 +4450,7 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
         const key = 'mdxera.mobile.device_id';
         const existing = localStorage.getItem(key);
         if (existing) return existing;
-        const next = crypto.randomUUID();
+        const next = safeRandomUUID();
         localStorage.setItem(key, next);
         return next;
     };

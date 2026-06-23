@@ -10,6 +10,17 @@
 
 let _cached: string | null = null;
 
+const safeRandomUUID = (): string => {
+  if (typeof window !== 'undefined' && window.crypto && typeof window.crypto.randomUUID === 'function') {
+    return window.crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
+
 async function getStore() {
   const { Store } = await import('@tauri-apps/plugin-store');
   return Store.load('config/device.json');
@@ -30,7 +41,7 @@ export async function getDeviceId(): Promise<string> {
       _cached = existing;
       return existing;
     }
-    const fresh = crypto.randomUUID();
+    const fresh = safeRandomUUID();
     await store.set('device_id', fresh);
     await store.save();
     _cached = fresh;
@@ -40,7 +51,7 @@ export async function getDeviceId(): Promise<string> {
     const lsKey = 'mdxera_device_id';
     let id = localStorage.getItem(lsKey);
     if (!id) {
-      id = crypto.randomUUID();
+      id = safeRandomUUID();
       localStorage.setItem(lsKey, id);
     }
     _cached = id;

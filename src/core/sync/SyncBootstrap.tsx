@@ -204,6 +204,17 @@ export const SyncBootstrap: React.FC<Props> = ({ currentUser }) => {
     const onResync = async () => {
       console.info('[SyncBootstrap] Full resync requested for org', currentUser.organization_id);
       try {
+        // Prevent full resync/reload if there are unsynced local mutations in the queue
+        const queueRows = await db.select<{ n: number }>(
+          `SELECT COUNT(*) as n FROM _sync_queue WHERE status != 'done'`
+        );
+        const pendingCount = queueRows[0]?.n || 0;
+        if (pendingCount > 0) {
+          console.warn('[SyncBootstrap] Cannot resync: pending mutations in sync queue', pendingCount);
+          alert('Cannot perform full sync reload: There are pending offline modifications that have not been uploaded to the server yet. Please retry after the sync is completed.');
+          return;
+        }
+
         resetHydrationState();
         await db.execute(
           `DELETE FROM ${TABLE.INITIAL_SYNC_STATE} WHERE organization_id = ?`,

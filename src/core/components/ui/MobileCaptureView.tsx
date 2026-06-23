@@ -1,4 +1,4 @@
-﻿import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { broadcastSyncMessage, createMobileSyncedBill, getOrCreateMobileDeviceId } from '@core/services/storageService';
 
 interface MobileCaptureViewProps {
@@ -16,6 +16,17 @@ interface CapturedPage {
     capturedAt: string;
 }
 
+const safeRandomUUID = (): string => {
+    if (typeof window !== 'undefined' && window.crypto && typeof window.crypto.randomUUID === 'function') {
+        return window.crypto.randomUUID();
+    }
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0;
+        const v = c === 'x' ? r : (r & 0x3) | 0x8;
+        return v.toString(16);
+    });
+};
+
 const MobileCaptureView: React.FC<MobileCaptureViewProps> = ({ sessionId, orgId }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -24,7 +35,7 @@ const MobileCaptureView: React.FC<MobileCaptureViewProps> = ({ sessionId, orgId 
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [uploadState, setUploadState] = useState<UploadState>('pending');
     const [error, setError] = useState<string | null>(null);
-    const [invoiceId, setInvoiceId] = useState<string>(() => crypto.randomUUID());
+    const [invoiceId, setInvoiceId] = useState<string>(() => safeRandomUUID());
 
     const queryParams = new URLSearchParams(window.location.search);
     const userId = queryParams.get('user_id') || '';
@@ -88,7 +99,7 @@ const handleCapture = () => {
     const nextPage = capturedPages.length + 1;
 
     setCapturedPages(prev => ([...prev, {
-        id: crypto.randomUUID(),
+        id: safeRandomUUID(),
         image: base64,
         mimeType: 'image/jpeg',
         pageNumber: nextPage,
@@ -160,7 +171,7 @@ const handleCapture = () => {
         setPreviewUrl(null);
         setUploadState('pending');
         setError(null);
-        setInvoiceId(crypto.randomUUID());
+        setInvoiceId(safeRandomUUID());
     };
 
     return (

@@ -11,6 +11,7 @@ pub fn run() {
             commands::auth::sign_local_token,
             commands::auth::verify_local_token,
             commands::system::get_app_data_dir,
+            commands::system::get_local_ip,
         ])
         .setup(|app| {
             use tauri::Manager;

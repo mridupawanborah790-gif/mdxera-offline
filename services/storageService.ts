@@ -54,6 +54,18 @@ const SYNC_QUEUE_TABLES = new Set<string>([
     'team_members', 'business_roles',
 ]);
 
+// In-memory cache for highest code sequences to prevent redundant database/network scans.
+const highestMaterialCodeCache: Record<string, number> = {};
+const highestDoctorCodeCache: Record<string, number> = {};
+
+let columnFilterPromise: Promise<any> | null = null;
+const getColumnFilter = (): Promise<any> => {
+    if (!columnFilterPromise) {
+        columnFilterPromise = import('../src/core/sync/columnFilter');
+    }
+    return columnFilterPromise;
+};
+
 async function enqueueForSync(
     tableName: string,
     isUpdate: boolean,
@@ -408,16 +420,23 @@ const getHighestRemoteDoctorCode = async (organizationId: string): Promise<numbe
 };
 
 const getNextDoctorCode = async (organizationId: string): Promise<string> => {
-    const localHighest = await getHighestLocalDoctorCode(organizationId);
-    let remoteHighest = DOCTOR_CODE_START - 1;
+    let highest = highestDoctorCodeCache[organizationId];
+    
+    if (highest === undefined) {
+        const localHighest = await getHighestLocalDoctorCode(organizationId);
+        let remoteHighest = DOCTOR_CODE_START - 1;
 
-    if (navigator.onLine) {
-        try {
-            remoteHighest = await getHighestRemoteDoctorCode(organizationId);
-        } catch { }
+        if (navigator.onLine) {
+            try {
+                remoteHighest = await getHighestRemoteDoctorCode(organizationId);
+            } catch { }
+        }
+        highest = Math.max(localHighest, remoteHighest);
+        highestDoctorCodeCache[organizationId] = highest;
     }
 
-    const next = Math.max(localHighest, remoteHighest) + 1;
+    const next = highest + 1;
+    highestDoctorCodeCache[organizationId] = next;
     return `${DOCTOR_CODE_PREFIX}${String(next).padStart(6, '0')}`;
 };
 const MATERIAL_TYPE_LABEL_TO_DB: Record<string, string> = {
@@ -479,8 +498,7 @@ const normalizeMaterialMasterType = (value: unknown): string | undefined => {
         // (hydration writes only to memoryCache; persistLocalRowToSqlite
         // mirrors writes to SQLite). One small SELECT is cheap.
         try {
-            const mod = await import('../src/core/db/client');
-            const rows = await mod.db.select<{ material_code: string }>(
+            const rows = await sqliteDb.select<{ material_code: string }>(
                 `SELECT material_code FROM material_master WHERE organization_id = ?`,
                 [organizationId],
             );
@@ -527,18 +545,25 @@ const normalizeMaterialMasterType = (value: unknown): string | undefined => {
     };
 
     const getNextMaterialCode = async (organizationId: string): Promise<string> => {
-        const localHighest = await getHighestLocalMaterialCode(organizationId);
-        let remoteHighest = MATERIAL_CODE_START - 1;
+        let highest = highestMaterialCodeCache[organizationId];
+        
+        if (highest === undefined) {
+            const localHighest = await getHighestLocalMaterialCode(organizationId);
+            let remoteHighest = MATERIAL_CODE_START - 1;
 
-        if (navigator.onLine) {
-            try {
-                remoteHighest = await getHighestRemoteMaterialCode(organizationId);
-            } catch {
-                // Fallback to local sequence when remote read fails.
+            if (navigator.onLine) {
+                try {
+                    remoteHighest = await getHighestRemoteMaterialCode(organizationId);
+                } catch {
+                    // Fallback to local sequence when remote read fails.
+                }
             }
+            highest = Math.max(localHighest, remoteHighest);
+            highestMaterialCodeCache[organizationId] = highest;
         }
 
-        const next = Math.max(localHighest, remoteHighest) + 1;
+        const next = highest + 1;
+        highestMaterialCodeCache[organizationId] = next;
         return String(next).padStart(MATERIAL_CODE_LENGTH, '0');
     };
 
@@ -1030,9 +1055,8 @@ const normalizeMaterialMasterType = (value: unknown): string | undefined => {
     ): Promise<void> {
         if (!SYNC_QUEUE_TABLES.has(tableName)) return;
         try {
-            const [{ db }, { adaptRowForSqlite }] = await Promise.all([
-                import('../src/core/db/client'),
-                import('../src/core/sync/columnFilter'),
+            const [{ adaptRowForSqlite }] = await Promise.all([
+                getColumnFilter(),
             ]);
             // Don't run getSupabasePayload here — that strip targets Supabase's
             // narrower schema and would drop columns that DO exist locally
@@ -1042,7 +1066,7 @@ const normalizeMaterialMasterType = (value: unknown): string | undefined => {
             const snake = toSnake(payload);
             const adapted = await adaptRowForSqlite(tableName, snake, { syncStatus });
             if (!adapted) return; // local table doesn't exist yet
-            await db.upsert(tableName, adapted);
+            await sqliteDb.upsert(tableName, adapted);
         } catch (err) {
             // Non-fatal: memoryCache and the _sync_queue still have the row.
             console.warn(`[storage] persistLocalRowToSqlite(${tableName}) failed:`, err);
@@ -1230,9 +1254,11 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
                         
                         dbPayload.id = generateUUID();
                         if (tableName === 'material_master') {
+                            delete highestMaterialCodeCache[user.organization_id];
                             dbPayload.materialCode = await getNextMaterialCode(user.organization_id);
                             snakeData.material_code = dbPayload.materialCode;
                         } else if (tableName === 'doctor_master') {
+                            delete highestDoctorCodeCache[user.organization_id];
                             dbPayload.doctorCode = await getNextDoctorCode(user.organization_id);
                             snakeData.doctor_code = dbPayload.doctorCode;
                         }
@@ -1392,7 +1418,6 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
         if (SYNC_QUEUE_TABLES.has(tableName)) {
             try {
                 const idCol = tableName === 'profiles' ? 'user_id' : 'id';
-                const { db: sqliteDb } = await import('../src/core/db/client');
                 await sqliteDb.execute(`DELETE FROM ${tableName} WHERE ${idCol} = ?`, [id]);
             } catch (err) {
                 console.warn(`[storage] deleteData(${tableName}) local mirror failed:`, err);
@@ -2437,7 +2462,10 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
         // user sees any cross-device changes (name, roles, etc.).
         if (navigator.onLine) {
             try {
-                const freshProfile = await fetchProfile(userId);
+                const freshProfile = await Promise.race([
+                    fetchProfile(userId),
+                    new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Profile fetch timed out')), 3000))
+                ]);
                 if (freshProfile) return freshProfile;
             } catch (err) {
                 console.warn('Failed to fetch fresh profile during app initialization:', err);

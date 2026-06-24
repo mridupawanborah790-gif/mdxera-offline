@@ -205,6 +205,10 @@ export interface AppConfigurations {
         pricingMode?: 'mrp' | 'rate';
         pharmacy_logo_url?: string;
         dashboard_logo_url?: string;
+        whatsappEnabled?: boolean;
+        whatsappTemplateType?: 'text' | 'document';
+        aisensyApiKey?: string;
+        aisensyCampaignName?: string;
     };
     modules?: { [key: string]: ModuleConfig };
     discountRules?: DiscountRule[];

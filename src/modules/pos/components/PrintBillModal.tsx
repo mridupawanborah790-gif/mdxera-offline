@@ -1,9 +1,11 @@
-﻿
+
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { cacheRemoteAsset } from '@core/utils/assetCache';
 // Fix: Added AppConfigurations to imports
 import type { DetailedBill, InventoryItem, Medicine, AppConfigurations } from '@core/types';
+import { sendWhatsappInvoiceViaAiSensy } from '../../../../services/whatsappService';
+import { supabase } from '@core/db/supabaseClient';
 import MediOneTemplate from '@modules/pos/components/invoice-templates/MediOneTemplate';
 import MargTemplate from '@modules/pos/components/invoice-templates/MargTemplate';
 import GftTemplate from '@modules/pos/components/invoice-templates/GftTemplate';
@@ -27,6 +29,104 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, 
   const [template, setTemplate] = useState<'medi-1' | 'marg' | 'gft' | 'abhigyan' | 'medi-3' | 'thermal' | 'invoice-7'>('marg');
   const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('landscape');
   const [isSharing, setIsSharing] = useState(false);
+  const [isSendingApi, setIsSendingApi] = useState(false);
+
+  const handleWhatsAppApiSend = async () => {
+    if (!bill) return;
+    const apiKey = bill.configurations?.displayOptions?.aisensyApiKey || "";
+    const campaignName = bill.configurations?.displayOptions?.aisensyCampaignName || "";
+    const templateType = bill.configurations?.displayOptions?.whatsappTemplateType || 'document';
+
+    if (!apiKey) {
+      alert("AiSensy API Key is not configured. Please set it in Configuration > WhatsApp API.");
+      return;
+    }
+    if (!campaignName) {
+      alert("AiSensy Campaign Name is not configured. Please set it in Configuration > WhatsApp API.");
+      return;
+    }
+
+    setIsSendingApi(true);
+    try {
+      if (templateType === 'text') {
+        // Send via AiSensy Campaign API without PDF
+        const result = await sendWhatsappInvoiceViaAiSensy(apiKey, campaignName, bill, undefined, 'text');
+        if (result.success) {
+          alert("WhatsApp message sent successfully!");
+        } else {
+          alert(`Failed to send WhatsApp: ${result.message || 'Unknown error'}`);
+        }
+      } else {
+        // Document template flow
+        if (typeof html2pdf === 'undefined') {
+          alert("PDF generation library is not loaded. Please try printing to PDF instead.");
+          return;
+        }
+
+        const invoiceNo = bill.invoiceNumber || bill.id;
+        const element = document.getElementById('print-area');
+        const thermalContentHeightPx = isThermal ? (element?.scrollHeight ?? 0) : 0;
+        const thermalContentHeightMm = isThermal
+          ? Math.max(40, Math.ceil((thermalContentHeightPx * 25.4) / 96) + 2)
+          : 0;
+
+        const opt = {
+            margin: 0,
+            filename: `Invoice_${invoiceNo}.pdf`,
+            image: { type: 'jpeg', quality: 0.95 },
+            html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+            jsPDF: {
+              unit: 'mm',
+              format: isInvoice7 ? [100, 150] : (isThermal ? [thermalContentHeightMm, 76] : 'a5'),
+              orientation: (isThermal || isInvoice7) ? 'portrait' : effectiveOrientation
+            }
+        };
+
+        // Convert images to base64 for html2canvas
+        if (element) await resolveImagesInElement(element);
+        
+        const worker = html2pdf().set(opt).from(element).toPdf();
+        const pdfBlob = await worker.output('blob').then((blob: Blob) => blob);
+
+        // Upload to Supabase Storage Bucket 'invoices'
+        const orgId = bill.organization_id || 'default_org';
+        const storagePath = `${orgId}/${invoiceNo}.pdf`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from('invoices')
+          .upload(storagePath, pdfBlob, {
+            contentType: 'application/pdf',
+            upsert: true
+          });
+
+        if (uploadError) {
+          throw new Error(`Upload to Supabase Storage failed: ${uploadError.message}`);
+        }
+
+        // Get Public URL
+        const { data: publicUrlData } = supabase.storage
+          .from('invoices')
+          .getPublicUrl(storagePath);
+        
+        const pdfUrl = publicUrlData?.publicUrl;
+        if (!pdfUrl) {
+          throw new Error('Failed to generate public URL for invoice PDF.');
+        }
+
+        // Send via AiSensy Campaign API
+        const result = await sendWhatsappInvoiceViaAiSensy(apiKey, campaignName, bill, pdfUrl, 'document');
+        if (result.success) {
+          alert("WhatsApp message with PDF invoice sent successfully!");
+        } else {
+          alert(`Failed to send WhatsApp: ${result.message || 'Unknown error'}`);
+        }
+      }
+    } catch (err: any) {
+      alert(`Error sending WhatsApp: ${err.message || err}`);
+    } finally {
+      setIsSendingApi(false);
+    }
+  };
 
   useEffect(() => {
     if (template === 'medi-3') {
@@ -262,9 +362,9 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, 
                 Save as PDF
             </button>
             
-            {(bill.customerPhone || bill.customerDetails?.phone) && (
-                <button onClick={handleWhatsAppShare} disabled={isSharing} className="px-5 py-2 text-sm font-semibold text-green-700 bg-green-50 border border-green-200 rounded-lg shadow-sm hover:bg-green-100 flex items-center disabled:opacity-50">
-                    {isSharing ? 'Processing...' : 'WhatsApp'}
+            {bill.configurations?.displayOptions?.whatsappEnabled && (bill.customerPhone || bill.customerDetails?.phone) && (
+                <button onClick={handleWhatsAppApiSend} disabled={isSendingApi} className="px-5 py-2 text-sm font-semibold text-white bg-green-600 border border-green-700 rounded-lg shadow-sm hover:bg-green-700 flex items-center disabled:opacity-50">
+                    {isSendingApi ? 'Sending API...' : 'Send through WhatsApp'}
                 </button>
             )}
             

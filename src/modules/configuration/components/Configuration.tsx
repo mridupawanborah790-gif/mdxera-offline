@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Card from '@core/components/ui/Card';
 import type { AppConfigurations, ModuleConfig, InvoiceNumberConfig, DiscountRule, SlabRule, InventoryItem, Transaction, Purchase, RegisteredPharmacy, Medicine, Distributor, SupplierProductMap, Customer } from '@core/types';
 import { configurableModules, MASTER_SHORTCUT_OPTIONS } from '@core/utils/constants';
@@ -234,7 +234,7 @@ const MappingImportPreviewModal = ({ isOpen, onClose, onSave, data, distributors
     </Modal>
 );
 
-type ConfigSection = 'general' | 'posConfig' | 'purchaseConfig' | 'invoiceNumbering' | 'dashboardShortcuts' | 'moduleVisibility' | 'displayOptions' | 'discountMaster' | 'dataManagement';
+type ConfigSection = 'general' | 'posConfig' | 'purchaseConfig' | 'invoiceNumbering' | 'dashboardShortcuts' | 'moduleVisibility' | 'displayOptions' | 'discountMaster' | 'dataManagement' | 'whatsappConfig';
 
 interface ConfigurationPageProps {
     configurations: AppConfigurations;
@@ -271,6 +271,7 @@ const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
     const MAX_DASHBOARD_SHORTCUTS = 12;
     const [activeSection, setActiveSection] = useState<ConfigSection>('general');
     const [localConfigs, setLocalConfigs] = useState<AppConfigurations>(configurations || { organization_id: currentUser?.organization_id || 'MDXERA' });
+    const [showApiKey, setShowApiKey] = useState(false);
 
     // Live sequences fetched from DB for the numbering screen
     const [liveSequences, setLiveSequences] = useState<Record<string, { currentNumber: number, documentNumber: string }>>({});
@@ -740,31 +741,6 @@ const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
         e.target.value = '';
     };
 
-    const classifyAction = (type: string, row: any): 'imported' | 'updated' | 'skipped' => {
-        if (type === 'master') {
-            const found = medicines.find(m => m.materialCode === row.materialCode || (!!row.barcode && m.barcode === row.barcode) || m.name.toLowerCase() === row.name.toLowerCase());
-            return found ? 'updated' : 'imported';
-        }
-        if (type === 'inventory') {
-            const found = inventory.find(i => i.name.toLowerCase() === row.name.toLowerCase() && i.batch === row.batch);
-            return found ? 'updated' : 'imported';
-        }
-        if (type === 'suppliers') {
-            const found = distributors.find(s => (!!s.gst_number && s.gst_number === row.gst_number) || (!!row.mobile && s.mobile === row.mobile) || s.name.toLowerCase() === row.name.toLowerCase());
-            return found ? 'updated' : 'imported';
-        }
-        if (type === 'customers') {
-            const found = customers.find(c => (!!row.phone && c.phone === row.phone) || c.name.toLowerCase() === row.name.toLowerCase());
-            return found ? 'updated' : 'imported';
-        }
-        if (type === 'nomenclature') {
-            const found = (mappings || []).find(m => m.supplier_id === row.supplier_id && m.supplier_product_name.toLowerCase().trim() === row.supplier_product_name.toLowerCase().trim());
-            return found ? 'updated' : 'imported';
-        }
-        if (type === 'sales' || type === 'purchases') return 'imported';
-        return 'skipped';
-    };
-
     const runManagedMigration = async (type: string, rows: any[], saver: (chunk: any[]) => any, successMessage: string) => {
         if (!rows.length || isMigrationRunning || isMigrationInitializing) return;
         setIsMigrationInitializing(true);
@@ -777,6 +753,83 @@ const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
         cancelMigrationRef.current = false;
         setImportType(null);
         setPreviewData([]);
+
+        // Pre-build indexes for fast O(1) lookups during migration
+        const medicineCodes = new Set<string>();
+        const medicineBarcodes = new Set<string>();
+        const medicineNames = new Set<string>();
+
+        const inventoryKeys = new Set<string>();
+
+        const supplierGsts = new Set<string>();
+        const supplierMobiles = new Set<string>();
+        const supplierNames = new Set<string>();
+
+        const customerPhones = new Set<string>();
+        const customerNames = new Set<string>();
+
+        const mappingKeys = new Set<string>();
+
+        if (type === 'master') {
+            medicines.forEach(m => {
+                if (m.materialCode) medicineCodes.add(m.materialCode);
+                if (m.barcode) medicineBarcodes.add(m.barcode);
+                if (m.name) medicineNames.add(m.name.toLowerCase());
+            });
+        } else if (type === 'inventory') {
+            inventory.forEach(i => {
+                if (i.name && i.batch) inventoryKeys.add(`${i.name.toLowerCase()}_${i.batch}`);
+            });
+        } else if (type === 'suppliers') {
+            distributors.forEach(s => {
+                if (s.gst_number) supplierGsts.add(s.gst_number);
+                if (s.mobile) supplierMobiles.add(s.mobile);
+                if (s.name) supplierNames.add(s.name.toLowerCase());
+            });
+        } else if (type === 'customers') {
+            customers.forEach(c => {
+                if (c.phone) customerPhones.add(c.phone);
+                if (c.name) customerNames.add(c.name.toLowerCase());
+            });
+        } else if (type === 'nomenclature') {
+            (mappings || []).forEach(m => {
+                if (m.supplier_id && m.supplier_product_name) {
+                    mappingKeys.add(`${m.supplier_id}_${m.supplier_product_name.toLowerCase().trim()}`);
+                }
+            });
+        }
+
+        const classifyActionFast = (row: any): 'imported' | 'updated' | 'skipped' => {
+            if (type === 'master') {
+                const found = medicineCodes.has(row.materialCode) || 
+                              (!!row.barcode && medicineBarcodes.has(row.barcode)) || 
+                              (!!row.name && medicineNames.has(row.name.toLowerCase()));
+                return found ? 'updated' : 'imported';
+            }
+            if (type === 'inventory') {
+                const key = `${(row.name || '').toLowerCase()}_${row.batch || ''}`;
+                const found = inventoryKeys.has(key);
+                return found ? 'updated' : 'imported';
+            }
+            if (type === 'suppliers') {
+                const found = (!!row.gst_number && supplierGsts.has(row.gst_number)) || 
+                              (!!row.mobile && supplierMobiles.has(row.mobile)) || 
+                              (!!row.name && supplierNames.has(row.name.toLowerCase()));
+                return found ? 'updated' : 'imported';
+            }
+            if (type === 'customers') {
+                const found = (!!row.phone && customerPhones.has(row.phone)) || 
+                              (!!row.name && customerNames.has(row.name.toLowerCase()));
+                return found ? 'updated' : 'imported';
+            }
+            if (type === 'nomenclature') {
+                const key = `${row.supplier_id || ''}_${(row.supplier_product_name || '').toLowerCase().trim()}`;
+                const found = mappingKeys.has(key);
+                return found ? 'updated' : 'imported';
+            }
+            if (type === 'sales' || type === 'purchases') return 'imported';
+            return 'skipped';
+        };
 
         // Ensure progress popup renders before any save work begins.
         await new Promise(resolve => setTimeout(resolve, 0));
@@ -793,7 +846,7 @@ const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
                 if (cancelMigrationRef.current) break;
                 const chunk = rows.slice(idx, idx + CHUNK_SIZE);
                 chunk.forEach(row => {
-                    const action = classifyAction(type, row);
+                    const action = classifyActionFast(row);
                     if (action === 'imported') imported += 1;
                     if (action === 'updated') updated += 1;
                     if (action === 'skipped') skipped += 1;
@@ -938,6 +991,7 @@ const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
                             { id: 'dashboardShortcuts', name: 'Gateway Shortcuts', icon: '🚀' },
                             { id: 'moduleVisibility', name: 'Module Hide / Unhide  (Locked)', icon: '🔒' },
                             { id: 'displayOptions', name: 'Printing & Display', icon: '🖥️' },
+                            { id: 'whatsappConfig', name: 'WhatsApp API', icon: '💬' },
                         ].map(item => (
                             <button 
                                 key={item.id} 
@@ -1366,6 +1420,89 @@ const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
                                             )}
                                         </div>
                                         <p className="text-[9px] font-bold text-gray-400 uppercase tracking-tighter opacity-70">PNG / JPG / JPEG allowed</p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeSection === 'whatsappConfig' && (
+                            <div className="space-y-8 animate-in fade-in duration-300 max-w-3xl">
+                                <h2 className="text-xl font-black text-gray-900 uppercase tracking-tighter border-b-2 border-primary pb-2">WhatsApp Business API (AiSensy)</h2>
+                                
+                                <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest max-w-xl">
+                                    Configure WhatsApp API credentials to send digital invoices to customers via AiSensy.com.
+                                </p>
+
+                                <div className="border border-gray-200 bg-gray-50 p-6 space-y-6">
+                                    <Toggle 
+                                        label="Enable WhatsApp API Integration" 
+                                        enabled={localConfigs.displayOptions?.whatsappEnabled ?? false}
+                                        setEnabled={(v) => handleConfigChange('displayOptions', 'whatsappEnabled', v)}
+                                        description="If enabled, sales invoices can be sent automatically via your AiSensy Campaign."
+                                    />
+
+                                    <div className="space-y-4 pt-6 border-t border-gray-200">
+                                        <div className="flex flex-col gap-1.5 relative">
+                                            <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">
+                                                AiSensy API Campaign Key
+                                            </label>
+                                            <div className="relative flex items-center">
+                                                <input
+                                                    type={showApiKey ? "text" : "password"}
+                                                    value={localConfigs.displayOptions?.aisensyApiKey || ''}
+                                                    onChange={e => handleConfigChange('displayOptions', 'aisensyApiKey', e.target.value)}
+                                                    placeholder="Enter your Developer API Key"
+                                                    className="w-full tally-input !text-sm pr-10"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowApiKey(!showApiKey)}
+                                                    className="absolute right-3 text-gray-500 hover:text-gray-700 focus:outline-none"
+                                                >
+                                                    {showApiKey ? (
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                                                    ) : (
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                                    )}
+                                                </button>
+                                            </div>
+                                            <p className="text-[9px] font-bold text-gray-400 uppercase tracking-tighter opacity-70">
+                                                Copy the "API Campaign Key" from Developer Hub in AiSensy.
+                                            </p>
+                                        </div>
+
+                                        <div className="flex flex-col gap-1.5">
+                                            <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">
+                                                AiSensy API Campaign Name
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={localConfigs.displayOptions?.aisensyCampaignName || ''}
+                                                onChange={e => handleConfigChange('displayOptions', 'aisensyCampaignName', e.target.value)}
+                                                placeholder="e.g. send_invoice"
+                                                className="w-full tally-input !text-sm"
+                                            />
+                                            <p className="text-[9px] font-bold text-gray-400 uppercase tracking-tighter opacity-70">
+                                                The exact name of the Live API Campaign created in your AiSensy dashboard.
+                                            </p>
+                                        </div>
+
+                                        <div className="flex flex-col gap-1.5">
+                                            <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">
+                                                WhatsApp Template Type
+                                            </label>
+                                            <select 
+                                                value={localConfigs.displayOptions?.whatsappTemplateType || 'document'}
+                                                onChange={e => handleConfigChange('displayOptions', 'whatsappTemplateType', e.target.value)}
+                                                className="w-full tally-input !text-sm"
+                                            >
+                                                <option value="text">Text Template (5 Variables: Customer, Pharmacy, Inv#, Total, Date)</option>
+                                                <option value="document">Document Template (PDF Attachment + 4 Variables)</option>
+                                            </select>
+                                            <p className="text-[9px] font-bold text-gray-400 uppercase tracking-tighter opacity-70">
+                                                Select "Text Template" if your template does not accept a PDF attachment, or "Document Template" to send the PDF invoice.
+                                            </p>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

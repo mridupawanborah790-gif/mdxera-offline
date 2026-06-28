@@ -617,12 +617,12 @@ const normalizeMaterialMasterType = (value: unknown): string | undefined => {
     // Same trigger applies to suppliers — `controlGlId` is intentionally omitted.
     const SUPPLIERS_ALLOWED_FIELDS = [
         'id', 'organization_id', 'user_id', 'created_by_id',
-        'name', 'brandAgencies', 'category', 'contactPerson',
+        'name', 'brandAgencies', 'brand_agencies', 'category', 'contactPerson', 'contact_person',
         'phone', 'mobile', 'email', 'website',
         'address', 'address_line1', 'address_line2', 'area', 'city', 'pincode', 'district', 'state', 'country',
-        'gstNumber', 'panNumber', 'drugLicense', 'foodLicense', 'tanNumber', 'paymentDetails',
-        'opening_balance', 'supplierGroup', 'currentBalance', 'ledger',
-        'is_active', 'is_blocked', 'remarks', 'createdAt', 'updatedAt'
+        'gstNumber', 'gst_number', 'panNumber', 'pan_number', 'drugLicense', 'drug_license', 'foodLicense', 'food_license', 'tanNumber', 'tan_number', 'paymentDetails', 'payment_details',
+        'opening_balance', 'supplierGroup', 'supplier_group', 'currentBalance', 'current_balance', 'ledger',
+        'is_active', 'is_blocked', 'remarks', 'createdAt', 'created_at', 'updatedAt', 'updated_at'
     ];
 
     const isValidUuid = (value: any): boolean => 
@@ -891,7 +891,7 @@ const normalizeMaterialMasterType = (value: unknown): string | undefined => {
                 'supplier_id', 'master_medicine_id', 'supplier_product_name', 'auto_apply', 
                 'full_name', 'pharmacy_name', 'manager_name', 'address_line1', 'address_line2', 
                 'contact_person', 'opening_balance', 'supplier_group', 'control_gl_id',
-                'retailer_gstin', 'dl_valid_to', 'food_license', 
+                'retailer_gstin', 'dl_valid_to', 'food_license', 'gst_number', 'drug_license', 'pan_number', 'tan_number',
                 'bank_account_name', 'bank_account_number', 'bank_ifsc_code', 
                 'bank_upi_id', 'authorized_signatory', 'pharmacy_logo_url', 'dashboard_logo_url', 
                 'terms_and_conditions', 'purchase_order_terms', 'organization_type', 'subscription_plan', 
@@ -987,7 +987,7 @@ const normalizeMaterialMasterType = (value: unknown): string | undefined => {
                 'supplier_id', 'master_medicine_id', 'supplier_product_name', 'auto_apply', 
                 'full_name', 'pharmacy_name', 'manager_name', 'address_line1', 'address_line2', 
                 'contact_person', 'opening_balance', 'supplier_group', 'control_gl_id',
-                'retailer_gstin', 'dl_valid_to', 'food_license', 
+                'retailer_gstin', 'dl_valid_to', 'food_license', 'gst_number', 'drug_license', 'pan_number', 'tan_number',
                 'bank_account_name', 'bank_account_number', 'bank_ifsc_code', 
                 'bank_upi_id', 'authorized_signatory', 'pharmacy_logo_url', 'dashboard_logo_url', 
                 'terms_and_conditions', 'purchase_order_terms', 'organization_type', 'subscription_plan', 
@@ -2580,9 +2580,8 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
 
         if (!entity) throw new Error(`${type} not found`);
         const ledger = Array.isArray(entity.ledger) ? [...entity.ledger] : [];
-        const prevBalance = ledger.length > 0 ? Number(ledger[ledger.length - 1].balance || 0) : Number(entity.opening_balance || 0);
-        const newBalance = prevBalance + Number(entry.debit || 0) - Number(entry.credit || 0);
-        entity.ledger = [...ledger, { ...entry, balance: newBalance }];
+        const nextLedger = [...ledger, entry];
+        entity.ledger = recalculateLedger(nextLedger, Number(entity.opening_balance || 0), type);
         return await saveData(tableName, entity, user, true);
     };
 
@@ -3020,8 +3019,8 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
             type: 'payment',
             description: args.description,
             entryCategory: args.entryCategory || 'invoice_payment',
-            debit: 0,
-            credit: Number(args.amount),
+            debit: Number(args.amount),
+            credit: 0,
             balance: 0,
             paymentMode: args.paymentMode,
             bankAccountId: isCashMode ? undefined : args.bankAccountId,
@@ -3103,8 +3102,17 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
         const normalizedInvoiceRef = String(invoiceRef || '').trim();
         if (!normalizedInvoiceRef) throw new Error('Selected invoice is not available for this customer.');
         const normalizedInvoiceRefLower = normalizedInvoiceRef.toLowerCase();
-        const normalizedCustomerName = String(customer.name || '').trim().toLowerCase();
+        
         const customerLedger = Array.isArray(customer.ledger) ? customer.ledger : [];
+        const openingEntry = customerLedger.find(e => e && e.id === normalizedInvoiceRef && e.type === 'openingBalance');
+        if (openingEntry) {
+            return Number(openingEntry.debit || 0) - Number(openingEntry.credit || 0);
+        }
+        if (normalizedInvoiceRef === 'opening-balance-id-fallback') {
+            return Number(customer.opening_balance || 0);
+        }
+
+        const normalizedCustomerName = String(customer.name || '').trim().toLowerCase();
         const adjustedCategories = new Set([
             'invoice_payment_adjustment',
             'down_payment_adjustment',
@@ -3201,6 +3209,18 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
     };
 
     const getSupplierInvoiceTotal = async (supplier: Supplier, invoiceId: string, user: RegisteredPharmacy): Promise<number> => {
+        const normalizedInvoiceId = String(invoiceId || '').trim();
+        if (!normalizedInvoiceId) throw new Error('Selected invoice is not available for this supplier.');
+        
+        const supplierLedger = Array.isArray(supplier.ledger) ? supplier.ledger : [];
+        const openingEntry = supplierLedger.find(e => e && e.id === normalizedInvoiceId && e.type === 'openingBalance');
+        if (openingEntry) {
+            return Number(openingEntry.credit || 0) - Number(openingEntry.debit || 0);
+        }
+        if (normalizedInvoiceId === 'opening-balance-id-fallback') {
+            return Number(supplier.opening_balance || 0);
+        }
+
         // Legacy IndexedDB check
         const localPurchases = await idb.getAll(STORES.PURCHASES) as Purchase[];
         let localMatch = localPurchases.find((row) => row?.id === invoiceId && row?.status !== 'cancelled' && String(row?.supplier || '').trim().toLowerCase() === String(supplier.name || '').trim().toLowerCase());
@@ -3316,18 +3336,36 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
     };
     const AUTO_LEDGER_PREFIX = '[AUTO_LEDGER]';
 
+    const getEntryTypeWeight = (entry: TransactionLedgerItem): number => {
+        if (entry.type === 'openingBalance') return 0;
+        if (entry.type === 'purchase' || entry.type === 'sale') return 1;
+        if (entry.type === 'payment' && (entry.entryCategory === 'invoice_payment' || entry.entryCategory === 'down_payment')) return 2;
+        if (String(entry.entryCategory || '').includes('adjustment')) return 3;
+        return 4;
+    };
+
     const sortLedgerEntries = (entries: TransactionLedgerItem[]) => {
         return [...entries].sort((a, b) => {
             const dateDiff = new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime();
             if (dateDiff !== 0) return dateDiff;
+            const weightA = getEntryTypeWeight(a);
+            const weightB = getEntryTypeWeight(b);
+            if (weightA !== weightB) return weightA - weightB;
             return (a.id || '').localeCompare(b.id || '');
         });
     };
 
-    const recalculateLedger = (entries: TransactionLedgerItem[], openingBalance = 0): TransactionLedgerItem[] => {
-        let runningBalance = Number(openingBalance || 0);
+    const recalculateLedger = (entries: TransactionLedgerItem[], openingBalance = 0, partyType: 'customer' | 'supplier'): TransactionLedgerItem[] => {
+        const hasOpeningBalanceEntry = entries.some(entry => entry.type === 'openingBalance' && entry.status !== 'cancelled');
+        let runningBalance = hasOpeningBalanceEntry ? 0 : Number(openingBalance || 0);
         return sortLedgerEntries(entries).map((entry) => {
-            runningBalance += Number(entry.debit || 0) - Number(entry.credit || 0);
+            if (entry.status !== 'cancelled') {
+                if (partyType === 'supplier') {
+                    runningBalance += Number(entry.credit || 0) - Number(entry.debit || 0);
+                } else {
+                    runningBalance += Number(entry.debit || 0) - Number(entry.credit || 0);
+                }
+            }
             return { ...entry, balance: runningBalance };
         });
     };
@@ -3439,7 +3477,7 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
             balance: 0,
         });
 
-        entity.ledger = recalculateLedger(ledger, Number(entity.opening_balance || 0));
+        entity.ledger = recalculateLedger(ledger, Number(entity.opening_balance || 0), args.ownerType);
         await saveData(tableName, entity, user, true);
     };
 
@@ -3462,7 +3500,7 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
             });
         }
 
-        entity.ledger = recalculateLedger(nextLedger, entity.opening_balance || 0);
+        entity.ledger = recalculateLedger(nextLedger, entity.opening_balance || 0, owner.type);
         await saveData(tableName, entity, user, true);
     };
 
@@ -3989,8 +4027,8 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
                     date: purchase.date,
                     type: 'purchase',
                     description: `Purchase Voucher ${purchase.invoiceNumber || purchase.id}`,
-                    debit: Number(purchase.totalAmount || 0),
-                    credit: 0,
+                    debit: 0,
+                    credit: Number(purchase.totalAmount || 0),
                 },
                 purchase.status !== 'cancelled'
             );
@@ -4208,8 +4246,8 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
                 date: purchaseReturn.date,
                 type: 'return',
                 description: `Purchase Return ${purchaseReturn.id}`,
-                debit: 0,
-                credit: Number(purchaseReturn.totalValue || 0),
+                debit: Number(purchaseReturn.totalValue || 0),
+                credit: 0,
             },
             true
         );

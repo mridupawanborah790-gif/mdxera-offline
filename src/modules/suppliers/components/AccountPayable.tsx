@@ -110,6 +110,14 @@ const getPaymentAmount = (entry: TransactionLedgerItem): number => {
     return Number(entry.debit || 0);
 };
 
+const getEntryTypeWeight = (entry: TransactionLedgerItem): number => {
+    if (entry.type === 'openingBalance') return 0;
+    if (entry.type === 'purchase' || entry.type === 'sale') return 1;
+    if (entry.type === 'payment' && (entry.entryCategory === 'invoice_payment' || entry.entryCategory === 'down_payment')) return 2;
+    if (String(entry.entryCategory || '').includes('adjustment')) return 3;
+    return 4;
+};
+
 const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases, bankOptions, onRecordPayment, onRecordDownPaymentAdjustment, onRecordInvoicePaymentAdjustment, onCancelPaymentEntry, currentUser }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedDistributor, setSelectedDistributor] = useState<Distributor | null>(null);
@@ -281,6 +289,47 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
         const mapByInvoice = new Map(supplierPurchases.map(item => [item.id, { ...item }]));
         const ledger = Array.isArray(selectedDistributor.ledger) ? selectedDistributor.ledger : [];
 
+        // Expose Opening Balance as a clearable "pseudo-invoice" item if a positive balance exists
+        const openingEntries = ledger.filter(e => e && e.type === 'openingBalance' && e.status !== 'cancelled');
+        openingEntries.forEach(entry => {
+            const obVal = Number(entry.credit || 0) - Number(entry.debit || 0);
+            if (obVal > 0) {
+                mapByInvoice.set(entry.id, {
+                    id: entry.id,
+                    date: entry.date,
+                    invoiceNumber: 'OPENING-BAL',
+                    invoiceAmount: obVal,
+                    paid: 0,
+                    balance: obVal,
+                    status: 'Open',
+                    paymentDate: '-',
+                    paymentMode: 'Opening Balance',
+                    bankName: '-',
+                    voucherRef: '-',
+                    latestPaymentEntry: undefined,
+                });
+            }
+        });
+        
+        const hasOpeningEntry = ledger.some(e => e && e.type === 'openingBalance' && e.status !== 'cancelled');
+        if (!hasOpeningEntry && Number(selectedDistributor.opening_balance || 0) > 0) {
+            const obVal = Number(selectedDistributor.opening_balance || 0);
+            mapByInvoice.set('opening-balance-id-fallback', {
+                id: 'opening-balance-id-fallback',
+                date: selectedDistributor.created_at || new Date().toISOString(),
+                invoiceNumber: 'OPENING-BAL',
+                invoiceAmount: obVal,
+                paid: 0,
+                balance: obVal,
+                status: 'Open',
+                paymentDate: '-',
+                paymentMode: 'Opening Balance',
+                bankName: '-',
+                voucherRef: '-',
+                latestPaymentEntry: undefined,
+            });
+        }
+
         for (const entry of ledger) {
             if (!entry || entry.type !== 'payment' || entry.status === 'cancelled') continue;
             if (!['invoice_payment_adjustment', 'down_payment_adjustment', 'invoice_payment_adjustment_reversal', 'down_payment_adjustment_reversal'].includes(String(entry.entryCategory || ''))) {
@@ -343,7 +392,7 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
     const ledgerRows = useMemo(() => {
         if (!selectedDistributor) return [];
         const ledger = Array.isArray(selectedDistributor.ledger) ? selectedDistributor.ledger : [];
-        return [...ledger]
+        const resolved = [...ledger]
             .filter(Boolean)
             .map((entry) => {
                 const resolvedMeta = ledgerVoucherMap[entry.id];
@@ -353,12 +402,49 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
                     journalEntryNumber: entry.journalEntryNumber || resolvedMeta?.journalEntryNumber,
                     referenceInvoiceNumber: entry.referenceInvoiceNumber || resolvedMeta?.referenceInvoiceNumber,
                 };
-            })
-            .sort((a, b) => {
-                const dateA = new Date(a.date).getTime();
-                const dateB = new Date(b.date).getTime();
-                return (Number.isNaN(dateB) ? 0 : dateB) - (Number.isNaN(dateA) ? 0 : dateA);
             });
+
+        // Sort chronologically ascending to calculate running balance correctly.
+        const sortedAsc = [...resolved].sort((a, b) => {
+            const dateA = new Date(a.date).getTime();
+            const dateB = new Date(b.date).getTime();
+            if (dateA !== dateB) {
+                return (Number.isNaN(dateA) ? 0 : dateA) - (Number.isNaN(dateB) ? 0 : dateB);
+            }
+            const weightA = getEntryTypeWeight(a);
+            const weightB = getEntryTypeWeight(b);
+            if (weightA !== weightB) return weightA - weightB;
+            return (a.id || '').localeCompare(b.id || '');
+        });
+
+        // Supplier is a Creditor. Credit increases balance, Debit decreases balance.
+        // If there is an active openingBalance entry, start running balance at 0 to avoid doubling.
+        const hasOpeningBalanceEntry = sortedAsc.some(entry => entry.type === 'openingBalance' && entry.status !== 'cancelled');
+        let runningBalance = hasOpeningBalanceEntry ? 0 : Number(selectedDistributor.opening_balance || 0);
+
+        const calculated = sortedAsc.map(entry => {
+            if (entry.status !== 'cancelled') {
+                runningBalance += Number(entry.credit || 0) - Number(entry.debit || 0);
+            }
+            return {
+                ...entry,
+                balance: runningBalance
+            };
+        });
+
+        // Now sort descending by date (newest first) for UI display.
+        // On equal dates, sort by descending weight (newest adjustment first, then payment, then invoice, then opening balance)
+        return calculated.sort((a, b) => {
+            const dateA = new Date(a.date).getTime();
+            const dateB = new Date(b.date).getTime();
+            if (dateA !== dateB) {
+                return (Number.isNaN(dateB) ? 0 : dateB) - (Number.isNaN(dateA) ? 0 : dateA);
+            }
+            const weightA = getEntryTypeWeight(a);
+            const weightB = getEntryTypeWeight(b);
+            if (weightA !== weightB) return weightB - weightA;
+            return (b.id || '').localeCompare(a.id || '');
+        });
     }, [selectedDistributor, ledgerVoucherMap]);
 
     const payableHistoryRows = useMemo(
@@ -398,7 +484,9 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
     };
 
     const totalInvoiceOutstanding = useMemo(
-        () => invoiceRows.reduce((sum, row) => sum + Number(row.balance || 0), 0),
+        () => invoiceRows
+            .filter(row => row.invoiceNumber !== 'OPENING-BAL')
+            .reduce((sum, row) => sum + Number(row.balance || 0), 0),
         [invoiceRows]
     );
 

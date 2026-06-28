@@ -98,6 +98,14 @@ const formatDisplayDate = (value?: string): string => {
     return parsed.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
+const getEntryTypeWeight = (entry: TransactionLedgerItem): number => {
+    if (entry.type === 'openingBalance') return 0;
+    if (entry.type === 'purchase' || entry.type === 'sale') return 1;
+    if (entry.type === 'payment' && (entry.entryCategory === 'invoice_payment' || entry.entryCategory === 'down_payment')) return 2;
+    if (String(entry.entryCategory || '').includes('adjustment')) return 3;
+    return 4;
+};
+
 const getReceivableInvoiceRowsForCustomer = (
     customer: Customer | null,
     transactions: Transaction[]
@@ -128,6 +136,47 @@ const getReceivableInvoiceRowsForCustomer = (
             .map((s) => [String(s.invoiceNumber).trim().toLowerCase(), s.id])
     );
     const ledger = Array.isArray(customer.ledger) ? customer.ledger : [];
+
+    // Expose Opening Balance as a clearable "pseudo-invoice" item if a positive balance exists
+    const openingEntries = ledger.filter(e => e && e.type === 'openingBalance' && e.status !== 'cancelled');
+    openingEntries.forEach(entry => {
+        const obVal = Number(entry.debit || 0) - Number(entry.credit || 0);
+        if (obVal > 0) {
+            mapByInvoice.set(entry.id, {
+                id: entry.id,
+                invoiceNumber: 'OPENING-BAL',
+                date: entry.date,
+                invoiceAmount: obVal,
+                received: 0,
+                balance: obVal,
+                status: 'Open',
+                paymentDate: '-',
+                paymentMode: 'Opening Balance',
+                bankName: '-',
+                voucherRef: '-',
+                latestPaymentEntry: undefined,
+            });
+        }
+    });
+
+    const hasOpeningEntry = ledger.some(e => e && e.type === 'openingBalance' && e.status !== 'cancelled');
+    if (!hasOpeningEntry && Number(customer.opening_balance || 0) > 0) {
+        const obVal = Number(customer.opening_balance || 0);
+        mapByInvoice.set('opening-balance-id-fallback', {
+            id: 'opening-balance-id-fallback',
+            invoiceNumber: 'OPENING-BAL',
+            date: new Date().toISOString(),
+            invoiceAmount: obVal,
+            received: 0,
+            balance: obVal,
+            status: 'Open',
+            paymentDate: '-',
+            paymentMode: 'Opening Balance',
+            bankName: '-',
+            voucherRef: '-',
+            latestPaymentEntry: undefined,
+        });
+    }
     const touchedInvoiceIds = new Set<string>();
 
     for (const entry of ledger) {
@@ -235,7 +284,7 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
         if (!Array.isArray(customers) || !Array.isArray(transactions)) return {} as Record<string, number>;
         return customers.reduce<Record<string, number>>((acc, customer) => {
             const rows = getReceivableInvoiceRowsForCustomer(customer, transactions);
-            acc[customer.id] = Number(rows.reduce((sum, row) => sum + Number(row.balance || 0), 0).toFixed(2));
+            acc[customer.id] = Number(rows.filter(row => row.invoiceNumber !== 'OPENING-BAL').reduce((sum, row) => sum + Number(row.balance || 0), 0).toFixed(2));
             return acc;
         }, {});
     }, [customers, transactions]);
@@ -289,13 +338,49 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
     const ledgerRows = useMemo(() => {
         if (!selectedCustomer) return [];
         const ledger = Array.isArray(selectedCustomer.ledger) ? selectedCustomer.ledger : [];
-        return [...ledger]
-            .filter(Boolean)
-            .sort((a, b) => {
-                const timeA = new Date(a.date).getTime();
-                const timeB = new Date(b.date).getTime();
-                return (Number.isNaN(timeB) ? 0 : timeB) - (Number.isNaN(timeA) ? 0 : timeA);
-            });
+        const resolved = [...ledger].filter(Boolean);
+
+        // Sort chronologically ascending to calculate running balance correctly.
+        const sortedAsc = [...resolved].sort((a, b) => {
+            const dateA = new Date(a.date).getTime();
+            const dateB = new Date(b.date).getTime();
+            if (dateA !== dateB) {
+                return (Number.isNaN(dateA) ? 0 : dateA) - (Number.isNaN(dateB) ? 0 : dateB);
+            }
+            const weightA = getEntryTypeWeight(a);
+            const weightB = getEntryTypeWeight(b);
+            if (weightA !== weightB) return weightA - weightB;
+            return (a.id || '').localeCompare(b.id || '');
+        });
+
+        // Customer is a Debtor. Debit increases balance, Credit decreases balance.
+        // If there is an active openingBalance entry, start running balance at 0 to avoid doubling.
+        const hasOpeningBalanceEntry = sortedAsc.some(entry => entry.type === 'openingBalance' && entry.status !== 'cancelled');
+        let runningBalance = hasOpeningBalanceEntry ? 0 : Number(selectedCustomer.opening_balance || 0);
+
+        const calculated = sortedAsc.map(entry => {
+            if (entry.status !== 'cancelled') {
+                runningBalance += Number(entry.debit || 0) - Number(entry.credit || 0);
+            }
+            return {
+                ...entry,
+                balance: runningBalance
+            };
+        });
+
+        // Now sort descending by date (newest first) for UI display.
+        // On equal dates, sort by descending weight (newest adjustment first, then payment, then invoice, then opening balance)
+        return calculated.sort((a, b) => {
+            const dateA = new Date(a.date).getTime();
+            const dateB = new Date(b.date).getTime();
+            if (dateA !== dateB) {
+                return (Number.isNaN(dateB) ? 0 : dateB) - (Number.isNaN(dateA) ? 0 : dateA);
+            }
+            const weightA = getEntryTypeWeight(a);
+            const weightB = getEntryTypeWeight(b);
+            if (weightA !== weightB) return weightB - weightA;
+            return (b.id || '').localeCompare(a.id || '');
+        });
     }, [selectedCustomer]);
 
     const receiptHistoryRows = useMemo(
@@ -332,7 +417,7 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
     };
 
     const invoiceOutstandingTotal = useMemo(
-        () => Number(invoiceRows.reduce((sum, row) => sum + Number(row.balance || 0), 0).toFixed(2)),
+        () => Number(invoiceRows.filter(row => row.invoiceNumber !== 'OPENING-BAL').reduce((sum, row) => sum + Number(row.balance || 0), 0).toFixed(2)),
         [invoiceRows]
     );
     const receivableBreakdown = useMemo(

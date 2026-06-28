@@ -96,13 +96,13 @@ export const calculateSupplierPayableBreakdown = (
     const purchaseInvoices = round2(
         ledger
             .filter((row) => row.status !== 'cancelled' && row.type === 'purchase')
-            .reduce((sum, row) => sum + Number(row.debit || 0), 0)
+            .reduce((sum, row) => sum + Number(row.credit || 0), 0)
     );
 
     const purchaseReturns = round2(
         ledger
             .filter((row) => row.status !== 'cancelled' && row.type === 'return')
-            .reduce((sum, row) => sum + Number(row.credit || 0), 0)
+            .reduce((sum, row) => sum + Number(row.debit || 0), 0)
     );
 
     const adjustedPayments = round2(
@@ -125,8 +125,16 @@ export const calculateSupplierPayableBreakdown = (
         }, 0)
     );
 
+    const openingAdjustments = round2(
+        ledger
+            .filter((row) => row.status !== 'cancelled' && (row.entryCategory === 'invoice_payment_adjustment' || row.entryCategory === 'down_payment_adjustment'))
+            .filter((row) => row.referenceInvoiceId === 'opening-balance-id-fallback' || row.referenceInvoiceNumber === 'OPENING-BAL' || ledger.some(e => e.id === row.referenceInvoiceId && e.type === 'openingBalance'))
+            .reduce((sum, row) => sum + Number(row.adjustedAmount || 0), 0)
+    );
+    const openingPayableOutstanding = round2(Math.max(openingPayable - openingAdjustments, 0));
+
     const invoiceOutstanding = round2(Math.max(invoiceOutstandingTotal, 0));
-    const grossRaw = round2(openingPayable + invoiceOutstanding - purchaseReturns);
+    const grossRaw = round2(openingPayableOutstanding + invoiceOutstanding - purchaseReturns);
     const grossPayable = round2(Math.max(grossRaw, 0));
     const returnDrivenAdvance = round2(Math.max(-grossRaw, 0));
     const unadjustedAdvance = round2(openingAdvance + unadjustedVoucherPayments + returnDrivenAdvance);
@@ -199,8 +207,16 @@ export const calculateCustomerReceivableBreakdown = (
         }, 0)
     );
 
+    const openingAdjustments = round2(
+        ledger
+            .filter((row) => row.status !== 'cancelled' && (row.entryCategory === 'invoice_payment_adjustment' || row.entryCategory === 'down_payment_adjustment'))
+            .filter((row) => row.referenceInvoiceId === 'opening-balance-id-fallback' || row.referenceInvoiceNumber === 'OPENING-BAL' || ledger.some(e => e.id === row.referenceInvoiceId && e.type === 'openingBalance'))
+            .reduce((sum, row) => sum + Number(row.adjustedAmount || 0), 0)
+    );
+    const openingReceivableOutstanding = round2(Math.max(openingReceivable - openingAdjustments, 0));
+
     const invoiceOutstanding = round2(Math.max(invoiceOutstandingTotal, 0));
-    const grossRaw = round2(openingReceivable + invoiceOutstanding - salesReturns);
+    const grossRaw = round2(openingReceivableOutstanding + invoiceOutstanding - salesReturns);
     const grossReceivable = round2(Math.max(grossRaw, 0));
     const returnDrivenAdvance = round2(Math.max(-grossRaw, 0));
     const unadjustedAdvance = round2(openingAdvance + unadjustedVoucherReceipts + returnDrivenAdvance);

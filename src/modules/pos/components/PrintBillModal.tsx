@@ -82,16 +82,19 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, 
             }
         };
 
+        const orgId = bill.organization_id || 'default_org';
+        const storagePath = `${orgId}/${invoiceNo}.pdf`;
+        console.debug('[WhatsApp PDF Flow] Starting PDF generation...', { invoiceNo, orgId, storagePath });
+
         // Convert images to base64 for html2canvas
         if (element) await resolveImagesInElement(element);
         
         const worker = html2pdf().set(opt).from(element).toPdf();
         const pdfBlob = await worker.output('blob').then((blob: Blob) => blob);
+        console.debug('[WhatsApp PDF Flow] PDF Blob generated successfully.', { size: pdfBlob.size });
 
         // Upload to Supabase Storage Bucket 'invoices'
-        const orgId = bill.organization_id || 'default_org';
-        const storagePath = `${orgId}/${invoiceNo}.pdf`;
-        
+        console.debug('[WhatsApp PDF Flow] Uploading to Supabase bucket "invoices"...');
         const { error: uploadError } = await supabase.storage
           .from('invoices')
           .upload(storagePath, pdfBlob, {
@@ -100,8 +103,10 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, 
           });
 
         if (uploadError) {
+          console.error('[WhatsApp PDF Flow] Supabase upload failed:', uploadError);
           throw new Error(`Upload to Supabase Storage failed: ${uploadError.message}`);
         }
+        console.debug('[WhatsApp PDF Flow] PDF uploaded successfully to Supabase.');
 
         // Get Public URL
         const { data: publicUrlData } = supabase.storage
@@ -112,9 +117,12 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, 
         if (!pdfUrl) {
           throw new Error('Failed to generate public URL for invoice PDF.');
         }
+        console.debug('[WhatsApp PDF Flow] PDF Public URL:', pdfUrl);
 
         // Send via AiSensy Campaign API
+        console.debug('[WhatsApp PDF Flow] Dispatching AiSensy campaign...', { campaignName });
         const result = await sendWhatsappInvoiceViaAiSensy(apiKey, campaignName, bill, pdfUrl, 'document');
+        console.debug('[WhatsApp PDF Flow] AiSensy response:', result);
         if (result.success) {
           alert("WhatsApp message with PDF invoice sent successfully!");
         } else {
@@ -364,7 +372,7 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, 
             
             {bill.configurations?.displayOptions?.whatsappEnabled && (bill.customerPhone || bill.customerDetails?.phone) && (
                 <button onClick={handleWhatsAppApiSend} disabled={isSendingApi} className="px-5 py-2 text-sm font-semibold text-white bg-green-600 border border-green-700 rounded-lg shadow-sm hover:bg-green-700 flex items-center disabled:opacity-50">
-                    {isSendingApi ? 'Sending API...' : 'Send through WhatsApp'}
+                    {isSendingApi ? 'Sending ...' : 'Send through WhatsApp'}
                 </button>
             )}
             

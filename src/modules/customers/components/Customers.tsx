@@ -68,6 +68,9 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
     const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'blocked'>('all');
     const [isPriceListModalOpen, setIsPriceListModalOpen] = useState(false);
 
+    const [currentPage, setCurrentPage] = useState(1);
+    const pageSize = 10;
+
     const filteredCustomers = useMemo(() => {
         return customers
             .filter(c => {
@@ -79,6 +82,16 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
             .filter(c => fuzzyMatch(c.name, searchTerm) || fuzzyMatch(c.phone, searchTerm))
             .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     }, [customers, searchTerm, statusFilter]);
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchTerm, statusFilter]);
+
+    const totalPages = Math.ceil(filteredCustomers.length / pageSize);
+    const paginatedCustomers = useMemo(() => {
+        const start = (currentPage - 1) * pageSize;
+        return filteredCustomers.slice(start, start + pageSize);
+    }, [filteredCustomers, currentPage, pageSize]);
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -112,8 +125,12 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
             </div>
 
             <div className="p-4 flex-1 flex gap-4 min-h-0 overflow-hidden">
-                <Card className="w-1/3 flex flex-col p-0 tally-border overflow-hidden bg-white">
+                <Card className="w-1/3 h-full flex flex-col p-0 tally-border overflow-hidden bg-white">
                     <div className="p-3 border-b border-gray-400 bg-gray-50 flex flex-col gap-2 flex-shrink-0">
+                        <div className="flex gap-2">
+                            {perms.entry && <button onClick={() => setIsAddModalOpen(true)} className="flex-1 py-2 tally-button-primary text-[10px] uppercase">F2: Create</button>}
+                            {perms.export && <button onClick={handleExportClick} className="flex-1 py-2 tally-border bg-white font-bold uppercase text-[10px]">F3: Export</button>}
+                        </div>
                         <input type="text" placeholder="Find Customer..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full border border-gray-400 p-2 text-sm font-bold focus:bg-yellow-50 outline-none shadow-sm" />
                         <div className="flex justify-between items-center">
                             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as any)} className="text-[10px] font-black uppercase text-primary border-none bg-transparent outline-none">
@@ -124,7 +141,7 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
                         </div>
                     </div>
                     <div className="flex-1 overflow-y-auto divide-y divide-gray-200">
-                        {filteredCustomers.map(cust => (
+                        {paginatedCustomers.map(cust => (
                             <button
                                 key={cust.id}
                                 type="button"
@@ -139,13 +156,28 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
                             </button>
                         ))}
                     </div>
-                    <div className="p-3 border-t border-gray-400 bg-gray-50 flex gap-2 flex-shrink-0">
-                        {perms.entry && <button onClick={() => setIsAddModalOpen(true)} className="flex-1 py-2 tally-button-primary text-[10px] uppercase">F2: Create</button>}
-                        {perms.export && <button onClick={handleExportClick} className="flex-1 py-2 tally-border bg-white font-bold uppercase text-[10px]">F3: Export</button>}
+                    <div className="p-3 border-t border-gray-400 bg-gray-50 flex items-center justify-between flex-shrink-0 text-xs font-bold uppercase">
+                        <button 
+                            type="button"
+                            disabled={currentPage === 1} 
+                            onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}
+                            className="px-3 py-1 border border-gray-300 bg-white disabled:opacity-50 text-[10px]"
+                        >
+                            Prev
+                        </button>
+                        <span>Page {currentPage} of {Math.max(totalPages, 1)}</span>
+                        <button 
+                            type="button"
+                            disabled={currentPage === totalPages || totalPages === 0} 
+                            onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))}
+                            className="px-3 py-1 border border-gray-300 bg-white disabled:opacity-50 text-[10px]"
+                        >
+                            Next
+                        </button>
                     </div>
                 </Card>
 
-                <Card className="flex-1 p-0 tally-border bg-white overflow-hidden flex flex-col shadow-inner">
+                <Card className="flex-1 h-full p-0 tally-border bg-white overflow-hidden flex flex-col shadow-inner">
                     {selectedCustomer ? (
                         <div className="flex flex-col h-full overflow-hidden">
                             <div className="p-6 bg-gray-100 border-b border-gray-400 flex justify-between items-start flex-shrink-0">

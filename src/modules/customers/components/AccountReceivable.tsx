@@ -235,6 +235,8 @@ const getReceivableInvoiceRowsForCustomer = (
 const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transactions, bankOptions, onRecordPayment, onRecordDownPaymentAdjustment, onRecordInvoicePaymentAdjustment, onCancelPaymentEntry, currentUser }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+    const [currentPage, setCurrentPage] = useState(1);
+    const pageSize = 10;
     const [selectedInvoiceId, setSelectedInvoiceId] = useState('');
     const [amount, setAmount] = useState<number | ''>('');
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -300,6 +302,82 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
                 return right - left;
             });
     }, [customers, searchTerm, customerInvoiceOutstandingMap]);
+
+    const overallStats = useMemo(() => {
+        let totalCustomers = 0;
+        let activeCustomers = 0;
+        let totalNetOutstanding = 0;
+        let totalGrossReceivable = 0;
+        let totalUnadjustedAdvance = 0;
+        let totalSalesInvoices = 0;
+        let totalSalesReturns = 0;
+        let totalAdjustedReceipts = 0;
+        let customersWithOutstandingCount = 0;
+        let customersWithAdvanceCount = 0;
+
+        if (Array.isArray(customers)) {
+            customers.forEach((c) => {
+                if (!c || c.is_blocked === true) return;
+                totalCustomers++;
+                activeCustomers++;
+                const outstandingTotal = customerInvoiceOutstandingMap[c.id] || 0;
+                const breakdown = calculateCustomerReceivableBreakdown(c, outstandingTotal);
+                
+                totalNetOutstanding += breakdown.netOutstanding;
+                totalGrossReceivable += breakdown.grossReceivable;
+                totalUnadjustedAdvance += breakdown.unadjustedAdvance;
+                totalSalesInvoices += breakdown.salesInvoices;
+                totalSalesReturns += breakdown.salesReturns;
+                totalAdjustedReceipts += breakdown.adjustedReceipts;
+
+                if (breakdown.netOutstanding > 0) {
+                    customersWithOutstandingCount++;
+                } else if (breakdown.netOutstanding < 0) {
+                    customersWithAdvanceCount++;
+                }
+            });
+        }
+
+        return {
+            totalCustomers,
+            activeCustomers,
+            totalNetOutstanding,
+            totalGrossReceivable,
+            totalUnadjustedAdvance,
+            totalSalesInvoices,
+            totalSalesReturns,
+            totalAdjustedReceipts,
+            customersWithOutstandingCount,
+            customersWithAdvanceCount,
+        };
+    }, [customers, customerInvoiceOutstandingMap]);
+
+    const topDebtors = useMemo(() => {
+        if (!Array.isArray(customers)) return [];
+        return customers
+            .filter(c => c && c.is_blocked !== true)
+            .map(c => {
+                const outstandingTotal = customerInvoiceOutstandingMap[c.id] || 0;
+                const breakdown = calculateCustomerReceivableBreakdown(c, outstandingTotal);
+                return {
+                    customer: c,
+                    netOutstanding: breakdown.netOutstanding
+                };
+            })
+            .filter(item => item.netOutstanding > 0)
+            .sort((a, b) => b.netOutstanding - a.netOutstanding)
+            .slice(0, 5);
+    }, [customers, customerInvoiceOutstandingMap]);
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchTerm]);
+
+    const totalPages = Math.ceil(filteredCustomers.length / pageSize);
+    const paginatedCustomers = useMemo(() => {
+        const start = (currentPage - 1) * pageSize;
+        return filteredCustomers.slice(start, start + pageSize);
+    }, [filteredCustomers, currentPage, pageSize]);
 
     useEffect(() => {
         if (!selectedCustomer) return;
@@ -676,13 +754,13 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
             </div>
 
             <div className="p-4 flex-1 flex gap-4 min-h-0 overflow-hidden">
-                <Card className="w-1/3 flex flex-col p-0 tally-border overflow-hidden bg-white">
+                <Card className="w-1/3 h-full flex flex-col p-0 tally-border overflow-hidden bg-white">
                     <div className="p-3 border-b border-gray-400 bg-gray-50 flex-shrink-0">
                         <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Search Ledger</label>
                         <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Name or Phone..." className="w-full border border-gray-400 p-2 text-sm font-bold focus:bg-yellow-50 outline-none" />
                     </div>
                     <div className="flex-1 overflow-y-auto divide-y divide-gray-200">
-                        {filteredCustomers.map(c => {
+                        {paginatedCustomers.map(c => {
                             const balance = calculateCustomerReceivableBreakdown(c, customerInvoiceOutstandingMap[c.id] || 0).netOutstanding;
                             const isSelected = selectedCustomer?.id === c.id;
                             return (
@@ -704,9 +782,28 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
                             );
                         })}
                     </div>
+                    <div className="p-3 border-t border-gray-400 bg-gray-50 flex items-center justify-between flex-shrink-0 text-xs font-bold uppercase">
+                        <button 
+                            type="button"
+                            disabled={currentPage === 1} 
+                            onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}
+                            className="px-3 py-1 border border-gray-300 bg-white disabled:opacity-50 text-[10px]"
+                        >
+                            Prev
+                        </button>
+                        <span>Page {currentPage} of {Math.max(totalPages, 1)}</span>
+                        <button 
+                            type="button"
+                            disabled={currentPage === totalPages || totalPages === 0} 
+                            onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))}
+                            className="px-3 py-1 border border-gray-300 bg-white disabled:opacity-50 text-[10px]"
+                        >
+                            Next
+                        </button>
+                    </div>
                 </Card>
 
-                <Card className="flex-1 p-6 tally-border bg-white overflow-y-auto">
+                <Card className="flex-1 h-full p-6 tally-border bg-white overflow-y-auto">
                     {selectedCustomer ? (
                         <div className="space-y-4">
                             <div className="flex items-start justify-between">
@@ -995,8 +1092,98 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
                             </Modal>
                         </div>
                     ) : (
-                        <div className="h-full flex flex-col items-center justify-center text-center opacity-30">
-                            <p className="text-2xl font-black uppercase tracking-[0.2em]">Select Ledger to review receivables</p>
+                        <div className="space-y-6">
+                            <div className="pb-4 border-b border-gray-300">
+                                <h2 className="text-xl font-black text-primary uppercase tracking-[0.1em]">Accounts Receivable Dashboard</h2>
+                                <p className="text-xs text-gray-500 font-bold uppercase mt-1">Overview & summary statistics of all outstanding customer accounts</p>
+                            </div>
+
+                            {/* Metrics Grid */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div className="p-4 rounded border border-red-200 bg-red-50/50 hover:shadow-md transition-shadow">
+                                    <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest block">Total Net Receivables</span>
+                                    <span className="text-2xl font-black text-red-700 mt-1 block">
+                                        ₹{overallStats.totalNetOutstanding.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                    </span>
+                                </div>
+                                <div className="p-4 rounded border border-gray-200 bg-gray-50 hover:shadow-md transition-shadow">
+                                    <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest block">Gross Receivables</span>
+                                    <span className="text-2xl font-black text-gray-800 mt-1 block">
+                                        ₹{overallStats.totalGrossReceivable.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                    </span>
+                                </div>
+                                <div className="p-4 rounded border border-emerald-200 bg-emerald-50/50 hover:shadow-md transition-shadow">
+                                    <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest block">Total Advances Received</span>
+                                    <span className="text-2xl font-black text-emerald-700 mt-1 block">
+                                        ₹{overallStats.totalUnadjustedAdvance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                    </span>
+                                </div>
+                            </div>
+
+                            {/* Stats Cards */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="p-4 rounded border border-gray-200 bg-white space-y-3">
+                                    <h3 className="text-xs font-black uppercase text-primary border-b border-gray-100 pb-2">Customer Base Analysis</h3>
+                                    <div className="grid grid-cols-2 gap-4 text-xs font-bold uppercase">
+                                        <div className="text-gray-500">Active Debtors:</div>
+                                        <div className="text-right text-gray-900">{overallStats.activeCustomers}</div>
+                                        <div className="text-gray-500">With Debit Balance:</div>
+                                        <div className="text-right text-red-600">{overallStats.customersWithOutstandingCount}</div>
+                                        <div className="text-gray-500">With Credit/Advance:</div>
+                                        <div className="text-right text-emerald-700">{overallStats.customersWithAdvanceCount}</div>
+                                    </div>
+                                </div>
+
+                                <div className="p-4 rounded border border-gray-200 bg-white space-y-3">
+                                    <h3 className="text-xs font-black uppercase text-primary border-b border-gray-100 pb-2">Ledger Transaction Summary</h3>
+                                    <div className="grid grid-cols-2 gap-4 text-xs font-bold uppercase">
+                                        <div className="text-gray-500">Total Sales (Debit):</div>
+                                        <div className="text-right text-gray-900">₹{overallStats.totalSalesInvoices.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                                        <div className="text-gray-500">Total Returns (Credit):</div>
+                                        <div className="text-right text-emerald-700">₹{overallStats.totalSalesReturns.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                                        <div className="text-gray-500">Total Settled Receipts:</div>
+                                        <div className="text-right text-primary">₹{overallStats.totalAdjustedReceipts.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Top Debtors */}
+                            <div className="p-4 rounded border border-gray-200 bg-white space-y-3">
+                                <h3 className="text-xs font-black uppercase text-primary border-b border-gray-100 pb-2">Top Debtors (Highest Outstanding)</h3>
+                                {topDebtors.length === 0 ? (
+                                    <p className="text-xs font-bold text-gray-400 py-2">No active outstanding receivables.</p>
+                                ) : (
+                                    <div className="overflow-x-auto">
+                                        <table className="min-w-full text-xs">
+                                            <thead>
+                                                <tr className="bg-gray-50 text-[10px] font-black text-gray-500 uppercase">
+                                                    <th className="p-2 text-left">Customer Name</th>
+                                                    <th className="p-2 text-left">Contact Info</th>
+                                                    <th className="p-2 text-right">Net Outstanding</th>
+                                                    <th className="p-2 text-center">Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100">
+                                                {topDebtors.map(({ customer, netOutstanding }) => (
+                                                    <tr key={customer.id} className="hover:bg-gray-50/50">
+                                                        <td className="p-2 font-black text-gray-900 uppercase">{customer.name}</td>
+                                                        <td className="p-2 font-bold text-gray-500">{customer.phone || 'No Phone'}</td>
+                                                        <td className="p-2 text-right font-black text-red-700">₹{netOutstanding.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                                                        <td className="p-2 text-center">
+                                                            <button
+                                                                onClick={() => setSelectedCustomer(customer)}
+                                                                className="text-primary hover:underline font-black uppercase text-[10px]"
+                                                            >
+                                                                Review Ledger
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     )}
                 </Card>

@@ -83,7 +83,8 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, 
         };
 
         const orgId = bill.organization_id || 'default_org';
-        const storagePath = `${orgId}/${invoiceNo}.pdf`;
+        // Use template and timestamp in the storage path to avoid CDN/provider caching of overwritten PDFs
+        const storagePath = `${orgId}/${invoiceNo}_${template}_${Date.now()}.pdf`;
         console.debug('[WhatsApp PDF Flow] Starting PDF generation...', { invoiceNo, orgId, storagePath });
 
         // Convert images to base64 for html2canvas

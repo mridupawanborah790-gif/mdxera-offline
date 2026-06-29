@@ -1953,6 +1953,16 @@ const App: React.FC = () => {
                 );
                 if (localGl?.[0]?.id) return localGl[0].id;
             }
+
+            // Fallback to localStorage configuration cache (useful when completely offline and SQLite is not synced yet)
+            const storageKey = `mdxera_company_configuration_v2_${organizationId}`;
+            const cachedData = localStorage.getItem(storageKey);
+            if (cachedData) {
+                const parsed = JSON.parse(cachedData);
+                const glMasters = parsed?.glMasters || [];
+                const matched = glMasters.find((g: any) => g.glCode === glCode && (g.activeStatus || 'Active') === 'Active');
+                if (matched?.id) return matched.id;
+            }
         } catch (e) {
             console.warn('[resolveControlGlByCode] local lookup failed, falling back to Supabase', e);
         }
@@ -2018,12 +2028,24 @@ const App: React.FC = () => {
                 const mappedLocal = localAssign?.[0]?.control_gl_id;
                 if (mappedLocal) return mappedLocal;
             }
+
+            // Fallback to localStorage configuration cache (useful when completely offline and SQLite is not synced yet)
+            const storageKey = `mdxera_company_configuration_v2_${organizationId}`;
+            const cachedData = localStorage.getItem(storageKey);
+            if (cachedData) {
+                const parsed = JSON.parse(cachedData);
+                const assignments = parsed?.glAssignments || [];
+                const matched = assignments.find((a: any) =>
+                    (a.assignmentScope || 'MATERIAL') === 'PARTY_GROUP' &&
+                    (a.partyType || '').toLowerCase() === partyType.toLowerCase() &&
+                    (a.partyGroup || '').trim().toLowerCase() === trimmedGroup.toLowerCase() &&
+                    (a.activeStatus || 'Active') === 'Active'
+                );
+                if (matched?.controlGL) return matched.controlGL;
+            }
+
             // Whether or not we had an active book locally, fall back to the
-            // GL-code lookup (also local-first). This is critical for offline
-            // mode: if no party-group mapping exists locally for this group,
-            // we can still resolve the default control GL by its well-known
-            // code (120000 customer / 210000 supplier) from the local
-            // gl_master mirror — so customer/supplier creation works offline.
+            // GL-code lookup (also local-first).
             const codeMatch = await resolveControlGlByCode(organizationId, fallbackGlCode);
             if (codeMatch) return codeMatch;
         } catch (e) {

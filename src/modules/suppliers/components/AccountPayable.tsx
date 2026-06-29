@@ -3,7 +3,7 @@ import Card from '@core/components/ui/Card';
 import Modal from '@core/components/ui/Modal';
 import PrintSupplierVoucherModal from './PrintSupplierVoucherModal';
 import { Distributor, Purchase, RegisteredPharmacy, TransactionLedgerItem } from '@core/types';
-import { calculateSupplierPayableBreakdown, getOutstandingBalance, formatVoucherNo } from '@core/utils/helpers';
+import { calculateSupplierPayableBreakdown, getOutstandingBalance, formatVoucherNo, getSupplierInvoiceOutstandingTotalFromPurchases } from '@core/utils/helpers';
 import { fuzzyMatch } from '@core/utils/search';
 import { handleEnterToNextField } from '@core/utils/navigation';
 import { numberToWords } from '@core/utils/numberToWords';
@@ -121,6 +121,8 @@ const getEntryTypeWeight = (entry: TransactionLedgerItem): number => {
 const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases, bankOptions, onRecordPayment, onRecordDownPaymentAdjustment, onRecordInvoicePaymentAdjustment, onCancelPaymentEntry, currentUser }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedDistributor, setSelectedDistributor] = useState<Distributor | null>(null);
+    const [currentPage, setCurrentPage] = useState(1);
+    const pageSize = 10;
     const [selectedInvoiceId, setSelectedInvoiceId] = useState('');
     const [amount, setAmount] = useState<number | ''>('');
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -166,6 +168,90 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
             .filter(d => fuzzyMatch(d.name || '', searchTerm) || fuzzyMatch(d.gst_number || '', searchTerm))
             .sort((a, b) => getOutstandingBalance(b) - getOutstandingBalance(a));
     }, [distributors, searchTerm]);
+
+    const supplierInvoiceOutstandingMap = useMemo(() => {
+        if (!Array.isArray(distributors) || !Array.isArray(purchases)) return {} as Record<string, number>;
+        return distributors.reduce<Record<string, number>>((acc, supplier) => {
+            acc[supplier.id] = getSupplierInvoiceOutstandingTotalFromPurchases(supplier, purchases);
+            return acc;
+        }, {});
+    }, [distributors, purchases]);
+
+    const overallStats = useMemo(() => {
+        let totalSuppliers = 0;
+        let activeSuppliers = 0;
+        let totalNetOutstanding = 0;
+        let totalGrossPayable = 0;
+        let totalUnadjustedAdvance = 0;
+        let totalPurchaseInvoices = 0;
+        let totalPurchaseReturns = 0;
+        let totalAdjustedPayments = 0;
+        let suppliersWithOutstandingCount = 0;
+        let suppliersWithAdvanceCount = 0;
+
+        if (Array.isArray(distributors)) {
+            distributors.forEach((d) => {
+                if (!d || d.is_blocked === true) return;
+                totalSuppliers++;
+                activeSuppliers++;
+                const outstandingTotal = supplierInvoiceOutstandingMap[d.id] || 0;
+                const breakdown = calculateSupplierPayableBreakdown(d, outstandingTotal);
+                
+                totalNetOutstanding += breakdown.netOutstanding;
+                totalGrossPayable += breakdown.grossPayable;
+                totalUnadjustedAdvance += breakdown.unadjustedAdvance;
+                totalPurchaseInvoices += breakdown.purchaseInvoices;
+                totalPurchaseReturns += breakdown.purchaseReturns;
+                totalAdjustedPayments += breakdown.adjustedPayments;
+
+                if (breakdown.netOutstanding > 0) {
+                    suppliersWithOutstandingCount++;
+                } else if (breakdown.netOutstanding < 0) {
+                    suppliersWithAdvanceCount++;
+                }
+            });
+        }
+
+        return {
+            totalSuppliers,
+            activeSuppliers,
+            totalNetOutstanding,
+            totalGrossPayable,
+            totalUnadjustedAdvance,
+            totalPurchaseInvoices,
+            totalPurchaseReturns,
+            totalAdjustedPayments,
+            suppliersWithOutstandingCount,
+            suppliersWithAdvanceCount,
+        };
+    }, [distributors, supplierInvoiceOutstandingMap]);
+
+    const topCreditors = useMemo(() => {
+        if (!Array.isArray(distributors)) return [];
+        return distributors
+            .filter(d => d && d.is_blocked !== true)
+            .map(d => {
+                const outstandingTotal = supplierInvoiceOutstandingMap[d.id] || 0;
+                const breakdown = calculateSupplierPayableBreakdown(d, outstandingTotal);
+                return {
+                    supplier: d,
+                    netOutstanding: breakdown.netOutstanding
+                };
+            })
+            .filter(item => item.netOutstanding > 0)
+            .sort((a, b) => b.netOutstanding - a.netOutstanding)
+            .slice(0, 5);
+    }, [distributors, supplierInvoiceOutstandingMap]);
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchTerm]);
+
+    const totalPages = Math.ceil(filteredDistributors.length / pageSize);
+    const paginatedDistributors = useMemo(() => {
+        const start = (currentPage - 1) * pageSize;
+        return filteredDistributors.slice(start, start + pageSize);
+    }, [filteredDistributors, currentPage, pageSize]);
 
     useEffect(() => {
         if (!selectedDistributor?.id) return;
@@ -734,13 +820,13 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
             </div>
 
             <div className="p-4 flex-1 flex gap-4 min-h-0 overflow-hidden">
-                <Card className="w-1/3 flex flex-col p-0 tally-border overflow-hidden bg-white">
+                <Card className="w-1/3 h-full flex flex-col p-0 tally-border overflow-hidden bg-white">
                     <div className="p-3 border-b border-gray-400 bg-gray-50 flex-shrink-0">
                         <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Search Ledger</label>
                         <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Name or GSTIN..." className="w-full border border-gray-400 p-2 text-sm font-bold focus:bg-yellow-50 outline-none" />
                     </div>
                     <div className="flex-1 overflow-y-auto divide-y divide-gray-200">
-                        {filteredDistributors.map(d => {
+                        {paginatedDistributors.map(d => {
                             const isSelected = selectedDistributor?.id === d.id;
                             return (
                                 <button 
@@ -756,9 +842,28 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
                             );
                         })}
                     </div>
+                    <div className="p-3 border-t border-gray-400 bg-gray-50 flex items-center justify-between flex-shrink-0 text-xs font-bold uppercase">
+                        <button 
+                            type="button"
+                            disabled={currentPage === 1} 
+                            onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}
+                            className="px-3 py-1 border border-gray-300 bg-white disabled:opacity-50 text-[10px]"
+                        >
+                            Prev
+                        </button>
+                        <span>Page {currentPage} of {Math.max(totalPages, 1)}</span>
+                        <button 
+                            type="button"
+                            disabled={currentPage === totalPages || totalPages === 0} 
+                            onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))}
+                            className="px-3 py-1 border border-gray-300 bg-white disabled:opacity-50 text-[10px]"
+                        >
+                            Next
+                        </button>
+                    </div>
                 </Card>
 
-                <Card className="flex-1 p-6 tally-border bg-white overflow-y-auto">
+                <Card className="flex-1 h-full p-6 tally-border bg-white overflow-y-auto">
                     {selectedDistributor ? (
                         <div className="space-y-6">
                             <div className="pb-4 border-b border-gray-300 flex items-start justify-between gap-4">
@@ -1058,8 +1163,98 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
                             </Modal>
                         </div>
                     ) : (
-                        <div className="h-full flex flex-col items-center justify-center text-center opacity-30">
-                            <p className="text-2xl font-black uppercase tracking-[0.2em]">Select Ledger to review payables</p>
+                        <div className="space-y-6">
+                            <div className="pb-4 border-b border-gray-300">
+                                <h2 className="text-xl font-black text-primary uppercase tracking-[0.1em]">Accounts Payable Dashboard</h2>
+                                <p className="text-xs text-gray-500 font-bold uppercase mt-1">Overview & summary statistics of all outstanding supplier accounts</p>
+                            </div>
+
+                            {/* Metrics Grid */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div className="p-4 rounded border border-red-200 bg-red-50/50 hover:shadow-md transition-shadow">
+                                    <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest block">Total Net Payables</span>
+                                    <span className="text-2xl font-black text-red-700 mt-1 block">
+                                        ₹{overallStats.totalNetOutstanding.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                    </span>
+                                </div>
+                                <div className="p-4 rounded border border-gray-200 bg-gray-50 hover:shadow-md transition-shadow">
+                                    <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest block">Gross Payables</span>
+                                    <span className="text-2xl font-black text-gray-880 mt-1 block">
+                                        ₹{overallStats.totalGrossPayable.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                    </span>
+                                </div>
+                                <div className="p-4 rounded border border-emerald-200 bg-emerald-50/50 hover:shadow-md transition-shadow">
+                                    <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest block">Total Advances Paid</span>
+                                    <span className="text-2xl font-black text-emerald-700 mt-1 block">
+                                        ₹{overallStats.totalUnadjustedAdvance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                    </span>
+                                </div>
+                            </div>
+
+                            {/* Stats Cards */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="p-4 rounded border border-gray-200 bg-white space-y-3">
+                                    <h3 className="text-xs font-black uppercase text-primary border-b border-gray-100 pb-2">Supplier Base Analysis</h3>
+                                    <div className="grid grid-cols-2 gap-4 text-xs font-bold uppercase">
+                                        <div className="text-gray-500">Active Creditors:</div>
+                                        <div className="text-right text-gray-900">{overallStats.activeSuppliers}</div>
+                                        <div className="text-gray-500">With Credit Balance:</div>
+                                        <div className="text-right text-red-600">{overallStats.suppliersWithOutstandingCount}</div>
+                                        <div className="text-gray-500">With Debit/Advance:</div>
+                                        <div className="text-right text-emerald-700">{overallStats.suppliersWithAdvanceCount}</div>
+                                    </div>
+                                </div>
+
+                                <div className="p-4 rounded border border-gray-200 bg-white space-y-3">
+                                    <h3 className="text-xs font-black uppercase text-primary border-b border-gray-100 pb-2">Ledger Transaction Summary</h3>
+                                    <div className="grid grid-cols-2 gap-4 text-xs font-bold uppercase">
+                                        <div className="text-gray-500">Total Purchases (Credit):</div>
+                                        <div className="text-right text-gray-900">₹{overallStats.totalPurchaseInvoices.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                                        <div className="text-gray-500">Total Returns (Debit):</div>
+                                        <div className="text-right text-emerald-700">₹{overallStats.totalPurchaseReturns.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                                        <div className="text-gray-500">Total Settled Payments:</div>
+                                        <div className="text-right text-primary">₹{overallStats.totalAdjustedPayments.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Top Creditors */}
+                            <div className="p-4 rounded border border-gray-200 bg-white space-y-3">
+                                <h3 className="text-xs font-black uppercase text-primary border-b border-gray-100 pb-2">Top Creditors (Highest Outstanding)</h3>
+                                {topCreditors.length === 0 ? (
+                                    <p className="text-xs font-bold text-gray-400 py-2">No active outstanding payables.</p>
+                                ) : (
+                                    <div className="overflow-x-auto">
+                                        <table className="min-w-full text-xs">
+                                            <thead>
+                                                <tr className="bg-gray-50 text-[10px] font-black text-gray-500 uppercase">
+                                                    <th className="p-2 text-left">Supplier Name</th>
+                                                    <th className="p-2 text-left">GSTIN</th>
+                                                    <th className="p-2 text-right">Net Outstanding</th>
+                                                    <th className="p-2 text-center">Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100">
+                                                {topCreditors.map(({ supplier, netOutstanding }) => (
+                                                    <tr key={supplier.id} className="hover:bg-gray-50/50">
+                                                        <td className="p-2 font-black text-gray-900 uppercase">{supplier.name}</td>
+                                                        <td className="p-2 font-bold text-gray-500">{supplier.gst_number || 'NO GSTIN'}</td>
+                                                        <td className="p-2 text-right font-black text-red-700">₹{netOutstanding.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                                                        <td className="p-2 text-center">
+                                                            <button
+                                                                onClick={() => setSelectedDistributor(supplier)}
+                                                                className="text-primary hover:underline font-black uppercase text-[10px]"
+                                                            >
+                                                                Review Ledger
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     )}
                 </Card>

@@ -1034,7 +1034,7 @@ const Reports: React.FC<ReportsProps> = ({
         const invoiceAdjustments = new Map<string, { previous: number; current: number }>();
 
         customerLedger.forEach((entry: any) => {
-          if (!entry || entry.type !== 'payment' || entry.status === 'cancelled') return;
+          if (!entry || entry.type !== 'payment' || (entry.status === 'cancelled' && entry.type !== 'payment')) return;
           const entryCategory = String(entry.entryCategory || '');
           if (!adjustmentCategories.has(entryCategory)) return;
 
@@ -1045,8 +1045,7 @@ const Reports: React.FC<ReportsProps> = ({
           );
           if (!invoiceId) return;
 
-          const multiplier = entryCategory.endsWith('_reversal') ? -1 : 1;
-          const adjustedAmount = round2(Number(entry.adjustedAmount || 0) * multiplier);
+          const adjustedAmount = round2(Number(entry.adjustedAmount || 0));
           const bucket = invoiceAdjustments.get(invoiceId) || { previous: 0, current: 0 };
           const entryDate = String(entry.date || '');
           if (entryDate && new Date(entryDate) < new Date(startDate)) {
@@ -1108,7 +1107,7 @@ const Reports: React.FC<ReportsProps> = ({
         const supplierLedger = Array.isArray(supplier?.ledger) ? supplier.ledger : [];
 
         supplierLedger.forEach((entry: any) => {
-          if (!entry || entry.type !== 'payment' || entry.status === 'cancelled') return;
+          if (!entry || entry.type !== 'payment' || (entry.status === 'cancelled' && entry.type !== 'payment')) return;
           const entryCategory = String(entry.entryCategory || '');
           if (!adjustmentCategories.has(entryCategory)) return;
 
@@ -1119,8 +1118,7 @@ const Reports: React.FC<ReportsProps> = ({
           );
           if (!invoiceId) return;
 
-          const multiplier = entryCategory.endsWith('_reversal') ? -1 : 1;
-          const adjustedAmount = round2(Number(entry.adjustedAmount || 0) * multiplier);
+          const adjustedAmount = round2(Number(entry.adjustedAmount || 0));
           const bucket = invoiceAdjustments.get(invoiceId) || { previous: 0, current: 0 };
           const entryDate = String(entry.date || '');
           if (entryDate && new Date(entryDate) < new Date(startDate)) {

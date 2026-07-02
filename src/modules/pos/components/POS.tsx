@@ -977,7 +977,7 @@ const POS = forwardRef<any, POSProps>(({
         const touchedInvoiceIds = new Set<string>();
 
         for (const entry of ledger) {
-            if (!entry || entry.type !== 'payment' || entry.status === 'cancelled') continue;
+            if (!entry || entry.type !== 'payment' || (entry.status === 'cancelled' && entry.type !== 'payment')) continue;
             const entryCategory = String(entry.entryCategory || '');
             if (!['invoice_payment_adjustment', 'down_payment_adjustment', 'invoice_payment_adjustment_reversal', 'down_payment_adjustment_reversal'].includes(entryCategory)) continue;
 
@@ -986,8 +986,7 @@ const POS = forwardRef<any, POSProps>(({
             if (!target) continue;
 
             const adjustedAmount = Number(entry.adjustedAmount || 0);
-            const multiplier = entryCategory.endsWith('_reversal') ? -1 : 1;
-            target.received += (adjustedAmount * multiplier);
+            target.received += adjustedAmount;
             target.balance = Number((target.invoiceAmount - target.received).toFixed(2));
             if (target.balance < 0) target.balance = 0;
             touchedInvoiceIds.add(target.id);

@@ -180,7 +180,7 @@ const getReceivableInvoiceRowsForCustomer = (
     const touchedInvoiceIds = new Set<string>();
 
     for (const entry of ledger) {
-        if (!entry || entry.type !== 'payment' || entry.status === 'cancelled') continue;
+        if (!entry || entry.type !== 'payment' || (entry.status === 'cancelled' && entry.type !== 'payment')) continue;
         const entryCategory = String(entry.entryCategory || '');
         if (!['invoice_payment_adjustment', 'down_payment_adjustment', 'invoice_payment_adjustment_reversal', 'down_payment_adjustment_reversal'].includes(entryCategory)) {
             continue;
@@ -191,8 +191,7 @@ const getReceivableInvoiceRowsForCustomer = (
         const target = invoiceId && mapByInvoice.get(invoiceId);
         if (target) {
             const adjustedAmount = Number(entry.adjustedAmount || 0);
-            const multiplier = entryCategory.endsWith('_reversal') ? -1 : 1;
-            target.received += (adjustedAmount * multiplier);
+            target.received += adjustedAmount;
             target.balance = Number((target.invoiceAmount - target.received).toFixed(2));
             if (target.balance <= 0) {
                 target.balance = 0;
@@ -255,6 +254,10 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
     const [adjustmentDate, setAdjustmentDate] = useState(new Date().toISOString().split('T')[0]);
     const [voucherInvoiceAdjustments, setVoucherInvoiceAdjustments] = useState<Record<string, number>>({});
     const [printingVoucher, setPrintingVoucher] = useState<TransactionLedgerItem | null>(null);
+    const [cancellationVoucher, setCancellationVoucher] = useState<TransactionLedgerItem | null>(null);
+    const [cancellationDate, setCancellationDate] = useState<string>('');
+    const [cancellationReason, setCancellationReason] = useState<string>('User requested cancellation');
+    const [cancellationError, setCancellationError] = useState<string>('');
 
     const normalizedPaymentMode = paymentMode.trim().toLowerCase();
     const isCashMode = normalizedPaymentMode === 'cash';
@@ -437,7 +440,7 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
         let runningBalance = hasOpeningBalanceEntry ? 0 : Number(selectedCustomer.opening_balance || 0);
 
         const calculated = sortedAsc.map(entry => {
-            if (entry.status !== 'cancelled') {
+            if (entry.status !== 'cancelled' || entry.type === 'payment') {
                 runningBalance += Number(entry.debit || 0) - Number(entry.credit || 0);
             }
             return {
@@ -733,17 +736,14 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
         }
     };
 
-    const handleCancelEntry = async (entry: TransactionLedgerItem) => {
+    const handleCancelEntry = (entry: TransactionLedgerItem) => {
         if (!selectedCustomer || entry.status === 'cancelled') return;
-        const reason = window.prompt('Enter cancellation reason', 'User requested cancellation');
-        if (!reason) return;
-        await onCancelPaymentEntry({
-            ownerType: 'customer',
-            ownerId: selectedCustomer.id,
-            paymentEntryId: entry.id,
-            cancellationDate: new Date().toISOString().split('T')[0],
-            reason,
-        });
+        const initialDate = new Date().toISOString().split('T')[0];
+        const paymentDateStr = entry.date ? entry.date.split('T')[0] : '';
+        setCancellationVoucher(entry);
+        setCancellationDate(initialDate >= paymentDateStr ? initialDate : paymentDateStr);
+        setCancellationReason('User requested cancellation');
+        setCancellationError('');
     };
 
     return (
@@ -1090,6 +1090,96 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
                                     </div>
                                 )}
                             </Modal>
+                            {cancellationVoucher && (
+                                <Modal
+                                    isOpen={Boolean(cancellationVoucher)}
+                                    onClose={() => setCancellationVoucher(null)}
+                                    title="Cancel Payment Voucher"
+                                    widthClass="max-w-md"
+                                >
+                                    <form onSubmit={async (e) => {
+                                        e.preventDefault();
+                                        if (!selectedCustomer || !cancellationVoucher) return;
+                                        const paymentDateStr = cancellationVoucher.date ? cancellationVoucher.date.split('T')[0] : '';
+                                        if (cancellationDate < paymentDateStr) {
+                                            setCancellationError(`Cancellation date cannot be less than the payment date (${formatDisplayDate(cancellationVoucher.date)}).`);
+                                            return;
+                                        }
+                                        setIsSubmitting(true);
+                                        try {
+                                            await onCancelPaymentEntry({
+                                                ownerType: 'customer',
+                                                ownerId: selectedCustomer.id,
+                                                paymentEntryId: cancellationVoucher.id,
+                                                cancellationDate,
+                                                reason: cancellationReason,
+                                            });
+                                            setCancellationVoucher(null);
+                                        } catch (err) {
+                                            setCancellationError(err instanceof Error ? err.message : 'Failed to cancel payment.');
+                                        } finally {
+                                            setIsSubmitting(false);
+                                        }
+                                    }} className="p-4 space-y-4 text-xs font-bold text-gray-700">
+                                        <div>
+                                            <span className="text-[10px] font-black uppercase text-gray-500 block mb-1">Voucher Number / Info</span>
+                                            <div className="border border-gray-400 p-2 bg-gray-50 text-gray-900 font-bold uppercase text-xs">
+                                                {formatVoucherNo(cancellationVoucher.journalEntryNumber || cancellationVoucher.journalEntryId || cancellationVoucher.id)} (Amount: ₹{Number(cancellationVoucher.credit || cancellationVoucher.debit || 0).toFixed(2)})
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <span className="text-[10px] font-black uppercase text-gray-500 block mb-1">Payment Date</span>
+                                            <div className="border border-gray-400 p-2 bg-gray-50 text-gray-900 font-bold uppercase text-xs">
+                                                {formatDisplayDate(cancellationVoucher.date)}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] font-black uppercase text-gray-500 block mb-1">Cancellation Date</label>
+                                            <input
+                                                type="date"
+                                                required
+                                                value={cancellationDate}
+                                                onChange={(e) => {
+                                                    setCancellationDate(e.target.value);
+                                                    setCancellationError('');
+                                                }}
+                                                min={cancellationVoucher.date ? cancellationVoucher.date.split('T')[0] : undefined}
+                                                className="w-full border border-gray-400 p-2 text-xs font-bold focus:bg-yellow-50 outline-none"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] font-black uppercase text-gray-500 block mb-1">Reason for Cancellation</label>
+                                            <textarea
+                                                required
+                                                value={cancellationReason}
+                                                onChange={(e) => setCancellationReason(e.target.value)}
+                                                className="w-full border border-gray-400 p-2 text-xs font-bold focus:bg-yellow-50 outline-none h-20 resize-none"
+                                            />
+                                        </div>
+                                        {cancellationError && (
+                                            <div className="text-red-700 text-[10px] font-black uppercase bg-red-50 p-2 border border-red-400">
+                                                {cancellationError}
+                                            </div>
+                                        )}
+                                        <div className="flex justify-end gap-2 pt-2 border-t border-gray-300">
+                                            <button
+                                                type="button"
+                                                onClick={() => setCancellationVoucher(null)}
+                                                className="px-4 py-2 border border-gray-400 font-bold uppercase text-[10px] hover:bg-gray-50"
+                                            >
+                                                Cancel
+                                            </button>
+                                            <button
+                                                type="submit"
+                                                disabled={isSubmitting}
+                                                className="px-4 py-2 bg-red-700 text-white font-bold uppercase text-[10px] hover:bg-red-800"
+                                            >
+                                                {isSubmitting ? 'Processing...' : 'Confirm Reversal'}
+                                            </button>
+                                        </div>
+                                    </form>
+                                </Modal>
+                            )}
                         </div>
                     ) : (
                         <div className="space-y-6">

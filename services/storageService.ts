@@ -3089,7 +3089,7 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
     const getInvoiceAdjustedAmount = (ledger: TransactionLedgerItem[], invoiceId: string): number => {
         if (!invoiceId) return 0;
         return (ledger || []).reduce((sum, entry) => {
-            if (!entry || entry.status === 'cancelled') return sum;
+            if (!entry || (entry.status === 'cancelled' && entry.type !== 'payment')) return sum;
             if (entry.referenceInvoiceId !== invoiceId) return sum;
             if (!['invoice_payment_adjustment', 'down_payment_adjustment', 'invoice_payment_adjustment_reversal', 'down_payment_adjustment_reversal'].includes(String(entry.entryCategory || ''))) {
                 return sum;
@@ -3122,7 +3122,7 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
         const resolveAdjustedAmountFromLedger = (invoiceId: string, invoiceNumber?: string): number => {
             const normalizedInvoiceNumber = String(invoiceNumber || '').trim().toLowerCase();
             return customerLedger.reduce((sum, entry) => {
-                if (!entry || entry.status === 'cancelled') return sum;
+                if (!entry || (entry.status === 'cancelled' && entry.type !== 'payment')) return sum;
                 const entryCategory = String(entry.entryCategory || '');
                 if (!adjustedCategories.has(entryCategory)) return sum;
                 const referenceId = String(entry.referenceInvoiceId || '').trim();
@@ -3132,8 +3132,7 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
                     || referenceId === normalizedInvoiceRef
                     || referenceNumber === normalizedInvoiceRefLower;
                 if (!matchesInvoice) return sum;
-                const multiplier = entryCategory.endsWith('_reversal') ? -1 : 1;
-                return sum + (Number(entry.adjustedAmount || 0) * multiplier);
+                return sum + Number(entry.adjustedAmount || 0);
             }, 0);
         };
         const resolveLocalInvoice = async (): Promise<number | null> => {
@@ -3359,7 +3358,7 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
         const hasOpeningBalanceEntry = entries.some(entry => entry.type === 'openingBalance' && entry.status !== 'cancelled');
         let runningBalance = hasOpeningBalanceEntry ? 0 : Number(openingBalance || 0);
         return sortLedgerEntries(entries).map((entry) => {
-            if (entry.status !== 'cancelled') {
+            if (entry.status !== 'cancelled' || entry.type === 'payment') {
                 if (partyType === 'supplier') {
                     runningBalance += Number(entry.credit || 0) - Number(entry.debit || 0);
                 } else {

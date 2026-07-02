@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Modal from '@core/components/ui/Modal';
 import AddMedicineModal from '@modules/inventory/components/AddMedicineModal';
 import BatchSelectionModal from '@modules/inventory/components/BatchSelectionModal';
@@ -573,7 +573,7 @@ export const NewBillModal: React.FC<NewBillModalProps> = ({
                                         roundOff: totals.roundOff,
                                         status: 'completed',
                                         itemCount: cartItems.length,
-                                        paymentMode: 'Cash',
+                                        paymentMode: paymentMode,
                                         pricingMode: localPricingMode
                                     };
                                     await onSaveOrUpdateTransaction(tx, false);

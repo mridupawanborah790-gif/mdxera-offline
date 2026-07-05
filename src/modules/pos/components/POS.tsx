@@ -427,6 +427,21 @@ const POS = forwardRef<any, POSProps>(({
     const [quickDoctorName, setQuickDoctorName] = useState('');
     const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0]);
     const [cartItems, setCartItems] = useState<BillItem[]>([]);
+    const liveInventory = useMemo(() => {
+        return inventory.map(i => {
+            const cartUnitsForBatch = cartItems.reduce((sum, ci) => {
+                if (ci.inventoryItemId === i.id) {
+                    const unitsPerPack = resolveUnitsPerStrip(i.unitsPerPack, i.packType);
+                    return sum + (Number(ci.quantity || 0) * unitsPerPack) + Number(ci.looseQuantity || 0);
+                }
+                return sum;
+            }, 0);
+            return {
+                ...i,
+                stock: Math.max(0, (i.stock || 0) - cartUnitsForBatch)
+            };
+        });
+    }, [inventory, cartItems]);
     const [prescriptions, setPrescriptions] = useState<UploadedFile[]>([]);
     const [isSaving, setIsSaving] = useState(false);
     const [reservedVoucherNumber, setReservedVoucherNumber] = useState<string | null>(null);
@@ -833,7 +848,7 @@ const POS = forwardRef<any, POSProps>(({
 
     const activeStockSnapshot = useMemo(() => {
         if (!activeBillItem) return null;
-        const matchingInventory = inventory.filter(inv => {
+        const matchingInventory = liveInventory.filter(inv => {
             if (activeBillItem.inventoryItemId && inv.id === activeBillItem.inventoryItemId) return true;
             return (inv.name || '').toLowerCase() === (activeBillItem.name || '').toLowerCase() && (inv.batch || '') === (activeBillItem.batch || '');
         });
@@ -845,7 +860,7 @@ const POS = forwardRef<any, POSProps>(({
             stock: selectedBatchInventory?.stock ?? 0,
             mrp: activeBillItem.mrp || selectedBatchInventory?.mrp || 0
         };
-    }, [activeBillItem, inventory]);
+    }, [activeBillItem, liveInventory]);
 
     useEffect(() => {
         setBillMode(billType === 'non-gst' ? 'EST' : 'GST');
@@ -1565,7 +1580,7 @@ const POS = forwardRef<any, POSProps>(({
         });
 
         // 1. First check the inventory
-        inventory.forEach(i => {
+        liveInventory.forEach(i => {
             const policy = getInventoryPolicy(i, medicines);
             if (!policy.salesEnabled) return;
 
@@ -1670,7 +1685,7 @@ const POS = forwardRef<any, POSProps>(({
                 return a.item.name.localeCompare(b.item.name);
             })
             .slice(0, 30);
-    }, [modalSearchTerm, inventory, medicines]);
+    }, [modalSearchTerm, liveInventory, medicines]);
 
     const tryAutoPickByBarcode = useCallback((rawValue: string): boolean => {
         const token = normalizeLookupToken(rawValue);
@@ -1895,7 +1910,7 @@ const POS = forwardRef<any, POSProps>(({
         const itemBrand = (productWrapper.item.brand || '').toLowerCase().trim();
         const itemCode = (productWrapper.item.code || '').toLowerCase().trim();
 
-        const fallbackBatches = inventory.filter(inv => {
+        const fallbackBatches = liveInventory.filter(inv => {
             if (!isRealBatch(inv.batch)) return false;
 
             const invName = (inv.name || '').toLowerCase().trim();
@@ -2625,6 +2640,7 @@ const POS = forwardRef<any, POSProps>(({
                         <div className="flex gap-1 h-8">
                             <button
                                 type="button"
+                                tabIndex={-1}
                                 onClick={() => fileInputRef.current?.click()}
                                 className="flex-1 bg-gray-100 hover:bg-gray-200 border border-gray-400 text-[10px] font-black uppercase flex items-center justify-center gap-1"
                                 title="Upload Prescription"
@@ -2635,6 +2651,7 @@ const POS = forwardRef<any, POSProps>(({
                             </button>
                             <button
                                 type="button"
+                                tabIndex={-1}
                                 onClick={() => setIsWebcamOpen(true)}
                                 className="flex-1 bg-gray-100 hover:bg-gray-200 border border-gray-400 text-[10px] font-black uppercase flex items-center justify-center gap-1"
                                 title="Scan Prescription"
@@ -2774,7 +2791,7 @@ const POS = forwardRef<any, POSProps>(({
                                                         id={`batch-${item.id}`}
                                                         onClick={() => {
                                                             if (isReadOnly) return;
-                                                            const batches = inventory.filter(inv => inv.name === item.name).sort((a, b) => parseExpiryForSort(String(a.expiry || '')) - parseExpiryForSort(String(b.expiry || '')));
+                                                            const batches = liveInventory.filter(inv => inv.name === item.name).sort((a, b) => parseExpiryForSort(String(a.expiry || '')) - parseExpiryForSort(String(b.expiry || '')));
                                                             if (batches.length > 0) setPendingBatchSelection({ item: batches[0], batches });
                                                             activeRowIdRef.current = item.id;
                                                         }}
@@ -2783,7 +2800,7 @@ const POS = forwardRef<any, POSProps>(({
                                                             if (e.key === 'Enter') {
                                                                 e.preventDefault();
                                                                 e.stopPropagation();
-                                                                const batches = inventory.filter(inv => inv.name === item.name).sort((a, b) => parseExpiryForSort(String(a.expiry || '')) - parseExpiryForSort(String(b.expiry || '')));
+                                                                const batches = liveInventory.filter(inv => inv.name === item.name).sort((a, b) => parseExpiryForSort(String(a.expiry || '')) - parseExpiryForSort(String(b.expiry || '')));
                                                                 if (batches.length > 0) setPendingBatchSelection({ item: batches[0], batches });
                                                                 activeRowIdRef.current = item.id;
                                                             } else {

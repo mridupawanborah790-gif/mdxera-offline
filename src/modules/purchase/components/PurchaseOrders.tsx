@@ -1,4 +1,4 @@
-﻿import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Card from '@core/components/ui/Card';
 import Modal from '@core/components/ui/Modal';
 import type { Distributor, InventoryItem, PurchaseOrderItem, PurchaseOrder, Medicine, SupplierProductMap, Purchase } from '@core/types';
@@ -62,9 +62,7 @@ type GridColumnKey =
 const GRID_COLUMN_ORDER: GridColumnKey[] = [
     'name',
     'itemCode',
-    'supplierItemName',
     'packType',
-    'unitOfMeasurement',
     'quantity',
     'freeQuantity',
     'estimatedRate',
@@ -798,6 +796,26 @@ const PurchaseOrdersPage = React.forwardRef<any, PurchaseOrdersProps>(({
         }
     };
 
+    const handleEditPO = (po: PurchaseOrder) => {
+        setEditingPO(po);
+        setPoSerialId(po.serialId);
+        setSelectedDistributorId(po.distributorId);
+        setOrderDate(po.date ? new Date(po.date).toISOString().split('T')[0] : getDefaultOrderDate());
+        setItems(normalizeLineItems(
+            (po.items || []).map(item => ({
+                ...createEmptyLineItem(),
+                ...item,
+                freeQuantity: Number((item as any).freeQuantity ?? (item as any).freeQty ?? 0),
+                id: item.id || crypto.randomUUID(),
+                expectedDeliveryDate: item.expectedDeliveryDate
+                    ? new Date(item.expectedDeliveryDate).toISOString().split('T')[0]
+                    : ''
+            }))
+        ));
+        setRemarks(po.remarks || '');
+        setView('create');
+    };
+
     React.useImperativeHandle(ref, () => ({
         handleSubmit: handleSavePO,
         resetForm: () => {
@@ -923,7 +941,7 @@ const PurchaseOrdersPage = React.forwardRef<any, PurchaseOrdersProps>(({
     };
 
     return (
-        <main className="flex-1 overflow-hidden flex flex-col page-fade-in bg-app-bg">
+        <main className="h-full overflow-hidden flex flex-col page-fade-in bg-app-bg">
             <div className="bg-primary text-white h-7 flex items-center px-4 justify-between border-b border-gray-600 shadow-md flex-shrink-0">
                 <span className="text-[10px] font-black uppercase tracking-widest">
                     {view === 'create' ? 'Purchase Order Voucher Creation' : 'Purchase Order Register'}
@@ -933,8 +951,8 @@ const PurchaseOrdersPage = React.forwardRef<any, PurchaseOrdersProps>(({
                 </span>
             </div>
 
-            <div className="p-4 flex-1 flex flex-col gap-4 overflow-hidden">
-                <div className="flex justify-between items-center mb-2 px-2">
+            <div className="flex-1 flex flex-col overflow-hidden">
+                <div className="flex justify-between items-center px-4 pt-4 pb-2 flex-shrink-0">
                     <div className="flex items-center space-x-2 bg-white dark:bg-gray-800 p-1 border border-app-border shadow-sm">
                         <button
                             onClick={() => setView('list')}
@@ -953,7 +971,8 @@ const PurchaseOrdersPage = React.forwardRef<any, PurchaseOrdersProps>(({
 
                 {view === 'create' ? (
                     <div className="flex-1 flex flex-col overflow-hidden">
-                        <Card className="p-3 bg-white dark:bg-card-bg border border-app-border rounded-none grid grid-cols-1 md:grid-cols-4 gap-4 items-end flex-shrink-0">
+                        <div className="px-4 pb-3 flex-1 flex flex-col gap-3 overflow-hidden">
+                            <Card className="p-3 bg-white dark:bg-card-bg border border-app-border rounded-none grid grid-cols-1 md:grid-cols-4 gap-4 items-end flex-shrink-0">
                             <div className="md:col-span-2">
                                 <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Particulars (Supplier Name)</label>
                                 <select
@@ -992,7 +1011,7 @@ const PurchaseOrdersPage = React.forwardRef<any, PurchaseOrdersProps>(({
                             </div>
                         </Card>
 
-                        <Card className="flex-1 flex flex-col p-0 tally-border !rounded-none overflow-hidden shadow-inner bg-white dark:bg-zinc-800 mt-4">
+                        <Card className="flex-1 flex flex-col p-0 tally-border !rounded-none overflow-hidden shadow-inner bg-white dark:bg-zinc-800">
                             <div className="flex-1 overflow-auto">
                                 <table className="min-w-[1700px] border-collapse text-sm">
                                     <thead className="sticky top-0 bg-gray-100 dark:bg-zinc-900 border-b border-gray-400">
@@ -1000,9 +1019,7 @@ const PurchaseOrdersPage = React.forwardRef<any, PurchaseOrdersProps>(({
                                             <th className="p-2 border-r border-gray-400">Sl.</th>
                                             <th className="p-2 border-r border-gray-400 text-left">Item Name</th>
                                             <th className="p-2 border-r border-gray-400">Item Code / SKU</th>
-                                            <th className="p-2 border-r border-gray-400">Supplier Item</th>
                                             <th className="p-2 border-r border-gray-400">Pack</th>
-                                            <th className="p-2 border-r border-gray-400">Unit</th>
                                             <th className="p-2 border-r border-gray-400">Qty</th>
                                             <th className="p-2 border-r border-gray-400">F.Qty</th>
                                             <th className="p-2 border-r border-gray-400">Est. Rate</th>
@@ -1028,10 +1045,27 @@ const PurchaseOrdersPage = React.forwardRef<any, PurchaseOrdersProps>(({
                                                         className={getCellClassName(item.id, 'name', 'w-full bg-transparent p-1 outline-none font-semibold')}
                                                     />
                                                 </td>
-                                                <td className="p-1 border-r"><input ref={el => setCellRef(item.id, 'itemCode', el)} value={item.itemCode || item.sku || ''} onFocus={() => setActiveCell({ rowId: item.id, column: 'itemCode' })} onKeyDown={e => handleGridNavigation(e, item.id, 'itemCode')} onChange={e => { handleUpdateItem(item.id, 'itemCode', e.target.value); handleUpdateItem(item.id, 'sku', e.target.value); }} className={getCellClassName(item.id, 'itemCode', 'w-full bg-transparent p-1 outline-none')} /></td>
-                                                <td className="p-1 border-r"><input ref={el => setCellRef(item.id, 'supplierItemName', el)} value={item.supplierItemName || ''} onFocus={() => setActiveCell({ rowId: item.id, column: 'supplierItemName' })} onKeyDown={e => handleGridNavigation(e, item.id, 'supplierItemName')} onChange={e => handleUpdateItem(item.id, 'supplierItemName', e.target.value)} className={getCellClassName(item.id, 'supplierItemName', 'w-full bg-transparent p-1 outline-none')} /></td>
-                                                <td className="p-1 border-r"><input ref={el => setCellRef(item.id, 'packType', el)} value={item.packType || ''} onFocus={() => setActiveCell({ rowId: item.id, column: 'packType' })} onKeyDown={e => handleGridNavigation(e, item.id, 'packType')} onChange={e => handleUpdateItem(item.id, 'packType', e.target.value)} className={getCellClassName(item.id, 'packType', 'w-full bg-transparent p-1 outline-none')} /></td>
-                                                <td className="p-1 border-r"><input ref={el => setCellRef(item.id, 'unitOfMeasurement', el)} value={item.unitOfMeasurement || ''} onFocus={() => setActiveCell({ rowId: item.id, column: 'unitOfMeasurement' })} onKeyDown={e => handleGridNavigation(e, item.id, 'unitOfMeasurement')} onChange={e => handleUpdateItem(item.id, 'unitOfMeasurement', e.target.value)} className={getCellClassName(item.id, 'unitOfMeasurement', 'w-full bg-transparent p-1 outline-none')} /></td>
+                                                <td className="p-1 border-r">
+                                                    <input
+                                                        ref={el => setCellRef(item.id, 'itemCode', el)}
+                                                        value={item.itemCode || item.sku || ''}
+                                                        readOnly={true}
+                                                        tabIndex={-1}
+                                                        onFocus={() => setActiveCell({ rowId: item.id, column: 'itemCode' })}
+                                                        onKeyDown={e => handleGridNavigation(e, item.id, 'itemCode')}
+                                                        className={getCellClassName(item.id, 'itemCode', 'w-full bg-transparent p-1 outline-none opacity-70 cursor-not-allowed')}
+                                                    />
+                                                </td>
+                                                <td className="p-1 border-r">
+                                                    <input
+                                                        ref={el => setCellRef(item.id, 'packType', el)}
+                                                        value={item.packType || ''}
+                                                        onFocus={() => setActiveCell({ rowId: item.id, column: 'packType' })}
+                                                        onKeyDown={e => handleGridNavigation(e, item.id, 'packType')}
+                                                        onChange={e => handleUpdateItem(item.id, 'packType', e.target.value)}
+                                                        className={getCellClassName(item.id, 'packType', 'w-full bg-transparent p-1 outline-none')}
+                                                    />
+                                                </td>
                                                 <td className="p-1 border-r"><input ref={el => setCellRef(item.id, 'quantity', el)} type="number" min={0} value={item.quantity} onFocus={() => setActiveCell({ rowId: item.id, column: 'quantity' })} onKeyDown={e => handleGridNavigation(e, item.id, 'quantity')} onChange={e => handleUpdateItem(item.id, 'quantity', Number(e.target.value) || 0)} className={getCellClassName(item.id, 'quantity', 'w-24 bg-transparent p-1 outline-none text-right')} /></td>
                                                 <td className="p-1 border-r"><input ref={el => setCellRef(item.id, 'freeQuantity', el)} type="number" min={0} value={item.freeQuantity || 0} onFocus={() => setActiveCell({ rowId: item.id, column: 'freeQuantity' })} onKeyDown={e => handleGridNavigation(e, item.id, 'freeQuantity')} onChange={e => handleUpdateItem(item.id, 'freeQuantity', Number(e.target.value) || 0)} className={getCellClassName(item.id, 'freeQuantity', 'w-24 bg-transparent p-1 outline-none text-right')} /></td>
                                                 <td className="p-1 border-r"><input ref={el => setCellRef(item.id, 'estimatedRate', el)} type="number" min={0} value={item.estimatedRate ?? item.purchasePrice ?? 0} onFocus={() => setActiveCell({ rowId: item.id, column: 'estimatedRate' })} onKeyDown={e => handleGridNavigation(e, item.id, 'estimatedRate')} onChange={e => handleUpdateItem(item.id, 'estimatedRate', Number(e.target.value) || 0)} className={getCellClassName(item.id, 'estimatedRate', 'w-28 bg-transparent p-1 outline-none text-right')} /></td>
@@ -1050,8 +1084,9 @@ const PurchaseOrdersPage = React.forwardRef<any, PurchaseOrdersProps>(({
                                 </table>
                             </div>
                         </Card>
+                        </div>
 
-                        <div className="flex justify-between items-stretch flex-shrink-0 gap-8 min-h-[140px] mt-4">
+                        <div className="bg-slate-50 dark:bg-zinc-900 border-t border-gray-300 dark:border-zinc-700 p-4 flex justify-between items-stretch flex-shrink-0 gap-8 min-h-[140px]">
                             <div className="flex-1 bg-white p-4 tally-border !rounded-none shadow-sm flex flex-col">
                                 <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1.5 ml-1">Order Narration / Remarks</label>
                                 <textarea
@@ -1093,7 +1128,8 @@ const PurchaseOrdersPage = React.forwardRef<any, PurchaseOrdersProps>(({
                         </div>
                     </div>
                 ) : (
-                    <Card className="flex-1 p-0 border-app-border overflow-hidden shadow-md bg-white">
+                    <div className="px-4 pb-4 flex-1 flex flex-col overflow-hidden">
+                        <Card className="flex-1 p-0 border-app-border overflow-hidden shadow-md bg-white">
                         <div className="p-4 border-b border-gray-400 bg-slate-50 flex justify-between items-center">
                             <div className="flex bg-white p-1 tally-border !rounded-none">
                                 {['all', PurchaseOrderStatus.ORDERED, PurchaseOrderStatus.PARTIALLY_RECEIVED, PurchaseOrderStatus.RECEIVED, PurchaseOrderStatus.CANCELLED].map(status => (
@@ -1106,6 +1142,37 @@ const PurchaseOrdersPage = React.forwardRef<any, PurchaseOrdersProps>(({
                                     </button>
                                 ))}
                             </div>
+
+                            <div className="flex gap-2">
+                                <button
+                                    disabled={!selectedPO}
+                                    onClick={() => selectedPO && onPrintPurchaseOrder(selectedPO)}
+                                    className="px-3 py-1.5 tally-border bg-white text-[10px] font-black uppercase disabled:opacity-50 hover:bg-slate-50"
+                                >
+                                    Print
+                                </button>
+                                <button
+                                    disabled={!selectedPO || selectedPO.status !== PurchaseOrderStatus.ORDERED}
+                                    onClick={() => selectedPO && handleEditPO(selectedPO)}
+                                    className="px-3 py-1.5 tally-border bg-white text-[10px] font-black uppercase disabled:opacity-50 hover:bg-slate-50"
+                                >
+                                    Edit
+                                </button>
+                                <button
+                                    disabled={!selectedPO || (selectedPO.status !== PurchaseOrderStatus.ORDERED && selectedPO.status !== PurchaseOrderStatus.PARTIALLY_RECEIVED)}
+                                    onClick={() => selectedPO && openReceiveFlow(selectedPO)}
+                                    className="px-3 py-1.5 tally-border bg-white text-[10px] font-black uppercase disabled:opacity-50 hover:bg-slate-50"
+                                >
+                                    Receive
+                                </button>
+                                <button
+                                    disabled={!selectedPO || (selectedPO.status !== PurchaseOrderStatus.ORDERED && selectedPO.status !== PurchaseOrderStatus.PARTIALLY_RECEIVED)}
+                                    onClick={() => selectedPO && onCancelPurchaseOrder(selectedPO.id)}
+                                    className="px-3 py-1.5 tally-border bg-white text-[10px] font-black uppercase text-red-700 disabled:opacity-50 hover:bg-red-50"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
                         </div>
 
                         <div className="overflow-x-auto">
@@ -1117,8 +1184,7 @@ const PurchaseOrdersPage = React.forwardRef<any, PurchaseOrdersProps>(({
                                         <th className="p-3 text-left text-[10px] font-black text-gray-600 uppercase border-r border-gray-400">Distributor</th>
                                         <th className="p-3 text-left text-[10px] font-black text-gray-600 uppercase border-r border-gray-400">Received Invoice ID</th>
                                         <th className="p-3 text-center text-[10px] font-black text-gray-600 uppercase border-r border-gray-400">Status</th>
-                                        <th className="p-3 text-right text-[10px] font-black text-gray-600 uppercase border-r border-gray-400">Amount</th>
-                                        <th className="p-3 text-right text-[10px] font-black text-gray-600 uppercase">Action</th>
+                                        <th className="p-3 text-right text-[10px] font-black text-gray-600 uppercase">Amount</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-200 text-xs font-bold">
@@ -1141,45 +1207,7 @@ const PurchaseOrdersPage = React.forwardRef<any, PurchaseOrdersProps>(({
                                                         {po.status}
                                                     </span>
                                                 </td>
-                                                <td className={`p-3 border-r border-gray-200 text-right font-black ${isSelected ? 'text-white' : 'group-hover:text-white'}`}>₹{po.totalAmount.toLocaleString('en-IN')}</td>
-                                                <td className="p-3 text-right">
-                                                    <div className="flex justify-end gap-2">
-                                                        <button onClick={(e) => { e.stopPropagation(); onPrintPurchaseOrder(po); }} className={`font-black uppercase text-[10px] hover:underline ${isSelected ? 'text-white' : 'text-gray-500 group-hover:text-white'}`}>Print</button>
-                                                        {po.status === PurchaseOrderStatus.ORDERED && (
-                                                            <button
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    setEditingPO(po);
-                                                                    setPoSerialId(po.serialId);
-                                                                    setSelectedDistributorId(po.distributorId);
-                                                                    setOrderDate(po.date ? new Date(po.date).toISOString().split('T')[0] : getDefaultOrderDate());
-                                                                    setItems(normalizeLineItems(
-                                                                        (po.items || []).map(item => ({
-                                                                            ...createEmptyLineItem(),
-                                                                            ...item,
-                                                                            freeQuantity: Number((item as any).freeQuantity ?? (item as any).freeQty ?? 0),
-                                                                            id: item.id || crypto.randomUUID(),
-                                                                            expectedDeliveryDate: item.expectedDeliveryDate
-                                                                                ? new Date(item.expectedDeliveryDate).toISOString().split('T')[0]
-                                                                                : ''
-                                                                        }))
-                                                                    ));
-                                                                    setRemarks(po.remarks || '');
-                                                                    setView('create');
-                                                                }}
-                                                                className={`font-black uppercase text-[10px] hover:underline ${isSelected ? 'text-white' : 'text-blue-700 group-hover:text-white'}`}
-                                                            >
-                                                                Edit
-                                                            </button>
-                                                        )}
-                                                        {(po.status === PurchaseOrderStatus.ORDERED || po.status === PurchaseOrderStatus.PARTIALLY_RECEIVED) && (
-                                                            <>
-                                                                <button onClick={(e) => { e.stopPropagation(); openReceiveFlow(po); }} className={`font-black uppercase text-[10px] hover:underline ${isSelected ? 'text-white' : 'text-emerald-700 group-hover:text-white'}`}>Receive</button>
-                                                                <button onClick={(e) => { e.stopPropagation(); onCancelPurchaseOrder(po.id); }} className={`font-black uppercase text-[10px] hover:underline ${isSelected ? 'text-white' : 'text-red-600 group-hover:text-white'}`}>Cancel</button>
-                                                            </>
-                                                        )}
-                                                    </div>
-                                                </td>
+                                                <td className={`p-3 text-right font-black ${isSelected ? 'text-white' : 'group-hover:text-white'}`}>₹{po.totalAmount.toLocaleString('en-IN')}</td>
                                             </tr>
                                         );
                                     })}
@@ -1187,6 +1215,7 @@ const PurchaseOrdersPage = React.forwardRef<any, PurchaseOrdersProps>(({
                             </table>
                         </div>
                     </Card>
+                    </div>
                 )}
             </div>
 
@@ -1370,11 +1399,9 @@ const PurchaseOrdersPage = React.forwardRef<any, PurchaseOrdersProps>(({
                                     <th className="p-2 text-left border-r border-gray-300">Item Name</th>
                                     <th className="p-2 text-left border-r border-gray-300">Item Code / SKU</th>
                                     <th className="p-2 text-left border-r border-gray-300">Pack</th>
-                                    <th className="p-2 text-left border-r border-gray-300">Unit</th>
                                     <th className="p-2 text-right border-r border-gray-300">Current Stock</th>
                                     <th className="p-2 text-right border-r border-gray-300">Minimum Stock Limit</th>
                                     <th className="p-2 text-right border-r border-gray-300">Shortage Qty</th>
-                                    <th className="p-2 text-left border-r border-gray-300">Supplier Item</th>
                                     <th className="p-2 text-left border-r border-gray-300">Est. Rate</th>
                                     <th className="p-2 text-left">GST %</th>
                                 </tr>
@@ -1414,7 +1441,6 @@ const PurchaseOrdersPage = React.forwardRef<any, PurchaseOrdersProps>(({
                                             <td className="p-2 border-r border-gray-200 font-bold uppercase">{result.name}</td>
                                             <td className="p-2 border-r border-gray-200 font-mono">{result.code || result.sku || '-'}</td>
                                             <td className="p-2 border-r border-gray-200 uppercase">{inv?.packType || med?.pack || '-'}</td>
-                                            <td className="p-2 border-r border-gray-200 uppercase">{inv?.unitOfMeasurement || inv?.packUnit || 'Unit'}</td>
                                             <td className={`p-2 border-r border-gray-200 text-right font-bold ${isLowStock && !isSelected ? 'text-red-600' : ''}`}>{currentStock.toFixed(2)}</td>
                                             <td className="p-2 border-r border-gray-200 text-right">{minStock > 0 ? minStock.toFixed(2) : '-'}</td>
                                             <td className={`p-2 border-r border-gray-200 text-right font-bold ${shortageQty > 0 && !isSelected ? 'text-orange-600' : ''}`}>
@@ -1425,7 +1451,6 @@ const PurchaseOrdersPage = React.forwardRef<any, PurchaseOrdersProps>(({
                                                     </span>
                                                 )}
                                             </td>
-                                            <td className="p-2 border-r border-gray-200 uppercase">{result.supplierItemName || '-'}</td>
                                             <td className="p-2 border-r border-gray-200 text-right">₹{Number(inv?.purchasePrice || med?.rateA || 0).toFixed(2)}</td>
                                             <td className="p-2 text-right">{Number(inv?.gstPercent || med?.gstRate || 0).toFixed(2)}</td>
                                         </tr>

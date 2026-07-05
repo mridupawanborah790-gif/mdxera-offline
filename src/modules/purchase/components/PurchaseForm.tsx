@@ -298,6 +298,25 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
     const [invoiceNumber, setInvoiceNumber] = useState('');
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
     const [items, setItems] = useState<PurchaseItem[]>([createBlankItem()]);
+    const liveInventory = useMemo(() => {
+        return inventory.map(i => {
+            const addedUnitsForBatch = items.reduce((sum, ci) => {
+                const matches = ci.inventoryItemId === i.id ||
+                                (ci.inventoryItemId === undefined &&
+                                 (ci.name || '').toLowerCase().trim() === (i.name || '').toLowerCase().trim() &&
+                                 (ci.batch || '').trim() === (i.batch || '').trim());
+                if (matches) {
+                    const unitsPerPack = ci.unitsPerPack || resolveUnitsPerStrip(i.unitsPerPack, i.packType);
+                    return sum + (Number(ci.quantity || 0) * unitsPerPack) + Number(ci.looseQuantity || 0) + (Number(ci.freeQuantity || 0) * unitsPerPack);
+                }
+                return sum;
+            }, 0);
+            return {
+                ...i,
+                stock: (i.stock || 0) + addedUnitsForBatch
+            };
+        });
+    }, [inventory, items]);
     const [activeRowId, setActiveRowId] = useState<string | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const isSubmittingRef = useRef(false);
@@ -1044,7 +1063,7 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
         });
 
         // 1. First check the inventory
-        inventory.forEach(i => {
+        liveInventory.forEach(i => {
             const policy = getInventoryPolicy(i, medicines);
             if (!policy.purchaseEnabled) return;
 
@@ -1142,7 +1161,7 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
                 return a.item.name.localeCompare(b.item.name);
             })
             .slice(0, 30);
-    }, [modalSearchTerm, inventory, medicines]);
+    }, [modalSearchTerm, liveInventory, medicines]);
 
     const activeRowCalculations = useMemo(() => {
         const p = items.find(item => item.id === activeRowId) || items.find(item => (item.name || '').trim() !== '');
@@ -1176,7 +1195,7 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
         if (activeRowId) {
             const row = items.find(p => p.id === activeRowId);
             if (row && row.name.trim()) {
-                const linkedInv = inventory.find(inv => inv.id === row.inventoryItemId);
+                const linkedInv = liveInventory.find(inv => inv.id === row.inventoryItemId);
                 if (linkedInv) return linkedInv;
                 return {
                     name: row.name,
@@ -1190,7 +1209,7 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
             }
         }
         return null;
-    }, [isSearchModalOpen, deduplicatedSearchInventory, selectedSearchIndex, activeRowId, items, inventory]);
+    }, [isSearchModalOpen, deduplicatedSearchInventory, selectedSearchIndex, activeRowId, items, liveInventory]);
 
     const handleGlobalKeyDown = useCallback((e: KeyboardEvent) => {
         if (isSearchModalOpen || isWebcamModalOpen || isAddSupplierModalOpen || isAddMedicineMasterModalOpen || isLinkModalOpen || isRateTierModalOpen || isSupplierSearchModalOpen || isEditMaterialModalOpen) return;

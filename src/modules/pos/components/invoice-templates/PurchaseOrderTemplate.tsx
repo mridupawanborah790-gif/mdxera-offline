@@ -1,4 +1,4 @@
-﻿
+
 import React from 'react';
 import type { PurchaseOrder, Distributor, RegisteredPharmacy } from '@core/types';
 import { numberToWords } from "@core/utils/numberToWords";
@@ -41,11 +41,35 @@ const PurchaseOrderTemplate: React.FC<TemplateProps> = ({ purchaseOrder, pharmac
       ];
 
   const itemChunks = useMemo(() => {
-    const chunks: Array<typeof purchaseOrder.items> = [];
-    for (let i = 0; i < purchaseOrder.items.length; i += ITEMS_PER_PAGE) {
-      const nextChunk = purchaseOrder.items.slice(i, i + ITEMS_PER_PAGE);
-      chunks.push(nextChunk);
+    const items = purchaseOrder.items;
+    const total = items.length;
+    const CAPACITY_NORMAL = 20;
+    const CAPACITY_LAST = 12;
+
+    if (total <= CAPACITY_LAST) {
+      return [items];
     }
+
+    const chunks: Array<typeof purchaseOrder.items> = [];
+    let currentIndex = 0;
+
+    while (currentIndex < total) {
+      const remaining = total - currentIndex;
+      if (remaining <= CAPACITY_LAST) {
+        chunks.push(items.slice(currentIndex));
+        break;
+      }
+
+      let chunkSize = CAPACITY_NORMAL;
+      if (remaining > CAPACITY_LAST && remaining <= CAPACITY_NORMAL) {
+        // Split so the next (last) page doesn't exceed CAPACITY_LAST
+        chunkSize = 10;
+      }
+
+      chunks.push(items.slice(currentIndex, currentIndex + chunkSize));
+      currentIndex += chunkSize;
+    }
+
     return chunks.length > 0 ? chunks : [[]];
   }, [purchaseOrder.items]);
 
@@ -110,7 +134,8 @@ const PurchaseOrderTemplate: React.FC<TemplateProps> = ({ purchaseOrder, pharmac
 
       {itemChunks.map((chunk, pageIndex) => {
         const isLastPage = pageIndex === itemChunks.length - 1;
-        const fillerRows = isLastPage ? 0 : Math.max(0, ITEMS_PER_PAGE - chunk.length);
+        const pageCapacity = isLastPage ? 12 : 20;
+        const fillerRows = isLastPage ? 0 : Math.max(0, pageCapacity - chunk.length);
         return (
           <div key={pageIndex} className="po-page mb-6 print:mb-0">
             <header className="mb-3 pt-1">
@@ -169,42 +194,48 @@ const PurchaseOrderTemplate: React.FC<TemplateProps> = ({ purchaseOrder, pharmac
                   </tr>
                 </thead>
                 <tbody>
-                  {chunk.map((item, index) => {
-                    const itemTotal = (Number(item.purchasePrice || 0)) * (item.quantity || 0);
-                    const actualIndex = (pageIndex * ITEMS_PER_PAGE) + index + 1;
-                    return (
-                      <tr key={item.id} className="po-row border-b border-gray-300">
-                        <td className="py-1 px-1.5 border-x border-gray-300 text-center align-middle">{actualIndex}</td>
-                        <td className="py-1 px-1.5 border-r border-gray-300 text-center font-semibold align-middle">{formatQtyWithFree(item)}</td>
-                        <td className="py-1 px-2 border-r border-gray-300 align-middle">
-                          <p className="font-semibold text-gray-900 leading-tight">{item.name}</p>
-                        </td>
-                        <td className="py-1 px-1.5 border-r border-gray-300 text-center align-middle">{item.hsnCode || '-'}</td>
-                        <td className="py-1 px-1.5 border-r border-gray-300 text-center align-middle">{item.packType || item.unitOfMeasurement || '—'}</td>
-                        <td className="py-1 px-1.5 border-r border-gray-300 text-right align-middle">₹{Number(item.purchasePrice || 0).toFixed(2)}</td>
-                        <td className="py-1 px-1.5 border-r border-gray-300 text-right align-middle">₹{Number(item.mrp || 0).toFixed(2)}</td>
-                        <td className="py-1 px-1.5 border-r border-gray-300 text-center align-middle">{Number(item.gstPercent || 0)}%</td>
-                        <td className="py-1 px-1.5 border-r border-gray-300 text-right font-bold text-gray-900 align-middle">₹{Number(itemTotal || 0).toFixed(2)}</td>
-                      </tr>
-                    );
-                  })}
+                  {(() => {
+                    const startIndex = itemChunks.slice(0, pageIndex).reduce((acc, c) => acc + c.length, 0);
+                    return chunk.map((item, index) => {
+                      const itemTotal = (Number(item.purchasePrice || 0)) * (item.quantity || 0);
+                      const actualIndex = startIndex + index + 1;
+                      return (
+                        <tr key={item.id} className="po-row border-b border-gray-300">
+                          <td className="py-1 px-1.5 border-x border-gray-300 text-center align-middle">{actualIndex}</td>
+                          <td className="py-1 px-1.5 border-r border-gray-300 text-center font-semibold align-middle">{formatQtyWithFree(item)}</td>
+                          <td className="py-1 px-2 border-r border-gray-300 align-middle">
+                            <p className="font-semibold text-gray-900 leading-tight">{item.name}</p>
+                          </td>
+                          <td className="py-1 px-1.5 border-r border-gray-300 text-center align-middle">{item.hsnCode || '-'}</td>
+                          <td className="py-1 px-1.5 border-r border-gray-300 text-center align-middle">{item.packType || item.unitOfMeasurement || '—'}</td>
+                          <td className="py-1 px-1.5 border-r border-gray-300 text-right align-middle">₹{Number(item.purchasePrice || 0).toFixed(2)}</td>
+                          <td className="py-1 px-1.5 border-r border-gray-300 text-right align-middle">₹{Number(item.mrp || 0).toFixed(2)}</td>
+                          <td className="py-1 px-1.5 border-r border-gray-300 text-center align-middle">{Number(item.gstPercent || 0)}%</td>
+                          <td className="py-1 px-1.5 border-r border-gray-300 text-right font-bold text-gray-900 align-middle">₹{Number(itemTotal || 0).toFixed(2)}</td>
+                        </tr>
+                      );
+                    });
+                  })()}
 
-                  {Array.from({ length: fillerRows }).map((_, fillerIndex) => {
-                    const serial = (pageIndex * ITEMS_PER_PAGE) + chunk.length + fillerIndex + 1;
-                    return (
-                      <tr key={`filler-${pageIndex}-${fillerIndex}`} className="po-row border-b border-gray-300">
-                        <td className="py-1 px-1.5 border-x border-gray-300 text-center align-middle text-gray-300">{serial}</td>
-                        <td className="py-1 px-1.5 border-r border-gray-300 align-middle">&nbsp;</td>
-                        <td className="py-1 px-2 border-r border-gray-300 align-middle">&nbsp;</td>
-                        <td className="py-1 px-1.5 border-r border-gray-300 align-middle">&nbsp;</td>
-                        <td className="py-1 px-1.5 border-r border-gray-300 align-middle">&nbsp;</td>
-                        <td className="py-1 px-1.5 border-r border-gray-300 align-middle">&nbsp;</td>
-                        <td className="py-1 px-1.5 border-r border-gray-300 align-middle">&nbsp;</td>
-                        <td className="py-1 px-1.5 border-r border-gray-300 align-middle">&nbsp;</td>
-                        <td className="py-1 px-1.5 border-r border-gray-300 align-middle">&nbsp;</td>
-                      </tr>
-                    );
-                  })}
+                  {(() => {
+                    const startIndex = itemChunks.slice(0, pageIndex).reduce((acc, c) => acc + c.length, 0);
+                    return Array.from({ length: fillerRows }).map((_, fillerIndex) => {
+                      const serial = startIndex + chunk.length + fillerIndex + 1;
+                      return (
+                        <tr key={`filler-${pageIndex}-${fillerIndex}`} className="po-row border-b border-gray-300">
+                          <td className="py-1 px-1.5 border-x border-gray-300 text-center align-middle text-gray-300">{serial}</td>
+                          <td className="py-1 px-1.5 border-r border-gray-300 align-middle">&nbsp;</td>
+                          <td className="py-1 px-2 border-r border-gray-300 align-middle">&nbsp;</td>
+                          <td className="py-1 px-1.5 border-r border-gray-300 align-middle">&nbsp;</td>
+                          <td className="py-1 px-1.5 border-r border-gray-300 align-middle">&nbsp;</td>
+                          <td className="py-1 px-1.5 border-r border-gray-300 align-middle">&nbsp;</td>
+                          <td className="py-1 px-1.5 border-r border-gray-300 align-middle">&nbsp;</td>
+                          <td className="py-1 px-1.5 border-r border-gray-300 align-middle">&nbsp;</td>
+                          <td className="py-1 px-1.5 border-r border-gray-300 align-middle">&nbsp;</td>
+                        </tr>
+                      );
+                    });
+                  })()}
                 </tbody>
               </table>
             </div>

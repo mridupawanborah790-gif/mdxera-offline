@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import { createPortal } from 'react-dom';
 import type { PurchaseOrder, Distributor, RegisteredPharmacy } from '@core/types';
 import PurchaseOrderTemplate from '@modules/pos/components/invoice-templates/PurchaseOrderTemplate';
@@ -47,7 +47,7 @@ const PrintPurchaseOrderModal: React.FC<PrintPurchaseOrderModalProps> = ({ isOpe
         @media print {
           @page {
             size: A4 portrait;
-            margin: 4mm;
+            margin: 0 !important;
           }
 
           html, body {

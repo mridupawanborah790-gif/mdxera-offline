@@ -896,9 +896,9 @@ const POS = forwardRef<any, POSProps>(({
             setAdjustment(0);
             setNarration('');
             setBillCategory('Cash');
-            // Default focus to Date field as requested
-            setTimeout(() => dateInputRef.current?.focus(), 150);
         }
+        // Focus date input when POS screen is opened/loaded
+        setTimeout(() => dateInputRef.current?.focus(), 150);
     }, [transactionToEdit, conversionDraft, customers]);
 
     const currentInvoiceNo = useMemo(() => {
@@ -2448,6 +2448,7 @@ const POS = forwardRef<any, POSProps>(({
     const handleDoctorSelect = useCallback((doctor: DoctorMaster) => {
         handleReferredByChange(doctor.name || '', doctor.id);
         setIsDoctorPickerOpen(false);
+        setTimeout(() => billCategorySelectRef.current?.focus(), 100);
     }, [handleReferredByChange]);
 
     const handleUseTypedDoctorName = useCallback(() => {
@@ -2455,6 +2456,7 @@ const POS = forwardRef<any, POSProps>(({
         if (!typedValue) return;
         handleReferredByChange(typedValue);
         setIsDoctorPickerOpen(false);
+        setTimeout(() => billCategorySelectRef.current?.focus(), 100);
     }, [doctorSearchTerm, handleReferredByChange]);
 
     const handleAddTypedDoctorToMaster = useCallback(async () => {
@@ -2474,6 +2476,7 @@ const POS = forwardRef<any, POSProps>(({
         handleReferredByChange(payload.name, payload.id);
         setIsDoctorPickerOpen(false);
         addNotification('Doctor added to master and selected.', 'success');
+        setTimeout(() => billCategorySelectRef.current?.focus(), 100);
     }, [addNotification, currentUser, doctorSearchTerm, handleReferredByChange]);
 
     const handleQuickDoctorSave = async () => {
@@ -2492,6 +2495,7 @@ const POS = forwardRef<any, POSProps>(({
         setDoctorId(payload.id);
         setIsDoctorQuickAddOpen(false);
         addNotification('Doctor saved and selected.', 'success');
+        setTimeout(() => billCategorySelectRef.current?.focus(), 100);
     };
 
     const handleReferredByKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -2504,6 +2508,9 @@ const POS = forwardRef<any, POSProps>(({
         if (e.key === 'Enter') {
             e.preventDefault();
             setIsDoctorPickerOpen(true);
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            billCategorySelectRef.current?.focus();
         }
     };
 
@@ -2616,7 +2623,7 @@ const POS = forwardRef<any, POSProps>(({
                                 onChange={e => handleReferredByChange(e.target.value)}
                                 onClick={() => !isReadOnly && setIsDoctorPickerOpen(true)}
                                 onKeyDown={handleReferredByKeyDown}
-                                placeholder="Doctor Name"
+                                placeholder="Enter to search, Esc to skip..."
                                 disabled={isReadOnly}
                                 className="w-full h-8 border border-gray-400 p-1 text-xs font-bold outline-none uppercase focus:bg-yellow-50"
                                 autoComplete="off"

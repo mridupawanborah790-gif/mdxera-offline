@@ -1273,7 +1273,7 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
                         }
                     }
                 } else {
-                    const onConflictColumn = tableName === 'physical_inventory' ? 'voucher_no' : 'id';
+                    const onConflictColumn = 'id';
                     // Drift-aware upsert: any PGRST204 from a missing column
                     // is auto-learned and the upsert is retried without it.
                     const upsertResult = await pushWithDriftLearning<Record<string, any>>(

@@ -875,7 +875,11 @@ const POS = forwardRef<any, POSProps>(({
             setIsCustomerSearchModalOpen(true);
         } else if (e.key === 'Escape') {
             e.preventDefault();
-            phoneInputRef.current?.focus();
+            if (phoneInputRef.current && !phoneInputRef.current.disabled) {
+                phoneInputRef.current.focus();
+            } else {
+                productSearchInputRef.current?.focus();
+            }
         }
     };
 
@@ -886,7 +890,13 @@ const POS = forwardRef<any, POSProps>(({
         setCustomerAddress(c.address || '');
         setIsCustomerSearchModalOpen(false);
         setTimeout(() => {
-            phoneInputRef.current?.focus();
+            if (phoneInputRef.current && !phoneInputRef.current.disabled) {
+                phoneInputRef.current.focus();
+                phoneInputRef.current.select();
+            } else {
+                productSearchInputRef.current?.focus();
+                productSearchInputRef.current?.select();
+            }
         }, 100);
     };
 
@@ -1955,7 +1965,13 @@ const POS = forwardRef<any, POSProps>(({
                 isOpen={isCustomerSearchModalOpen}
                 onClose={() => {
                     setIsCustomerSearchModalOpen(false);
-                    setTimeout(() => phoneInputRef.current?.focus(), 100);
+                    setTimeout(() => {
+                        if (phoneInputRef.current && !phoneInputRef.current.disabled) {
+                            phoneInputRef.current.focus();
+                        } else {
+                            productSearchInputRef.current?.focus();
+                        }
+                    }, 100);
                 }}
                 customers={customers}
                 transactions={transactions}

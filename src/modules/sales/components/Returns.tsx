@@ -1,4 +1,4 @@
-﻿import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import Card from '@core/components/ui/Card';
 import type { 
     Transaction, 
@@ -12,6 +12,7 @@ import type {
 } from '@core/types';
 import { handleEnterToNextField } from '@core/utils/navigation';
 import { shouldHandleScreenShortcut } from '@core/utils/screenShortcuts';
+import PrintReturnModal from './PrintReturnModal';
 
 const RETURN_REASONS = [
     'Damaged / Broken', 'Expired / Near Expiry', 'Incorrect Item Sent', 
@@ -129,6 +130,7 @@ const Returns = React.forwardRef<any, ReturnsProps>(({
     onPrefillPurchaseInvoiceHandled
 }, ref) => {
     const [view, setView] = useState<'list' | 'create'>('list');
+    const [printVoucher, setPrintVoucher] = useState<any | null>(null);
     const [activeTab, setActiveTab] = useState<'sales' | 'purchase'>(defaultTab);
     const [searchInvoiceId, setSearchInvoiceId] = useState('');
     const [selectedInvoice, setSelectedInvoice] = useState<Transaction | Purchase | null>(null);
@@ -421,7 +423,7 @@ const Returns = React.forwardRef<any, ReturnsProps>(({
                                             <td className="p-2 border-r border-gray-200 font-mono text-[10px] text-gray-500 group-hover:text-white/70">{ret.originalInvoiceNumber || ret.originalInvoiceId || ret.originalPurchaseInvoiceId}</td>
                                             <td className="p-2 border-r border-gray-400 text-right font-black text-red-600 group-hover:text-white">₹{(ret.totalRefund || ret.totalValue || 0).toFixed(2)}</td>
                                             <td className="p-2 text-right">
-                                                <button className="text-[10px] font-black uppercase text-primary group-hover:text-white hover:underline">Print</button>
+                                                <button onClick={(e) => { e.stopPropagation(); setPrintVoucher(ret); }} className="text-[10px] font-black uppercase text-primary group-hover:text-white hover:underline">Print</button>
                                             </td>
                                         </tr>
                                     ))}
@@ -549,6 +551,13 @@ const Returns = React.forwardRef<any, ReturnsProps>(({
                     </div>
                 )}
             </div>
+            <PrintReturnModal
+                isOpen={!!printVoucher}
+                onClose={() => setPrintVoucher(null)}
+                returnVoucher={printVoucher}
+                type={activeTab}
+                pharmacy={currentUser}
+            />
         </main>
     );
 });

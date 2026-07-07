@@ -1,4 +1,4 @@
-﻿
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Card from '@core/components/ui/Card';
 import Modal from '@core/components/ui/Modal';
@@ -8,6 +8,7 @@ import { PhysicalInventoryStatus } from '@core/types';
 import { fuzzyMatch } from '@core/utils/search';
 import { getInventoryPolicy, getResolvedMedicinePolicy } from '@core/utils/materialType';
 import { shouldHandleScreenShortcut } from '@core/utils/screenShortcuts';
+import TallyPrompt from '@core/components/ui/TallyPrompt';
 
 const uniformTextStyle = "text-2xl font-normal tracking-tight uppercase leading-tight";
 
@@ -211,6 +212,7 @@ const CountingView: React.FC<{
     const [isScannerOpen, setIsScannerOpen] = useState(false);
     const [isReviewOpen, setIsReviewOpen] = useState(false);
     const [addProductQuery, setAddProductQuery] = useState('');
+    const [showDiscardPrompt, setShowDiscardPrompt] = useState(false);
     const isEndingRef = useRef(false);
     const discoveryListRef = useRef<HTMLDivElement>(null);
     const discoverySearchInputRef = useRef<HTMLInputElement>(null);
@@ -458,11 +460,13 @@ const CountingView: React.FC<{
     };
 
     const handleCancelClick = () => {
-        if (window.confirm("Discard audit session? Stock levels will not be changed.")) {
-            // CRITICAL: Set ending flag before firing callback to prevent late syncs
-            isEndingRef.current = true;
-            onCancel(session);
-        }
+        setShowDiscardPrompt(true);
+    };
+
+    const handleConfirmDiscard = () => {
+        setShowDiscardPrompt(false);
+        isEndingRef.current = true;
+        onCancel(session);
     };
 
     const handleFinalizeClick = () => {
@@ -667,6 +671,16 @@ const CountingView: React.FC<{
                     </div>
                 </div>
             </Modal>
+            {showDiscardPrompt && (
+                <TallyPrompt
+                    isOpen={showDiscardPrompt}
+                    title="Discard Audit"
+                    message="Discard audit session? Stock levels will not be changed."
+                    onAccept={handleConfirmDiscard}
+                    onDiscard={() => setShowDiscardPrompt(false)}
+                    onCancel={() => setShowDiscardPrompt(false)}
+                />
+            )}
         </div>
     );
 };

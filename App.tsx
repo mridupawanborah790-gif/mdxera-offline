@@ -2702,6 +2702,7 @@ const App: React.FC = () => {
                 case 'nonGstPos':
                     return <POS
                         ref={isActive ? posRef : undefined}
+                        isActive={isActive}
                         inventory={inventory} purchases={purchases} medicines={medicines} customers={customers}
                         transactions={transactions}
                         doctors={doctors}
@@ -3134,36 +3135,33 @@ const App: React.FC = () => {
                         onCancelCount={async (session) => {
                             if (!currentUser) return;
 
-                            // IF the session is empty (no items added), we treat it as a "discard" of a new session.
-                            // We should RECLAIM the ID by not saving it and calling markVoucherCancelled (which reverts the counter).
                             const isNewEmptySession = !session.items || session.items.length === 0;
 
-                            if (isNewEmptySession) {
-                                // 1. Remove from local IndexedDB if it was ever saved there
-                                await storage.deleteData('physical_inventory', session.id, currentUser);
-                                // 2. Attempt to revert the counter in Supabase
-                                await storage.markVoucherCancelled('physical-inventory', currentUser, session.voucher_no || session.id, session.id);
-                                // 3. Refresh local state
+                            try {
+                                if (isNewEmptySession) {
+                                    // 1. Remove from local IndexedDB if it was ever saved there
+                                    await storage.deleteData('physical_inventory', session.id, currentUser);
+                                    // 2. Attempt to revert the counter in Supabase
+                                    await storage.markVoucherCancelled('physical-inventory', currentUser, session.voucher_no || session.id, session.id);
+                                } else {
+                                    // Standard cancellation for sessions that actually had data
+                                    const cancelledSession: PhysicalInventorySession = {
+                                        ...session,
+                                        user_id: currentUser.user_id,
+                                        status: PhysicalInventoryStatus.CANCELLED,
+                                        endDate: new Date().toISOString(),
+                                        performedById: currentUser.user_id,
+                                        performedByName: currentUser.full_name,
+                                    };
+                                    
+                                    await storage.saveData('physical_inventory', cancelledSession, currentUser);
+                                    await storage.markVoucherCancelled('physical-inventory', currentUser, cancelledSession.voucher_no || cancelledSession.id, cancelledSession.id);
+                                }
+                            } catch (err) {
+                                console.warn('Sync failed during audit discard, but local state will be updated:', err);
+                            } finally {
                                 await loadData(currentUser, 'background');
-                                return;
                             }
-
-                            // Standard cancellation for sessions that actually had data
-                            const cancelledSession: PhysicalInventorySession = {
-                                ...session,
-                                user_id: currentUser.user_id,
-                                status: PhysicalInventoryStatus.CANCELLED,
-                                endDate: new Date().toISOString(),
-                                performedById: currentUser.user_id,
-                                performedByName: currentUser.full_name,
-                            };
-                            
-                            return storage.saveData('physical_inventory', cancelledSession, currentUser)
-                                .then(() => storage.markVoucherCancelled('physical-inventory', currentUser, cancelledSession.voucher_no || cancelledSession.id, cancelledSession.id))
-                                .catch(err => {
-                                    console.warn('Sync failed during audit discard, but local state will be updated:', err);
-                                })
-                                .then(() => loadData(currentUser, 'background'));
                         }}
                     />;
                 case 'suppliers':

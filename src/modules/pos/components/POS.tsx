@@ -62,6 +62,7 @@ interface POSProps {
     openChallanExposure?: number;
     salesChallans?: SalesChallan[];
     isChallan?: boolean;
+    isActive?: boolean;
 }
 
 interface UploadedFile {
@@ -398,7 +399,8 @@ const POS = forwardRef<any, POSProps>(({
     onRefreshConfig,
     openChallanExposure = 0,
     salesChallans = [],
-    isChallan = false
+    isChallan = false,
+    isActive
 }, ref) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -900,6 +902,12 @@ const POS = forwardRef<any, POSProps>(({
         // Focus date input when POS screen is opened/loaded
         setTimeout(() => dateInputRef.current?.focus(), 150);
     }, [transactionToEdit, conversionDraft, customers]);
+
+    useEffect(() => {
+        if (isActive) {
+            setTimeout(() => dateInputRef.current?.focus(), 150);
+        }
+    }, [isActive]);
 
     const currentInvoiceNo = useMemo(() => {
         if (transactionToEdit) return transactionToEdit.id;
@@ -1844,7 +1852,13 @@ const POS = forwardRef<any, POSProps>(({
         } else if (e.key === 'Escape') {
             // User doesn't want to select customer, move to next field
             e.preventDefault();
-            addressInputRef.current?.focus();
+            if (addressInputRef.current && !addressInputRef.current.disabled) {
+                addressInputRef.current.focus();
+            } else if (phoneInputRef.current && !phoneInputRef.current.disabled) {
+                phoneInputRef.current.focus();
+            } else {
+                productSearchInputRef.current?.focus();
+            }
         }
     };
 
@@ -1868,9 +1882,18 @@ const POS = forwardRef<any, POSProps>(({
         setCustomerAddress((c as any).address || '');
         setIsCustomerSearchModalOpen(false);
 
-        // Move to next field (Phone input)
+        // Move to next field (Address, Phone, or Product Search)
         setTimeout(() => {
-            addressInputRef.current?.focus();
+            if (addressInputRef.current && !addressInputRef.current.disabled) {
+                addressInputRef.current.focus();
+                addressInputRef.current.select();
+            } else if (phoneInputRef.current && !phoneInputRef.current.disabled) {
+                phoneInputRef.current.focus();
+                phoneInputRef.current.select();
+            } else {
+                productSearchInputRef.current?.focus();
+                productSearchInputRef.current?.select();
+            }
         }, 100);
     };
 
@@ -2459,6 +2482,11 @@ const POS = forwardRef<any, POSProps>(({
         setTimeout(() => billCategorySelectRef.current?.focus(), 100);
     }, [doctorSearchTerm, handleReferredByChange]);
 
+    const handleCloseDoctorPicker = useCallback(() => {
+        setIsDoctorPickerOpen(false);
+        setTimeout(() => billCategorySelectRef.current?.focus(), 100);
+    }, []);
+
     const handleAddTypedDoctorToMaster = useCallback(async () => {
         if (!currentUser) return;
         const typedValue = doctorSearchTerm.trim();
@@ -2597,7 +2625,7 @@ const POS = forwardRef<any, POSProps>(({
                             onChange={e => setCustomerAddress(e.target.value)}
                             className="w-full h-8 border border-gray-400 p-1 text-xs font-bold outline-none focus:bg-yellow-50"
                             placeholder="Customer Address"
-                            disabled={isReadOnly || ((currentUser?.organization_type || 'Retail') === 'Distributor' && !!selectedCustomer?.id)}
+                            disabled={isReadOnly}
                         />
                     </div>
                     {isFieldVisible('colPhone') && (
@@ -3516,7 +3544,15 @@ const POS = forwardRef<any, POSProps>(({
                 onClose={() => {
                     setIsCustomerSearchModalOpen(false);
                     // Focus the next field on Esc
-                    setTimeout(() => phoneInputRef.current?.focus(), 100);
+                    setTimeout(() => {
+                        if (addressInputRef.current && !addressInputRef.current.disabled) {
+                            addressInputRef.current.focus();
+                        } else if (phoneInputRef.current && !phoneInputRef.current.disabled) {
+                            phoneInputRef.current.focus();
+                        } else {
+                            productSearchInputRef.current?.focus();
+                        }
+                    }, 100);
                 }}
                 customers={customers}
                 transactions={transactions}
@@ -3599,7 +3635,7 @@ const POS = forwardRef<any, POSProps>(({
 
             <Modal
                 isOpen={isDoctorPickerOpen}
-                onClose={() => setIsDoctorPickerOpen(false)}
+                onClose={handleCloseDoctorPicker}
                 title="Select Doctor"
                 widthClass="max-w-[680px]"
                 heightClass="h-[380px]"
@@ -3622,6 +3658,7 @@ const POS = forwardRef<any, POSProps>(({
                                 setDoctorHighlightedIndex(prev => Math.max(prev - 1, 0));
                             } else if (e.key === 'Enter') {
                                 e.preventDefault();
+                                e.stopPropagation();
                                 const selectedDoctor = filteredDoctors[doctorHighlightedIndex];
                                 if (selectedDoctor) {
                                     handleDoctorSelect(selectedDoctor);
@@ -3630,7 +3667,8 @@ const POS = forwardRef<any, POSProps>(({
                                 }
                             } else if (e.key === 'Escape') {
                                 e.preventDefault();
-                                setIsDoctorPickerOpen(false);
+                                e.stopPropagation();
+                                handleCloseDoctorPicker();
                             }
                         }}
                         placeholder="Search doctor name / mobile..."

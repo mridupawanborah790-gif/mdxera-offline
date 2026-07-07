@@ -1,4 +1,4 @@
-﻿
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Modal from '@core/components/ui/Modal';
 import { Customer, Transaction } from '@core/types';
@@ -75,11 +75,13 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
             setSelectedIndex(prev => (prev - 1 + filtered.length) % Math.max(1, filtered.length));
         } else if (e.key === 'Enter') {
             e.preventDefault();
+            e.stopPropagation();
             if (filtered[selectedIndex]) {
                 onSelect(filtered[selectedIndex]);
             }
         } else if (e.key === 'Escape') {
             e.preventDefault();
+            e.stopPropagation();
             onClose();
         }
     };

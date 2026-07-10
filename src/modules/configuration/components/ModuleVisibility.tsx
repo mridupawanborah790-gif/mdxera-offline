@@ -20,6 +20,15 @@ const DASHBOARD_FIELDS: DashboardField[] = [
   { id: 'expiryBar', name: 'Expiry Alerts Bar' },
 ];
 
+interface FeatureEntry {
+  id: string;
+  name: string;
+}
+
+const FEATURES: FeatureEntry[] = [
+  { id: 'profitVisibility', name: 'Sales Profit Visibility' },
+];
+
 interface ModuleVisibilityProps {
   currentUser: RegisteredPharmacy | null;
   addNotification: (message: string, type: 'success' | 'error' | 'warning') => void;
@@ -92,8 +101,10 @@ const ModuleVisibility: React.FC<ModuleVisibilityProps> = ({ currentUser, addNot
 
   const hiddenScreens = useModuleVisibilityStore((s) => s.hiddenScreens);
   const hiddenDashboardFields = useModuleVisibilityStore((s) => s.hiddenDashboardFields);
+  const hiddenFeatures = useModuleVisibilityStore((s) => s.hiddenFeatures);
   const setHiddenScreens = useModuleVisibilityStore((s) => s.setHiddenScreens);
   const setHiddenDashboardFields = useModuleVisibilityStore((s) => s.setHiddenDashboardFields);
+  const setHiddenFeatures = useModuleVisibilityStore((s) => s.setHiddenFeatures);
   const loadForUser = useModuleVisibilityStore((s) => s.loadForUser);
 
   useEffect(() => {
@@ -114,17 +125,26 @@ const ModuleVisibility: React.FC<ModuleVisibilityProps> = ({ currentUser, addNot
     setHiddenDashboardFields(Array.from(next));
   };
 
+  const toggleFeature = (id: string) => {
+    const next = new Set(hiddenFeatures);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setHiddenFeatures(Array.from(next));
+  };
+
   const resetAll = () => {
     setHiddenScreens([]);
     setHiddenDashboardFields([]);
-    addNotification('All modules and dashboard fields reset to visible.', 'success');
+    setHiddenFeatures([]);
+    addNotification('All modules, dashboard fields, and features reset to visible.', 'success');
   };
 
   const summary = useMemo(() => {
     const screens = hiddenScreens.size;
     const fields = hiddenDashboardFields.size;
-    return `${screens} screen${screens === 1 ? '' : 's'} hidden · ${fields} dashboard field${fields === 1 ? '' : 's'} hidden`;
-  }, [hiddenScreens, hiddenDashboardFields]);
+    const features = hiddenFeatures.size;
+    return `${screens} screen${screens === 1 ? '' : 's'} hidden · ${fields} dashboard field${fields === 1 ? '' : 's'} hidden · ${features} feature${features === 1 ? '' : 's'} hidden`;
+  }, [hiddenScreens, hiddenDashboardFields, hiddenFeatures]);
 
   if (!authorized) {
     return (
@@ -193,6 +213,28 @@ const ModuleVisibility: React.FC<ModuleVisibilityProps> = ({ currentUser, addNot
                   label={field.name}
                   hidden={hiddenDashboardFields.has(field.id)}
                   onToggle={() => toggleDashboardField(field.id)}
+                />
+              ))}
+            </div>
+          </Card>
+
+          <Card className="p-6 tally-border bg-white !rounded-none shadow-lg">
+            <div className="border-b-2 border-primary pb-2 mb-4">
+              <h3 className="text-lg font-black text-primary uppercase tracking-tight">
+                Features
+              </h3>
+              <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">
+                Enable or disable additional interface features.
+              </p>
+            </div>
+
+            <div className="space-y-1">
+              {FEATURES.map((feature) => (
+                <Row
+                  key={feature.id}
+                  label={feature.name}
+                  hidden={hiddenFeatures.has(feature.id)}
+                  onToggle={() => toggleFeature(feature.id)}
                 />
               ))}
             </div>

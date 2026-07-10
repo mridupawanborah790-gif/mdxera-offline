@@ -1,20 +1,162 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { PurchaseOrder, Distributor, RegisteredPharmacy } from '@core/types';
+import type { PurchaseOrder, Distributor, RegisteredPharmacy, AppConfigurations } from '@core/types';
 import PurchaseOrderTemplate from '@modules/pos/components/invoice-templates/PurchaseOrderTemplate';
+import { sendWhatsappInvoiceViaAiSensy } from '../../../../services/whatsappService';
+import { supabase } from '@core/db/supabaseClient';
+import { cacheRemoteAsset } from '@core/utils/assetCache';
+
+// Declare html2pdf for TypeScript since it's loaded via CDN
+declare const html2pdf: any;
 
 interface PrintPurchaseOrderModalProps {
   isOpen: boolean;
   onClose: () => void;
   purchaseOrder: (PurchaseOrder & { distributor: Distributor }) | null;
   pharmacy: RegisteredPharmacy | null;
+  configurations?: AppConfigurations;
 }
 
-const PrintPurchaseOrderModal: React.FC<PrintPurchaseOrderModalProps> = ({ isOpen, onClose, purchaseOrder, pharmacy }) => {
+const PrintPurchaseOrderModal: React.FC<PrintPurchaseOrderModalProps> = ({ isOpen, onClose, purchaseOrder, pharmacy, configurations }) => {
+  const [isSendingApi, setIsSendingApi] = useState(false);
+
   if (!isOpen || !purchaseOrder || !pharmacy) return null;
 
   const handlePrint = () => {
     window.print();
+  };
+
+  // data: URL to a base64 data URL. html2canvas cannot load tauri:// or any
+  // non-HTTP(S) scheme, and may also fail on cross-origin HTTP images even
+  // with useCORS:true. Converting to inline data: guarantees rendering.
+  const resolveImagesInElement = async (el: HTMLElement): Promise<void> => {
+    const imgs = Array.from(el.querySelectorAll<HTMLImageElement>('img[src]'));
+    await Promise.allSettled(
+      imgs.map(async (img) => {
+        const src = img.getAttribute('src') || '';
+        if (!src || src.startsWith('data:') || src.startsWith('blob:')) return;
+        try {
+          const base64 = await cacheRemoteAsset(src);
+          img.setAttribute('src', base64);
+        } catch {
+          // If caching fails, remove the src so html2canvas doesn't choke on it
+          img.removeAttribute('src');
+        }
+      })
+    );
+  };
+
+  const handleWhatsAppApiSend = async () => {
+    const apiKey = configurations?.displayOptions?.aisensyApiKey || "";
+    const campaignName = configurations?.displayOptions?.aisensyCampaignName || "";
+    const templateType = configurations?.displayOptions?.whatsappTemplateType || 'document';
+
+    if (!apiKey) {
+      alert("AiSensy API Key is not configured. Please set it in Configuration > WhatsApp API.");
+      return;
+    }
+    if (!campaignName) {
+      alert("AiSensy Campaign Name is not configured. Please set it in Configuration > WhatsApp API.");
+      return;
+    }
+
+    setIsSendingApi(true);
+    try {
+      const mockBill = {
+        customerPhone: purchaseOrder.distributor?.phone || purchaseOrder.distributor?.mobile || "",
+        customerName: purchaseOrder.distributorName || purchaseOrder.distributor?.name || "Valued Partner",
+        pharmacy: {
+          pharmacy_name: pharmacy?.pharmacy_name || "Rx Medimart"
+        },
+        invoiceNumber: purchaseOrder.serialId || purchaseOrder.id,
+        total: purchaseOrder.totalAmount || 0,
+        date: purchaseOrder.date,
+        createdAt: purchaseOrder.date
+      } as any;
+
+      if (templateType === 'text') {
+        // Send via AiSensy Campaign API without PDF
+        const result = await sendWhatsappInvoiceViaAiSensy(apiKey, campaignName, mockBill, undefined, 'text');
+        if (result.success) {
+          alert("WhatsApp message sent successfully!");
+        } else {
+          alert(`Failed to send WhatsApp: ${result.message || 'Unknown error'}`);
+        }
+      } else {
+        // Document template flow
+        if (typeof html2pdf === 'undefined') {
+          alert("PDF generation library is not loaded. Please try printing to PDF instead.");
+          return;
+        }
+
+        const invoiceNo = purchaseOrder.serialId || purchaseOrder.id;
+        const element = document.getElementById('print-area');
+
+        const opt = {
+            margin: 0,
+            filename: `PO_${invoiceNo}.pdf`,
+            image: { type: 'jpeg', quality: 0.95 },
+            html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+            jsPDF: {
+              unit: 'mm',
+              format: 'a4',
+              orientation: 'portrait'
+            }
+        };
+
+        const orgId = purchaseOrder.organization_id || 'default_org';
+        // Use template and timestamp in the storage path to avoid CDN/provider caching of overwritten PDFs
+        const storagePath = `${orgId}/PO_${invoiceNo}_${Date.now()}.pdf`;
+        console.debug('[WhatsApp PDF Flow] Starting PDF generation...', { invoiceNo, orgId, storagePath });
+
+        // Convert images to base64 for html2canvas
+        if (element) await resolveImagesInElement(element);
+        
+        const worker = html2pdf().set(opt).from(element).toPdf();
+        const pdfBlob = await worker.output('blob').then((blob: Blob) => blob);
+        console.debug('[WhatsApp PDF Flow] PDF Blob generated successfully.', { size: pdfBlob.size });
+
+        // Upload to Supabase Storage Bucket 'invoices'
+        console.debug('[WhatsApp PDF Flow] Uploading to Supabase bucket "invoices"...');
+        const { error: uploadError } = await supabase.storage
+          .from('invoices')
+          .upload(storagePath, pdfBlob, {
+            contentType: 'application/pdf',
+            upsert: true
+          });
+
+        if (uploadError) {
+          console.error('[WhatsApp PDF Flow] Supabase upload failed:', uploadError);
+          throw new Error(`Upload to Supabase Storage failed: ${uploadError.message}`);
+        }
+        console.debug('[WhatsApp PDF Flow] PDF uploaded successfully to Supabase.');
+
+        // Get Public URL
+        const { data: publicUrlData } = supabase.storage
+          .from('invoices')
+          .getPublicUrl(storagePath);
+        
+        const pdfUrl = publicUrlData?.publicUrl;
+        if (!pdfUrl) {
+          throw new Error('Failed to generate public URL for PO PDF.');
+        }
+        console.debug('[WhatsApp PDF Flow] PDF Public URL:', pdfUrl);
+
+        // Send via AiSensy Campaign API
+        console.debug('[WhatsApp PDF Flow] Dispatching AiSensy campaign...', { campaignName });
+        const result = await sendWhatsappInvoiceViaAiSensy(apiKey, campaignName, mockBill, pdfUrl, 'document');
+        console.debug('[WhatsApp PDF Flow] AiSensy response:', result);
+        if (result.success) {
+          alert("WhatsApp message with PDF purchase order sent successfully!");
+        } else {
+          alert(`Failed to send WhatsApp: ${result.message || 'Unknown error'}`);
+        }
+      }
+    } catch (err: any) {
+      alert(`Error sending WhatsApp: ${err.message || err}`);
+    } finally {
+      setIsSendingApi(false);
+    }
   };
 
   return createPortal(
@@ -34,6 +176,11 @@ const PrintPurchaseOrderModal: React.FC<PrintPurchaseOrderModalProps> = ({ isOpe
         </div>
 
         <div className="flex justify-end items-center p-4 bg-gray-50 border-t no-print space-x-3">
+            {configurations?.displayOptions?.whatsappEnabled && (purchaseOrder.distributor?.phone || purchaseOrder.distributor?.mobile) && (
+                <button onClick={handleWhatsAppApiSend} disabled={isSendingApi} className="px-5 py-2 text-sm font-semibold text-white bg-green-600 border border-green-700 rounded-lg shadow-sm hover:bg-green-700 flex items-center disabled:opacity-50">
+                    {isSendingApi ? 'Sending ...' : 'Send through WhatsApp'}
+                </button>
+            )}
             <button onClick={onClose} className="px-5 py-2 text-sm font-semibold text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50">
                 Close
             </button>

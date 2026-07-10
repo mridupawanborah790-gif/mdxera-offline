@@ -4,6 +4,7 @@ import type { InventoryItem, Transaction, Purchase, Distributor, Customer, Sales
 import { calculateCustomerReceivableBreakdown, calculateSupplierPayableBreakdown, getCustomerInvoiceOutstandingTotalFromTransactions, getOutstandingBalance, getSupplierInvoiceOutstandingTotalFromPurchases, formatVoucherNo } from '@core/utils/helpers';
 import { getStockBreakup } from '@core/utils/stock';
 import { formatPackLooseQuantity } from '@core/utils/quantity';
+import { useModuleVisibility } from '@core/visibility/useModuleVisibility';
 
 interface ReportsProps {
   inventory: InventoryItem[];
@@ -117,6 +118,8 @@ const isDateWithinRange = (isoDate: string, startIso: string, endIso: string) =>
 const Reports: React.FC<ReportsProps> = ({
   inventory, transactions, purchases, distributors, customers, doctors, salesReturns, purchaseReturns, onPrintReport,
 }) => {
+  const { isFeatureHidden } = useModuleVisibility();
+  const hideProfit = isFeatureHidden('profitVisibility');
   const todayIso = new Date().toISOString().split('T')[0];
   const firstOfMonthIso = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
 
@@ -249,21 +252,38 @@ const Reports: React.FC<ReportsProps> = ({
     const filteredPurchaseReturns = purchaseReturns.filter(p => isDateWithinRange(p.date, startDate, endDate));
 
     switch (reportId) {
-      case 'salesRegister':
-        reportHeaders = ['Bill No', 'Bill Date', 'Customer Name', 'GSTIN', 'Billing Category', 'Taxable Amount', 'GST Amount', 'Discount', 'Net Amount', 'Status'];
-        rows = completedSales.map(tx => ({
-          'Bill No': formatVoucherNo(tx.invoiceNumber || tx.id),
-          'Bill Date': formatReportDate(tx.date),
-          'Customer Name': tx.customerName,
-          'GSTIN': customerByName.get(tx.customerName)?.gstNumber || 'N/A',
-          'Billing Category': tx.billType || 'regular',
-          'Taxable Amount': round2(tx.subtotal - tx.totalItemDiscount - tx.schemeDiscount),
-          'GST Amount': round2(tx.totalGst || 0),
-          'Discount': round2((tx.totalItemDiscount || 0) + (tx.schemeDiscount || 0)),
-          'Net Amount': round2(tx.total || 0),
-          'Status': tx.status
-        }));
+      case 'salesRegister': {
+        const showProfit = !hideProfit;
+        reportHeaders = showProfit
+          ? ['Bill No', 'Bill Date', 'Customer Name', 'GSTIN', 'Billing Category', 'Taxable Amount', 'GST Amount', 'Discount', 'Net Amount', 'Profit', 'Status']
+          : ['Bill No', 'Bill Date', 'Customer Name', 'GSTIN', 'Billing Category', 'Taxable Amount', 'GST Amount', 'Discount', 'Net Amount', 'Status'];
+        rows = completedSales.map(tx => {
+          const row: any = {
+            'Bill No': formatVoucherNo(tx.invoiceNumber || tx.id),
+            'Bill Date': formatReportDate(tx.date),
+            'Customer Name': tx.customerName,
+            'GSTIN': customerByName.get(tx.customerName)?.gstNumber || 'N/A',
+            'Billing Category': tx.billType || 'regular',
+            'Taxable Amount': round2(tx.subtotal - tx.totalItemDiscount - tx.schemeDiscount),
+            'GST Amount': round2(tx.totalGst || 0),
+            'Discount': round2((tx.totalItemDiscount || 0) + (tx.schemeDiscount || 0)),
+            'Net Amount': round2(tx.total || 0),
+          };
+          if (showProfit) {
+            const purchaseTotal = tx.items.reduce((sum, item: any) => {
+              const inv = getInv(item.inventoryItemId, item.name);
+              const costRate = item.purchasePrice ?? inv?.purchasePrice ?? inv?.ptr ?? 0;
+              const unitsPerPack = parsePackSize(item.packType) || item.unitsPerPack || 1;
+              const billedQty = (item.quantity || 0) + ((item.looseQuantity || 0) / unitsPerPack);
+              return sum + (billedQty * costRate);
+            }, 0);
+            row['Profit'] = round2(row['Taxable Amount'] - purchaseTotal);
+          }
+          row['Status'] = tx.status;
+          return row;
+        });
         break;
+      }
       case 'salesSummary':
         reportHeaders = ['Total Sales Bills', 'Total Gross Sales', 'Total Discount', 'Total Taxable Value', 'Total GST', 'Net Sales', 'Cash Sales', 'Credit Sales'];
         rows = [{

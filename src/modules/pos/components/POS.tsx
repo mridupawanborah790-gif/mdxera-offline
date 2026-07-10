@@ -26,6 +26,7 @@ import { extractPackMultiplier, isLiquidOrWeightPack, resolveUnitsPerStrip } fro
 import { shouldHandleScreenShortcut } from '@core/utils/screenShortcuts';
 import { evaluateCustomerCredit } from '@core/utils/creditControl';
 import { getInventoryPolicy, getResolvedMedicinePolicy } from '@core/utils/materialType';
+import { useModuleVisibility } from '@core/visibility/useModuleVisibility';
 
 interface POSProps {
     inventory: InventoryItem[];
@@ -403,6 +404,9 @@ const POS = forwardRef<any, POSProps>(({
     isActive
 }, ref) => {
     const [searchTerm, setSearchTerm] = useState('');
+    const { isFeatureHidden } = useModuleVisibility();
+    const showProfit = !isFeatureHidden('profitVisibility');
+    const [isProfitVisible, setIsProfitVisible] = useState(false);
     const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
     const [customerSearch, setCustomerSearch] = useState('');
     const [customerPhone, setCustomerPhone] = useState('');
@@ -741,6 +745,16 @@ const POS = forwardRef<any, POSProps>(({
     const grandTotal = useMemo(() => {
         return parseFloat((totals.baseTotal + roundOff + adjustment).toFixed(2));
     }, [totals.baseTotal, roundOff, adjustment]);
+
+    const billProfit = useMemo(() => {
+        const totalPurchaseCost = cartItems.reduce((sum, item) => {
+            const unitsPerPack = resolveUnitsPerStrip(item.unitsPerPack, item.packType);
+            const billedQty = (item.quantity || 0) + ((item.looseQuantity || 0) / (unitsPerPack || 1));
+            const cost = billedQty * (item.purchasePrice || 0);
+            return sum + cost;
+        }, 0);
+        return parseFloat(((totals.taxableValue || 0) - totalPurchaseCost).toFixed(2));
+    }, [cartItems, totals.taxableValue]);
 
     const effectiveOpenChallanExposure = useMemo(() => {
         if (!selectedCustomer?.id) return Number(openChallanExposure || 0);
@@ -1387,6 +1401,11 @@ const POS = forwardRef<any, POSProps>(({
             if (isCustomerSearchModalOpen || schemeItem || pendingBatchSelection || isSearchModalOpen || isSchemeCalcOpen || isAddCustomerModalOpen || isEditMaterialModalOpen) return;
             
             if (!shouldHandleScreenShortcut(e, ['pos', 'nonGstPos'], { allowWhenInputFocused: true })) return;
+            if (showProfit && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
+                e.preventDefault();
+                setIsProfitVisible(prev => !prev);
+                return;
+            }
             if (e.ctrlKey && e.key.toLowerCase() === 's') {
                 e.preventDefault();
                 handleSave();
@@ -2004,6 +2023,7 @@ const POS = forwardRef<any, POSProps>(({
             discountPercent: Number(activePriceRecord?.defaultDiscountPercent ?? linkedMedicine?.productDiscount ?? selectedCustomer?.defaultDiscount ?? 0),
             itemFlatDiscount: 0,
             taxBasis: batch.taxBasis,
+            purchasePrice: batch.purchasePrice || 0,
             batch: ['NEW-STOCK', 'NEW-BATCH'].includes((batch.batch || '').trim().toUpperCase()) ? '' : (batch.batch || ''),
             expiry: formatExpiryForInput(batch.expiry ? String(batch.expiry) : ''),
             rate: rateValue,
@@ -2566,6 +2586,16 @@ const POS = forwardRef<any, POSProps>(({
                     >
                         {isSidebarCollapsed ? 'Show Insights' : 'Hide Insights'}
                     </button>
+                    {showProfit && (
+                        <button
+                            type="button"
+                            onClick={() => setIsProfitVisible(prev => !prev)}
+                            className="px-2 py-0.5 border border-white/60 text-white text-[9px] font-black uppercase tracking-widest hover:bg-white/10 transition-colors"
+                            title="Toggle Profit Visibility (Ctrl + P)"
+                        >
+                            {isProfitVisible ? 'Hide Profit' : 'Show Profit'}
+                        </button>
+                    )}
                     {currentUser?.organization_type === 'Retail' && (
                         <button
                             type="button"
@@ -2578,7 +2608,14 @@ const POS = forwardRef<any, POSProps>(({
                         </button>
                     )}
                 </div>
-                <span className="text-[10px] font-black uppercase text-accent">No. {currentInvoiceNo}</span>
+                <div className="flex items-center gap-4">
+                    {showProfit && (
+                        <span className="text-[10px] font-black uppercase text-emerald-400">
+                            Total Profit: {isProfitVisible ? `₹${billProfit.toFixed(2)}` : '₹*.**'}
+                        </span>
+                    )}
+                    <span className="text-[10px] font-black uppercase text-accent">No. {currentInvoiceNo}</span>
+                </div>
             </div>
 
             <div className="p-2 flex-1 flex flex-col gap-2 overflow-hidden">
@@ -2734,6 +2771,7 @@ const POS = forwardRef<any, POSProps>(({
                                     {isFieldVisible('colDisc') && <th className="p-2 border-r border-gray-400 text-center w-16">Disc%</th>}
                                     {isFieldVisible('colGst') && <th className="p-2 border-r border-gray-400 text-center w-16">GST%</th>}
                                     {isFieldVisible('colSch') && <th className="p-2 border-r border-gray-400 text-center w-20">Sch%</th>}
+                                    {showProfit && <th className="p-2 border-r border-gray-400 text-right w-24">Profit</th>}
                                     {isFieldVisible('colAmount') && <th className="p-2 text-right w-32">Amount</th>}
                                 </tr>
                             </thead>
@@ -3052,6 +3090,17 @@ const POS = forwardRef<any, POSProps>(({
                                                     </button>
                                                 </td>
                                             )}
+                                            {showProfit && (() => {
+                                                const unitsPerPack = resolveUnitsPerStrip(item.unitsPerPack, item.packType);
+                                                const billedQty = (item.quantity || 0) + ((item.looseQuantity || 0) / (unitsPerPack || 1));
+                                                const lineCost = billedQty * (item.purchasePrice || 0);
+                                                const lineProfit = lineAmount - lineCost;
+                                                return (
+                                                    <td className={`p-2 border-r border-gray-200 text-right ${selectedRowIndex === idx ? 'text-white font-bold' : 'group-hover:text-white text-emerald-600 font-bold'} ${uniformTextStyle}`}>
+                                                        {isProfitVisible ? `₹${lineProfit.toFixed(2)}` : '₹*.**'}
+                                                    </td>
+                                                );
+                                            })()}
                                             {isFieldVisible('colAmount') && <td className={`p-2 text-right ${selectedRowIndex === idx ? 'text-white' : 'group-hover:text-white text-gray-900'} ${uniformTextStyle}`}>₹{(lineAmount || 0).toFixed(2)}</td>}
                                         </tr>
                                     );

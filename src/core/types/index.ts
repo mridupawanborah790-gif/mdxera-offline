@@ -357,6 +357,7 @@ export interface BillItem {
     appliedDiscountId?: string;
     appliedDiscountValue?: number;
     appliedDiscountType?: 'flat' | 'percentage';
+    purchasePrice?: number;
 }
 
 export interface Transaction {

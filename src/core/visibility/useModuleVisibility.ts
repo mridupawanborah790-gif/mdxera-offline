@@ -6,15 +6,18 @@ import type { NavItem } from '@core/types';
 export function useModuleVisibility() {
   const hiddenScreens = useModuleVisibilityStore((s) => s.hiddenScreens);
   const hiddenDashboardFields = useModuleVisibilityStore((s) => s.hiddenDashboardFields);
+  const hiddenFeatures = useModuleVisibilityStore((s) => s.hiddenFeatures);
 
   return useMemo(
     () => ({
       isScreenHidden: (screenId: string) => hiddenScreens.has(screenId),
       isDashboardFieldHidden: (fieldId: string) => hiddenDashboardFields.has(fieldId),
+      isFeatureHidden: (featureId: string) => hiddenFeatures.has(featureId),
       hiddenScreens,
       hiddenDashboardFields,
+      hiddenFeatures,
     }),
-    [hiddenScreens, hiddenDashboardFields]
+    [hiddenScreens, hiddenDashboardFields, hiddenFeatures]
   );
 }
 

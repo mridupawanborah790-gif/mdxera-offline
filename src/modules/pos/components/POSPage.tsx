@@ -1003,6 +1003,7 @@ const POS = forwardRef<any, POSProps>(({
             gstPercent: batch.gstPercent,
             discountPercent: resolveProductDiscountPercent(batch) || applicableLineDiscountPercent || selectedCustomer?.defaultDiscount || 0,
             itemFlatDiscount: 0,
+            purchasePrice: batch.purchasePrice || 0,
             batch: policy.inventorised && ['NEW-STOCK', 'NEW-BATCH'].includes((batch.batch || '').trim().toUpperCase()) ? '' : (policy.inventorised ? (batch.batch || '') : ''),
             expiry: policy.inventorised ? (batch.expiry ? String(batch.expiry) : 'N/A') : '',
             rate: rateValue,

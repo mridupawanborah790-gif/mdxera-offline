@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import Card from '@core/components/ui/Card';
 import Modal from '@core/components/ui/Modal';
 import PrintSupplierVoucherModal from './PrintSupplierVoucherModal';
+import PrintLedgerModal from './PrintLedgerModal';
 import { Distributor, Purchase, RegisteredPharmacy, TransactionLedgerItem } from '@core/types';
 import { calculateSupplierPayableBreakdown, getOutstandingBalance, formatVoucherNo, getSupplierInvoiceOutstandingTotalFromPurchases } from '@core/utils/helpers';
 import { fuzzyMatch } from '@core/utils/search';
@@ -146,6 +147,7 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
     const [cancellationDate, setCancellationDate] = useState<string>('');
     const [cancellationReason, setCancellationReason] = useState<string>('User requested cancellation');
     const [cancellationError, setCancellationError] = useState<string>('');
+    const [isLedgerPrintOpen, setIsLedgerPrintOpen] = useState(false);
 
     const normalizedPaymentMode = paymentMode.trim().toLowerCase();
     const isCashMode = normalizedPaymentMode === 'cash';
@@ -479,8 +481,8 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
         setAmount(totalAllocatedAmount > 0 ? Number(totalAllocatedAmount.toFixed(2)) : '');
     }, [showPaymentForm, paymentType, totalAllocatedAmount, isAmountManuallyEdited]);
 
-    const ledgerRows = useMemo(() => {
-        if (!selectedDistributor) return [];
+    const { ledgerRows, ledgerRowsAsc } = useMemo(() => {
+        if (!selectedDistributor) return { ledgerRows: [], ledgerRowsAsc: [] };
         const ledger = Array.isArray(selectedDistributor.ledger) ? selectedDistributor.ledger : [];
         const resolved = [...ledger]
             .filter(Boolean)
@@ -524,7 +526,7 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
 
         // Now sort descending by date (newest first) for UI display.
         // On equal dates, sort by descending weight (newest adjustment first, then payment, then invoice, then opening balance)
-        return calculated.sort((a, b) => {
+        const sortedDesc = [...calculated].sort((a, b) => {
             const dateA = new Date(a.date).getTime();
             const dateB = new Date(b.date).getTime();
             if (dateA !== dateB) {
@@ -535,7 +537,20 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
             if (weightA !== weightB) return weightB - weightA;
             return (b.id || '').localeCompare(a.id || '');
         });
+
+        return {
+            ledgerRows: sortedDesc,
+            ledgerRowsAsc: calculated
+        };
     }, [selectedDistributor, ledgerVoucherMap]);
+
+    const distributorForPrint = useMemo(() => {
+        if (!selectedDistributor) return null;
+        return {
+            ...selectedDistributor,
+            ledger: ledgerRowsAsc
+        };
+    }, [selectedDistributor, ledgerRowsAsc]);
 
     const payableHistoryRows = useMemo(
         () => ledgerRows.filter(item => item.type === 'payment' && (getPaymentAmount(item) > 0 || Number(item.adjustedAmount || 0) > 0)),
@@ -1112,51 +1127,7 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
                                     <p className="text-[10px] font-black uppercase tracking-wider">Complete ledger transactions (including accounting-linked payment entries)</p>
                                     <button
                                         type="button"
-                                        onClick={() => {
-                                            const win = window.open('', '_blank', 'width=900,height=700');
-                                            if (!win) return;
-                                            const rows = ledgerRows.map(item => `
-                                                <tr>
-                                                    <td>${formatDisplayDate(item.date)}</td>
-                                                    <td style="text-transform:uppercase">${item.type ?? '-'}</td>
-                                                    <td>${(item.description || '').replace(/\s*\[AUTO_LEDGER\]:[a-f0-9\-]+/gi, '').trim() || '-'}</td>
-                                                    <td>₹${Number(item.debit || 0).toFixed(2)}</td>
-                                                    <td>₹${Number(item.credit || 0).toFixed(2)}</td>
-                                                    <td><strong>₹${Number(item.balance || 0).toFixed(2)}</strong></td>
-                                                    <td>${formatVoucherNo(item.journalEntryNumber) || item.journalEntryNumber || '-'}</td>
-                                                </tr>`).join('');
-                                            win.document.write(`<!DOCTYPE html><html><head><title>Ledger - ${selectedDistributor?.name || ''}</title>
-                                                <style>
-                                                    body { font-family: Arial, sans-serif; font-size: 12px; color: #000; margin: 24px; }
-                                                    h2 { margin: 0 0 4px; font-size: 16px; }
-                                                    h3 { margin: 0 0 2px; font-size: 13px; font-weight: normal; }
-                                                    p.sub { font-size: 10px; color: #555; margin: 0 0 16px; text-transform: uppercase; letter-spacing: 0.05em; }
-                                                    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-                                                    th { background: #f3f4f6; text-align: left; padding: 6px 8px; font-size: 10px; text-transform: uppercase; border: 1px solid #d1d5db; }
-                                                    td { padding: 6px 8px; border: 1px solid #d1d5db; vertical-align: top; }
-                                                    tr:nth-child(even) { background: #f9fafb; }
-                                                    .meta { display: flex; justify-content: space-between; margin-bottom: 16px; }
-                                                    @media print { body { margin: 0; } }
-                                                </style></head><body>
-                                                <div class="meta">
-                                                    <div>
-                                                        <h2>${selectedDistributor?.name || 'Supplier'}</h2>
-                                                        <h3>Complete Ledger Statement</h3>
-                                                        <p class="sub">Including accounting-linked payment entries</p>
-                                                    </div>
-                                                    <div style="text-align:right;font-size:11px;color:#555">
-                                                        <div>Printed: ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
-                                                        <div>Total Entries: ${ledgerRows.length}</div>
-                                                    </div>
-                                                </div>
-                                                <table>
-                                                    <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Debit</th><th>Credit</th><th>Balance</th><th>Voucher</th></tr></thead>
-                                                    <tbody>${rows}</tbody>
-                                                </table>
-                                                <script>window.onload = function(){ window.print(); }<\/script>
-                                            </body></html>`);
-                                            win.document.close();
-                                        }}
+                                        onClick={() => setIsLedgerPrintOpen(true)}
                                         className="px-3 py-1 border border-gray-400 bg-white text-[10px] font-black uppercase hover:bg-gray-50 flex items-center gap-1.5 flex-shrink-0"
                                     >
                                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
@@ -1431,6 +1402,14 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
                 summary={printingVoucher ? getVoucherAllocationSummary(printingVoucher) : null}
                 purchases={purchases}
             />
+            {selectedDistributor && (
+                <PrintLedgerModal
+                    isOpen={isLedgerPrintOpen}
+                    onClose={() => setIsLedgerPrintOpen(false)}
+                    distributor={distributorForPrint}
+                    pharmacy={currentUser}
+                />
+            )}
         </main>
     );
 };

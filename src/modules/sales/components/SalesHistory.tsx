@@ -8,6 +8,8 @@ import ConfirmModal from '@core/components/ui/ConfirmModal';
 import JournalEntryViewerModal from '@modules/accounting/components/JournalEntryViewerModal';
 import { shouldHandleScreenShortcut } from '@core/utils/screenShortcuts';
 import { formatVoucherNo } from '@core/utils/helpers';
+import { useModuleVisibility } from '@core/visibility/useModuleVisibility';
+import { resolveUnitsPerStrip } from '@core/utils/pack';
 
 type SortableKeys = 'invoiceNumber' | 'date' | 'customerName' | 'total' | 'status' | 'itemCount';
 
@@ -434,6 +436,9 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
     const [viewingTransaction, setViewingTransaction] = useState<Transaction | null>(null);
     const [rxViewingTransaction, setRxViewingTransaction] = useState<Transaction | null>(null);
 
+    const { isFeatureHidden } = useModuleVisibility();
+    const showProfit = !isFeatureHidden('profitVisibility');
+
     const requestSort = (key: SortableKeys) => {
         let direction: 'ascending' | 'descending' = 'ascending';
         if (sortConfig.key === key && sortConfig.direction === 'ascending') {
@@ -800,6 +805,29 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
 
     const totalRevenue = useMemo(() => filteredAndSortedTransactions.reduce((sum, t) => sum + (t.status !== 'cancelled' ? t.total : 0), 0), [filteredAndSortedTransactions]);
 
+    const selectedBillProfit = useMemo(() => {
+        if (!showProfit || !selectedTransaction || selectedTransaction.status === 'cancelled') return null;
+        const cost = (selectedTransaction.items || []).reduce((c, item) => {
+            const unitsPerPack = resolveUnitsPerStrip(item.unitsPerPack, item.packType);
+            const billedQty = (item.quantity || 0) + ((item.looseQuantity || 0) / (unitsPerPack || 1));
+            return c + billedQty * (item.purchasePrice || 0);
+        }, 0);
+        return parseFloat(((selectedTransaction.total || 0) - cost).toFixed(2));
+    }, [selectedTransaction, showProfit]);
+
+    const totalProfit = useMemo(() => {
+        if (!showProfit) return 0;
+        return filteredAndSortedTransactions.reduce((sum, tx) => {
+            if (tx.status === 'cancelled') return sum;
+            const cost = (tx.items || []).reduce((c, item) => {
+                const unitsPerPack = resolveUnitsPerStrip(item.unitsPerPack, item.packType);
+                const billedQty = (item.quantity || 0) + ((item.looseQuantity || 0) / (unitsPerPack || 1));
+                return c + billedQty * (item.purchasePrice || 0);
+            }, 0);
+            return sum + ((tx.total || 0) - cost);
+        }, 0);
+    }, [filteredAndSortedTransactions, showProfit]);
+
     const applySearch = useCallback(() => {
         setSearchTerm(searchInput.trim());
     }, [searchInput]);
@@ -808,7 +836,14 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
         <main className="flex-1 page-fade-in flex flex-col overflow-hidden bg-app-bg">
             <div className="bg-primary text-white h-7 flex items-center px-4 justify-between border-b border-gray-600 shadow-md flex-shrink-0">
                 <span className="text-[10px] font-black uppercase tracking-widest">Sales Register (Accounting)</span>
-                <span className="text-[10px] font-black uppercase text-accent">Total Revenue: ₹{totalRevenue.toLocaleString()}</span>
+                <div className="flex items-center gap-4">
+                    {showProfit && (
+                        <span className="text-[10px] font-black uppercase text-emerald-300">
+                            Total Profit: ₹{totalProfit.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                    )}
+                    <span className="text-[10px] font-black uppercase text-accent">Total Revenue: ₹{totalRevenue.toLocaleString()}</span>
+                </div>
             </div>
 
             <div className="p-4 flex-1 flex flex-col gap-4 overflow-hidden">
@@ -872,6 +907,9 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                             {' '}| Customer: <span className="uppercase">{selectedTransaction?.customerName || '-'}</span>
                             {' '}| Voucher ID: <span className="font-mono">{formatVoucherNo(selectedTransaction?.invoiceNumber || selectedTransaction?.id) || '-'}</span>
                             {' '}| Amount: <span className="font-black">₹{(selectedTransaction?.total || 0).toFixed(2)}</span>
+                            {showProfit && selectedBillProfit !== null && (
+                                <> | Profit: <span className={`font-black ${selectedBillProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>₹{selectedBillProfit.toFixed(2)}</span></>
+                            )}
                             {selectedTransaction?.narration && (
                                 <> | Narration: <span className="text-indigo-600 italic font-medium">{selectedTransaction.narration}</span></>
                             )}
@@ -1054,6 +1092,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                 documentType="SALES"
                 currentUser={currentUser}
                 isPosted={(journalTransaction?.status || '') === 'completed'}
+                transactionRecord={journalTransaction}
             />
 
             {viewingTransaction && (

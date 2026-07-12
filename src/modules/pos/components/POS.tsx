@@ -513,66 +513,41 @@ const POS = forwardRef<any, POSProps>(({
     const fetchStats = useCallback(async () => {
         if (!currentUser) return;
         try {
+            // Use the offline-aware storage layer (memoryCache → SQLite/IDB → Supabase).
+            // This ensures Sales Insights works even when the app is offline.
+            const allTx = await storage.fetchTransactions(currentUser);
+
             const now = new Date();
             const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
             const tomorrowStart = new Date(todayStart);
             tomorrowStart.setDate(tomorrowStart.getDate() + 1);
-            const todayStartIso = todayStart.toISOString();
-            const tomorrowStartIso = tomorrowStart.toISOString();
-            const startOfMonth = new Date();
-            startOfMonth.setDate(1);
-            const startOfMonthStr = startOfMonth.toISOString().slice(0, 10);
+            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-            let monthQuery = supabase
-                .from('sales_bill')
-                .select('total, date')
-                .eq('organization_id', currentUser.organization_id)
-                .in('status', ['completed', 'Completed'])
-                .gte('date', startOfMonthStr);
+            const completed = allTx.filter((t: Transaction) =>
+                t.organization_id === currentUser.organization_id &&
+                (t.status === 'completed' || t.status === 'Completed') &&
+                (!selectedCustomer?.id || t.customerId === selectedCustomer.id || (t as any).customer_id === selectedCustomer.id)
+            );
 
-            if (selectedCustomer?.id) {
-                monthQuery = monthQuery.eq('customer_id', selectedCustomer.id);
-            }
+            const todayTx  = completed.filter((t: Transaction) => {
+                const d = new Date(t.date);
+                return d >= todayStart && d < tomorrowStart;
+            });
+            const monthTx = completed.filter((t: Transaction) => new Date(t.date) >= startOfMonth);
 
-            let todayQuery = supabase
-                .from('sales_bill')
-                .select('total')
-                .eq('organization_id', currentUser.organization_id)
-                .in('status', ['completed', 'Completed'])
-                .gte('date', todayStartIso)
-                .lt('date', tomorrowStartIso);
-
-            if (selectedCustomer?.id) {
-                todayQuery = todayQuery.eq('customer_id', selectedCustomer.id);
-            }
-
-            const [{ data: todayData }, { data: monthData }] = await Promise.all([todayQuery, monthQuery]);
-
-            const safeMonthData = monthData || [];
-            if (safeMonthData.length || (todayData || []).length) {
-                const monthTotal = safeMonthData.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
-                const todayTotal = (todayData || []).reduce((sum, s) => sum + (Number(s.total) || 0), 0);
+            if (monthTx.length || todayTx.length) {
                 setStats({
-                    monthTotal,
-                    todayTotal,
-                    monthCount: safeMonthData.length
+                    monthTotal: monthTx.reduce((s, t) => s + (Number(t.total) || 0), 0),
+                    todayTotal: todayTx.reduce((s, t) => s + (Number(t.total) || 0), 0),
+                    monthCount: monthTx.length,
                 });
             }
 
-            let historyQuery = supabase
-                .from('sales_bill')
-                .select('*')
-                .eq('organization_id', currentUser.organization_id)
-                .in('status', ['completed', 'Completed'])
-                .order('created_at', { ascending: false })
-                .limit(20);
-
-            if (selectedCustomer?.id) {
-                historyQuery = historyQuery.eq('customer_id', selectedCustomer.id);
-            }
-
-            const { data: recent } = await historyQuery;
-            if (recent) setSalesHistory(recent.map(r => storage.toCamel(r)));
+            // Recent history — last 20 completed bills (already sorted by date desc after filter)
+            const recent = [...completed]
+                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                .slice(0, 20);
+            setSalesHistory(recent);
         } catch (e) {
             console.error('Error fetching stats:', e);
         }
@@ -1400,12 +1375,13 @@ const POS = forwardRef<any, POSProps>(({
         const handleKeyDown = (e: KeyboardEvent) => {
             if (isCustomerSearchModalOpen || schemeItem || pendingBatchSelection || isSearchModalOpen || isSchemeCalcOpen || isAddCustomerModalOpen || isEditMaterialModalOpen) return;
             
-            if (!shouldHandleScreenShortcut(e, ['pos', 'nonGstPos'], { allowWhenInputFocused: true })) return;
-            if (showProfit && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
+            if (showProfit && (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'p') {
+                if (!shouldHandleScreenShortcut(e, ['pos', 'nonGstPos', 'salesHistory'], { allowWhenInputFocused: true })) return;
                 e.preventDefault();
                 setIsProfitVisible(prev => !prev);
                 return;
             }
+            if (!shouldHandleScreenShortcut(e, ['pos', 'nonGstPos'], { allowWhenInputFocused: true })) return;
             if (e.ctrlKey && e.key.toLowerCase() === 's') {
                 e.preventDefault();
                 handleSave();
@@ -2591,7 +2567,7 @@ const POS = forwardRef<any, POSProps>(({
                             type="button"
                             onClick={() => setIsProfitVisible(prev => !prev)}
                             className="px-2 py-0.5 border border-white/60 text-white text-[9px] font-black uppercase tracking-widest hover:bg-white/10 transition-colors"
-                            title="Toggle Profit Visibility (Ctrl + P)"
+                            title="Toggle Profit Visibility (Ctrl + Shift + P)"
                         >
                             {isProfitVisible ? 'Hide Profit' : 'Show Profit'}
                         </button>

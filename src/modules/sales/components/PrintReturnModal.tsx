@@ -1,8 +1,9 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { RegisteredPharmacy } from '@core/types';
 import { numberToWords } from '@core/utils/numberToWords';
 import { formatVoucherNo } from '@core/utils/helpers';
+import { db } from '@core/db/client';
 
 const formatDisplayDate = (value?: string): string => {
     if (!value) return '-';
@@ -26,6 +27,31 @@ const PrintReturnModal: React.FC<PrintReturnModalProps> = ({
     type,
     pharmacy,
 }) => {
+    const [configs, setConfigs] = useState<any>(null);
+
+    useEffect(() => {
+        if (!isOpen || !pharmacy) return;
+        const loadConfigs = async () => {
+            try {
+                const rows = await db.select<any>(
+                    `SELECT display_options FROM configurations WHERE organization_id = ? LIMIT 1`,
+                    [pharmacy.organization_id]
+                );
+                if (rows && rows.length > 0) {
+                    const row = rows[0];
+                    let displayOpts = row.display_options;
+                    if (typeof displayOpts === 'string') {
+                        try { displayOpts = JSON.parse(displayOpts); } catch (e) {}
+                    }
+                    setConfigs(displayOpts);
+                }
+            } catch (err) {
+                console.warn('[PrintReturnModal] Failed to load configurations:', err);
+            }
+        };
+        loadConfigs();
+    }, [isOpen, pharmacy]);
+
     useEffect(() => {
         if (isOpen && returnVoucher) {
             const originalTitle = document.title;
@@ -61,31 +87,40 @@ const PrintReturnModal: React.FC<PrintReturnModalProps> = ({
     const companyAddress = [pharmacy.address, pharmacy.address_line2, pharmacy.district, pharmacy.state, pharmacy.pincode].filter(Boolean).join(', ');
     const authorizedSignatory = pharmacy.authorized_signatory || pharmacy.manager_name || pharmacy.full_name || 'Authorized Signatory';
 
-    return createPortal(
-        <div id="print-return-modal-container" className="fixed inset-0 bg-black/60 z-[1000] flex justify-center items-center backdrop-blur-sm print:bg-white print:p-0 overflow-y-auto">
-            <div className="bg-white rounded-lg shadow-2xl w-full max-w-4xl flex flex-col max-h-[95vh] print:max-h-none print:shadow-none print:rounded-none">
-                <div className="flex justify-between items-center p-4 border-b no-print bg-white sticky top-0 z-10">
-                    <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wider">Print Return Voucher</h3>
-                    <div className="flex gap-2">
-                        <button onClick={() => window.print()} className="px-4 py-2 bg-primary text-white rounded text-xs font-bold uppercase shadow-lg hover:bg-primary-dark">Print</button>
-                        <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-                    </div>
-                </div>
+        const logoUrl = configs?.pharmacy_logo_url || pharmacy.pharmacy_logo_url;
 
-                <div className="flex-1 overflow-y-auto bg-gray-50 p-8 print:p-0 print:bg-white">
-                    <div id="return-print-area" className="relative bg-white p-8 border border-gray-200 shadow-sm mx-auto print:shadow-none print:border-none max-w-[210mm] text-black font-sans">
-                        
-                        <div className="flex justify-between items-start border-b border-gray-300 pb-4 mb-6">
-                            <div>
-                                <h1 className="text-xl font-bold uppercase leading-none tracking-tight text-gray-900">{title}</h1>
-                                <h2 className="text-sm font-bold mt-2 text-gray-800">{companyName}</h2>
-                                <p className="text-xs mt-1 text-gray-600 whitespace-pre-line max-w-sm">{companyAddress}</p>
-                            </div>
-                            <div className="text-right text-xs">
-                                <div><strong>Voucher No.:</strong> <span className="font-bold">{voucherNumber}</span></div>
-                                <div className="mt-1"><strong>Voucher Date:</strong> {voucherDate}</div>
-                            </div>
+        return createPortal(
+            <div id="print-return-modal-container" className="fixed inset-0 bg-black/60 z-[1000] flex justify-center items-center backdrop-blur-sm print:bg-white print:p-0 overflow-y-auto">
+                <div className="bg-white rounded-lg shadow-2xl w-full max-w-4xl flex flex-col max-h-[95vh] print:max-h-none print:shadow-none print:rounded-none">
+                    <div className="flex justify-between items-center p-4 border-b no-print bg-white sticky top-0 z-10">
+                        <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wider">Print Return Voucher</h3>
+                        <div className="flex gap-2">
+                            <button onClick={() => window.print()} className="px-4 py-2 bg-primary text-white rounded text-xs font-bold uppercase shadow-lg hover:bg-primary-dark">Print</button>
+                            <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                         </div>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto bg-gray-50 p-8 print:p-0 print:bg-white">
+                        <div id="return-print-area" className="relative bg-white p-8 border border-gray-200 shadow-sm mx-auto print:shadow-none print:border-none max-w-[210mm] text-black font-sans">
+                            
+                            <div className="flex justify-between items-start border-b border-gray-300 pb-4 mb-6">
+                                <div className="flex-1 min-w-0">
+                                    <h1 className="text-xl font-bold uppercase leading-none tracking-tight text-gray-900">{title}</h1>
+                                    <h2 className="text-sm font-bold mt-2 text-gray-800">{companyName}</h2>
+                                    <p className="text-xs mt-1 text-gray-600 whitespace-pre-line max-w-sm">{companyAddress}</p>
+                                </div>
+
+                                {logoUrl && (
+                                    <div className="flex-1 flex justify-center">
+                                        <img src={logoUrl} alt="Logo" className="h-16 w-auto max-h-16 object-contain" />
+                                    </div>
+                                )}
+
+                                <div className="flex-1 text-right text-xs">
+                                    <div><strong>Voucher No.:</strong> <span className="font-bold">{voucherNumber}</span></div>
+                                    <div className="mt-1"><strong>Voucher Date:</strong> {voucherDate}</div>
+                                </div>
+                            </div>
 
                         {/* Top Metadata */}
                         <div className="grid grid-cols-2 gap-4 border border-gray-300 p-3 bg-gray-50 text-xs mb-6">

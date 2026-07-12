@@ -278,13 +278,18 @@ const App: React.FC = () => {
     const salesChallansRef = useRef<any>(null);
     const deliveryChallansRef = useRef<any>(null);
 
-    // Reactive online/offline status. `navigator.onLine` is read once at render
-    // time and doesn't notify React when connectivity flips; subscribe to the
-    // browser's online/offline events so StatusBar reflects reality live.
     const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
     useEffect(() => {
-        const handleOnline = () => setIsOnline(true);
-        const handleOffline = () => setIsOnline(false);
+        const handleOnline = () => {
+            const mode = localStorage.getItem('networkMode') || 'auto';
+            if (mode === 'auto') setIsOnline(true);
+            else setIsOnline(mode === 'online');
+        };
+        const handleOffline = () => {
+            const mode = localStorage.getItem('networkMode') || 'auto';
+            if (mode === 'auto') setIsOnline(false);
+            else setIsOnline(mode === 'online');
+        };
         window.addEventListener('online', handleOnline);
         window.addEventListener('offline', handleOffline);
         return () => {
@@ -292,6 +297,8 @@ const App: React.FC = () => {
             window.removeEventListener('offline', handleOffline);
         };
     }, []);
+
+
 
     // Redundant handleHydrateComplete listener removed to prevent double re-renders.
     // The debounced listener below handles this safely.
@@ -327,6 +334,14 @@ const App: React.FC = () => {
     const [defaultCustomerControlGlId, setDefaultCustomerControlGlId] = useState<string>('');
     const [defaultSupplierControlGlId, setDefaultSupplierControlGlId] = useState<string>('');
     const [bankOptions, setBankOptions] = useState<Array<{ id: string; bankName: string; accountName: string; accountNumber: string; linkedBankGlId?: string; defaultBank?: boolean; activeStatus?: string }>>([]);
+
+    useEffect(() => {
+        const mode = configurations.displayOptions?.networkMode || 'auto';
+        localStorage.setItem('networkMode', mode);
+        const isEffectiveOnline = mode === 'online' ? true : (mode === 'offline' ? false : (typeof navigator !== 'undefined' ? navigator.onLine : true));
+        setIsOnline(isEffectiveOnline);
+        window.dispatchEvent(new Event(isEffectiveOnline ? 'online' : 'offline'));
+    }, [configurations.displayOptions?.networkMode]);
 
     const [sourceChallansForPurchase, setSourceChallansForPurchase] = useState<{ items: PurchaseItem[], supplier: string, ids: string[] } | null>(null);
     const [sourceChallansForSales, setSourceChallansForSales] = useState<Transaction | null>(null);

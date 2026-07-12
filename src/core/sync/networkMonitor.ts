@@ -9,8 +9,14 @@ function notify(online: boolean) {
 }
 
 if (typeof window !== 'undefined') {
-  window.addEventListener('online', () => notify(true));
-  window.addEventListener('offline', () => notify(false));
+  const getEffectiveStatus = (onlineEvent: boolean) => {
+    const mode = localStorage.getItem('networkMode') || 'auto';
+    if (mode === 'online') return true;
+    if (mode === 'offline') return false;
+    return onlineEvent;
+  };
+  window.addEventListener('online', () => notify(getEffectiveStatus(true)));
+  window.addEventListener('offline', () => notify(getEffectiveStatus(false)));
 }
 
 /** Subscribe to network status changes. Returns an unsubscribe function. */
@@ -39,6 +45,8 @@ const SUPABASE_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNibG1ia2dvaWVmcXp5a2prc2dtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE2Nzg2ODIsImV4cCI6MjA3NzI1NDY4Mn0.wK5E6TVZCavAqLrbZeyfgdToGyETRnQAbm5PPaAVlFw';
 
 export async function checkConnectivity(supabaseUrl: string): Promise<boolean> {
+  const mode = localStorage.getItem('networkMode') || 'auto';
+  if (mode === 'offline') return false;
   try {
     const headers: Record<string, string> = {};
     if (SUPABASE_ANON_KEY) {

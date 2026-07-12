@@ -1,3 +1,4 @@
+import './src/core/utils/networkOverride';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 // NOTE: Currently using the legacy App.tsx (props-drilling model) as the entry point.

@@ -1860,6 +1860,30 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
             const matchedInventory = (item.inventoryItemId ? inventoryById.get(item.inventoryItemId) : undefined)
                 || inventoryByKey.get(normalizeInventoryKey(item.name, item.batch));
             if (!matchedInventory) continue;
+
+            // Check if the item is a service material or non-inventorised product
+            let isService = false;
+            try {
+                const mmRows = await sqliteDb.select<any>(
+                    `SELECT material_master_type, is_inventorised FROM material_master WHERE id = ? OR name = ? LIMIT 1`,
+                    [matchedInventory.material_id || (matchedInventory as any).materialId || '', matchedInventory.name]
+                );
+                if (mmRows && mmRows.length > 0) {
+                    const row = mmRows[0];
+                    if (
+                        row.material_master_type === 'service_material' ||
+                        row.is_inventorised === 0 ||
+                        row.is_inventorised === false ||
+                        String(row.material_master_type || '').toLowerCase().includes('service')
+                    ) {
+                        isService = true;
+                    }
+                }
+            } catch (err) {
+                console.warn('[saveSalesInvoice] Failed to check material_master policy:', err);
+            }
+            if (isService) continue;
+
             const current = unitsToDeductByInventoryId.get(matchedInventory.id) || 0;
             unitsToDeductByInventoryId.set(matchedInventory.id, current + getBillItemStockUnits(item, matchedInventory));
         }

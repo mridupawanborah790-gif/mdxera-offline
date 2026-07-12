@@ -1016,6 +1016,20 @@ const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6">
                                     <div className="space-y-4">
                                         <h3 className="text-[10px] font-black text-primary uppercase tracking-[0.2em] mb-4">General Settings</h3>
+                                        
+                                        <div className="flex flex-col gap-1.5 mb-4">
+                                            <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Connection Mode</label>
+                                            <select 
+                                                value={localConfigs.displayOptions?.networkMode || 'auto'}
+                                                onChange={e => handleConfigChange('displayOptions', 'networkMode', e.target.value as 'auto' | 'online' | 'offline')}
+                                                className="w-full tally-input !text-sm font-bold"
+                                            >
+                                                <option value="auto">Automatic (Based on Internet Connection)</option>
+                                                <option value="online">Force Online (Always sync & use Supabase)</option>
+                                                <option value="offline">Force Offline (Work locally only)</option>
+                                            </select>
+                                        </div>
+
                                         <Toggle 
                                             label="Ask Calculation on Billing" 
                                             enabled={localConfigs.displayOptions?.askCalculationOnBilling ?? true}

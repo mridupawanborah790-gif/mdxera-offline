@@ -209,6 +209,7 @@ export interface AppConfigurations {
         whatsappTemplateType?: 'text' | 'document';
         aisensyApiKey?: string;
         aisensyCampaignName?: string;
+        networkMode?: 'auto' | 'online' | 'offline';
     };
     modules?: { [key: string]: ModuleConfig };
     discountRules?: DiscountRule[];

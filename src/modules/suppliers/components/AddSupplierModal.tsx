@@ -58,7 +58,8 @@ export const AddSupplierModal: React.FC<{
     organizationId: string;
     prefillData?: Partial<Supplier>;
     defaultControlGlId?: string;
-}> = ({ isOpen, onClose, onAdd, onDuplicate, organizationId, prefillData, defaultControlGlId }) => {
+    getGlLabel?: (id?: string) => string;
+}> = ({ isOpen, onClose, onAdd, onDuplicate, organizationId, prefillData, defaultControlGlId, getGlLabel }) => {
     const initialState = useMemo(() => ({
         ...createInitialState(),
         control_gl_id: defaultControlGlId || '',
@@ -186,7 +187,11 @@ export const AddSupplierModal: React.FC<{
                             </div>
                             <div>
                                 <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Supplier Control GL</label>
-                                <input type="text" readOnly value={form.control_gl_id || defaultControlGlId ? `Mapped (${form.control_gl_id || defaultControlGlId})` : 'Auto-map from Company Configuration'} className="w-full border border-gray-400 p-2 text-sm bg-gray-100" />
+                                <input type="text" readOnly value={(() => {
+                                    const id = form.control_gl_id || defaultControlGlId;
+                                    const label = getGlLabel ? getGlLabel(id) : id;
+                                    return label ? `Mapped (${label})` : 'Auto-map from Company Configuration';
+                                })()} className="w-full border border-gray-400 p-2 text-sm bg-gray-100" />
                             </div>
                         </div>
                     </section>
@@ -330,7 +335,8 @@ export const EditSupplierModal: React.FC<{
     supplier: Supplier;
     defaultControlGlId?: string;
     isReadOnly?: boolean;
-}> = ({ isOpen, onClose, onSave, supplier, defaultControlGlId, isReadOnly = false }) => {
+    getGlLabel?: (id?: string) => string;
+}> = ({ isOpen, onClose, onSave, supplier, defaultControlGlId, isReadOnly = false, getGlLabel }) => {
     const [form, setForm] = useState<Supplier>(() => ({
         ...supplier,
         payment_details: { 
@@ -455,7 +461,11 @@ export const EditSupplierModal: React.FC<{
                         </div>
                         <div>
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Supplier Control GL</label>
-                            <input type="text" readOnly value={form.control_gl_id || defaultControlGlId ? `Mapped (${form.control_gl_id || defaultControlGlId})` : 'Auto-map from Company Configuration'} className="w-full border border-gray-400 p-2 text-sm bg-gray-100" />
+                            <input type="text" readOnly value={(() => {
+                                const id = form.control_gl_id || defaultControlGlId;
+                                const label = getGlLabel ? getGlLabel(id) : id;
+                                return label ? `Mapped (${label})` : 'Auto-map from Company Configuration';
+                            })()} className="w-full border border-gray-400 p-2 text-sm bg-gray-100" />
                         </div>
                         <div>
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Status</label>

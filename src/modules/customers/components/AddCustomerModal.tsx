@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Modal from '@core/components/ui/Modal';
 import ConfirmModal from '@core/components/ui/ConfirmModal';
 import type { Customer, OrganizationMember } from '@core/types';
@@ -30,6 +30,7 @@ interface AddCustomerModalProps {
     defaultControlGlId?: string;
     initialName?: string;
     initialPhone?: string;
+    getGlLabel?: (id?: string) => string;
 }
 
 const CUSTOMER_GROUP_OPTIONS = ['Sundry Debtors', 'Cash Customers', 'Corporate Customers', 'Retail Customers', 'Government Customers'] as const;
@@ -65,7 +66,7 @@ const createInitialState = (initialName?: string, initialPhone?: string) => ({
     overrideApprovalRequired: false,
 });
 
-const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ isOpen, onClose, onAdd, teamMembers = [], organizationId, defaultControlGlId, initialName, initialPhone }) => {
+const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ isOpen, onClose, onAdd, teamMembers = [], organizationId, defaultControlGlId, initialName, initialPhone, getGlLabel }) => {
     const effectiveControlGlId = useMemo(() => defaultControlGlId || '', [defaultControlGlId]);
     const initialState = useMemo(() => ({ ...createInitialState(initialName, initialPhone), organization_id: organizationId, controlGlId: effectiveControlGlId }), [organizationId, effectiveControlGlId, initialName, initialPhone]);
 
@@ -197,7 +198,10 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ isOpen, onClose, on
                             </div>
                             <div>
                                 <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Customer Control GL</label>
-                                <input type="text" readOnly value={effectiveControlGlId ? `Mapped (${effectiveControlGlId})` : 'Auto-map from Company Configuration'} className="w-full border border-gray-400 p-2 text-sm bg-gray-100" />
+                                <input type="text" readOnly value={(() => {
+                                    const label = getGlLabel ? getGlLabel(effectiveControlGlId) : effectiveControlGlId;
+                                    return label ? `Mapped (${label})` : 'Auto-map from Company Configuration';
+                                })()} className="w-full border border-gray-400 p-2 text-sm bg-gray-100" />
                             </div>
                             <div className="md:col-span-2">
                                 <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Assign Staff Member</label>

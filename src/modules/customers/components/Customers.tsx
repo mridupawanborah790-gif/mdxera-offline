@@ -12,7 +12,7 @@ import ExportCustomersModal from '../components/ExportCustomersModal';
 import type { Customer, RegisteredPharmacy, ModuleConfig, InventoryItem, CustomerPriceListEntry, OrganizationMember, PermissionSet } from '@core/types';
 import { downloadCsv, arrayToCsvRow } from '@core/utils/csv';
 import { handleEnterToNextField } from '@core/utils/navigation';
-import { fetchCustomerPriceList, saveCustomerPriceList, fetchInventory } from '@core/services/storageService';
+import { fetchCustomerPriceList, saveCustomerPriceList, fetchInventory, getData } from '@core/services/storageService';
 import { fuzzyMatch } from '@core/utils/search';
 import { shouldHandleScreenShortcut } from '@core/utils/screenShortcuts';
 import { getOutstandingBalance } from '@core/utils/helpers';
@@ -70,6 +70,21 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
 
     const [currentPage, setCurrentPage] = useState(1);
     const pageSize = 10;
+
+    const [glMasters, setGlMasters] = useState<any[]>([]);
+
+    useEffect(() => {
+        if (!currentUser) return;
+        getData('gl_master', [], currentUser).then((data) => {
+            setGlMasters(data || []);
+        });
+    }, [currentUser]);
+
+    const getGlLabel = (id?: string) => {
+        if (!id) return '';
+        const found = glMasters.find((g) => g.id === id);
+        return found ? `${found.glName}${found.glCode ? ` (${found.glCode})` : ''}` : id;
+    };
 
     const filteredCustomers = useMemo(() => {
         return customers
@@ -239,7 +254,12 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
                                     </div>
                                     <div className="p-3 border border-gray-200">
                                         <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Customer Control GL</p>
-                                        <p className="text-sm font-bold text-gray-900">{selectedCustomer.controlGlId || 'N/A'}</p>
+                                        <p className="text-sm font-bold text-gray-900">
+                                            {(() => {
+                                                const id = selectedCustomer.controlGlId || (selectedCustomer as any).control_gl_id || defaultCustomerControlGlId;
+                                                return getGlLabel(id) || 'N/A';
+                                            })()}
+                                        </p>
                                     </div>
                                     <div className="p-3 border border-gray-200">
                                         <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Email</p>
@@ -292,6 +312,7 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
                     defaultControlGlId={defaultCustomerControlGlId}
                     teamMembers={teamMembers}
                     organizationId={currentUser?.organization_id || ''} 
+                    getGlLabel={getGlLabel}
                 />
             )}
 
@@ -306,6 +327,7 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
                         teamMembers={teamMembers}
                         defaultControlGlId={defaultCustomerControlGlId}
                         isReadOnly={!perms.edit}
+                        getGlLabel={getGlLabel}
                     />
                     <PriceListManagementModal 
                         isOpen={isPriceListModalOpen}

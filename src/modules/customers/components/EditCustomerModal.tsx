@@ -17,6 +17,7 @@ interface EditCustomerModalProps {
     teamMembers?: OrganizationMember[];
     defaultControlGlId?: string;
     isReadOnly?: boolean;
+    getGlLabel?: (id?: string) => string;
 }
 
 const CUSTOMER_GROUP_OPTIONS = ['Sundry Debtors', 'Cash Customers', 'Corporate Customers', 'Retail Customers', 'Government Customers'] as const;
@@ -35,7 +36,7 @@ const Toggle: React.FC<{ label: string; enabled: boolean; setEnabled: (enabled: 
     </div>
 );
 
-export const EditCustomerModal: React.FC<EditCustomerModalProps> = ({ isOpen, onClose, onSave, customer, config, teamMembers = [], defaultControlGlId, isReadOnly = false }) => {
+export const EditCustomerModal: React.FC<EditCustomerModalProps> = ({ isOpen, onClose, onSave, customer, config, teamMembers = [], defaultControlGlId, isReadOnly = false, getGlLabel }) => {
     void config;
     const [formData, setFormData] = useState(customer);
     const [isPincodeLoading, setIsPincodeLoading] = useState(false);
@@ -151,7 +152,11 @@ export const EditCustomerModal: React.FC<EditCustomerModalProps> = ({ isOpen, on
                         </div>
                         <div>
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Customer Control GL</label>
-                            <input type="text" readOnly value={formData.controlGlId || defaultControlGlId ? `Mapped (${formData.controlGlId || defaultControlGlId})` : 'Auto-map from Company Configuration'} className="w-full border border-gray-400 p-2 text-sm bg-gray-100" />
+                            <input type="text" readOnly value={(() => {
+                                const id = formData.controlGlId || defaultControlGlId;
+                                const label = getGlLabel ? getGlLabel(id) : id;
+                                return label ? `Mapped (${label})` : 'Auto-map from Company Configuration';
+                            })()} className="w-full border border-gray-400 p-2 text-sm bg-gray-100" />
                         </div>
                         <div className="md:col-span-2">
                             <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Assign Staff Member</label>

@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import Card from '@core/components/ui/Card';
+import { getData } from '@core/services/storageService';
 import type { Supplier, RegisteredPharmacy, PermissionSet } from '@core/types';
 import type { SupplierQuickResult } from '@core/services/supplierService';
 import { AddSupplierModal, EditSupplierModal } from '@modules/suppliers/components/AddSupplierModal';
@@ -72,6 +73,21 @@ const Suppliers: React.FC<SuppliersProps> = ({ suppliers, onAddSupplier, onBulkA
 
     const [currentPage, setCurrentPage] = useState(1);
     const pageSize = 10;
+
+    const [glMasters, setGlMasters] = useState<any[]>([]);
+
+    useEffect(() => {
+        if (!currentUser) return;
+        getData('gl_master', [], currentUser).then((data) => {
+            setGlMasters(data || []);
+        });
+    }, [currentUser]);
+
+    const getGlLabel = (id?: string) => {
+        if (!id) return '';
+        const found = glMasters.find((g) => g.id === id);
+        return found ? `${found.glName}${found.glCode ? ` (${found.glCode})` : ''}` : id;
+    };
 
     const selectedSupplier = useMemo(() => {
         if (!selectedSupplierId || !Array.isArray(suppliers)) return null;
@@ -283,10 +299,15 @@ const Suppliers: React.FC<SuppliersProps> = ({ suppliers, onAddSupplier, onBulkA
                                                 <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Supplier Category</p>
                                                 <p className="text-sm font-bold text-gray-900">{displayValue(selectedSupplierExtra?.category)}</p>
                                             </div>
-                                            <div className="p-3 border border-gray-200">
-                                                <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Supplier Control GL</p>
-                                                <p className="text-sm font-bold text-gray-900">{displayValue(selectedSupplier.control_gl_id)}</p>
-                                            </div>
+                                             <div className="p-3 border border-gray-200">
+                                                 <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Supplier Control GL</p>
+                                                 <p className="text-sm font-bold text-gray-900">
+                                                     {(() => {
+                                                         const id = selectedSupplier.control_gl_id || (selectedSupplier as any).controlGlId || defaultSupplierControlGlId;
+                                                         return displayValue(getGlLabel(id));
+                                                     })()}
+                                                 </p>
+                                             </div>
                                             <div className="p-3 border border-gray-200">
                                                 <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Email</p>
                                                 <p className="text-sm font-bold text-gray-900 break-all">{displayValue(selectedSupplier.email)}</p>
@@ -332,6 +353,7 @@ const Suppliers: React.FC<SuppliersProps> = ({ suppliers, onAddSupplier, onBulkA
                     onDuplicate={handleDuplicateSupplier}
                     defaultControlGlId={defaultSupplierControlGlId}
                     organizationId={currentUser?.organization_id || ''}
+                    getGlLabel={getGlLabel}
                 />
             )}
 
@@ -343,6 +365,7 @@ const Suppliers: React.FC<SuppliersProps> = ({ suppliers, onAddSupplier, onBulkA
                     supplier={selectedSupplier}
                     defaultControlGlId={defaultSupplierControlGlId}
                     isReadOnly={!perms.edit}
+                    getGlLabel={getGlLabel}
                 />
             )}
 

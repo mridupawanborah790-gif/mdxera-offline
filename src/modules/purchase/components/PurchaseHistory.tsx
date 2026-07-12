@@ -715,6 +715,7 @@ const PurchaseHistory: React.FC<PurchaseHistoryProps> = ({
                 documentType="PURCHASE"
                 currentUser={currentUser}
                 isPosted={(journalPurchase?.status || '') === 'completed'}
+                transactionRecord={journalPurchase}
             />
 
             {viewingPurchase && (

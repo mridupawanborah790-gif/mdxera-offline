@@ -1,7 +1,9 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Modal from '@core/components/ui/Modal';
 import { RegisteredPharmacy } from '@core/types';
 import { supabase } from '@core/db/supabaseClient';
+import { db } from '@core/db/client';
+import { syncSalesLedger, syncPurchaseLedger } from '@core/services/storageService';
 
 interface JournalEntryViewerModalProps {
     isOpen: boolean;
@@ -11,6 +13,7 @@ interface JournalEntryViewerModalProps {
     documentType: 'SALES' | 'PURCHASE';
     currentUser: RegisteredPharmacy | null;
     isPosted: boolean;
+    transactionRecord?: any;
 }
 
 interface JournalLine {
@@ -23,12 +26,12 @@ interface JournalLine {
 
 interface JournalHeader {
     id: string;
+    company: string;
+    documentReference: string;
     entryNumber: string;
     postingDate: string;
-    status: string;
-    company: string;
     setOfBooks: string;
-    documentReference: string;
+    status: string;
 }
 
 const normalizeNumber = (value: any): number => Number(value || 0);
@@ -45,9 +48,12 @@ const JournalEntryViewerModal: React.FC<JournalEntryViewerModalProps> = ({
     invoiceNumber,
     documentType,
     currentUser,
-    isPosted
+    isPosted,
+    transactionRecord
 }) => {
     const [isLoading, setIsLoading] = useState(false);
+    const [isPosting, setIsPosting] = useState(false);
+    const [reloadCounter, setReloadCounter] = useState(0);
     const [error, setError] = useState<string | null>(null);
     const [emptyMessage, setEmptyMessage] = useState<string | null>(null);
     const [entries, setEntries] = useState<JournalHeader[]>([]);
@@ -63,8 +69,63 @@ const JournalEntryViewerModal: React.FC<JournalEntryViewerModalProps> = ({
         [invoiceId, invoiceNumber]
     );
 
+    const handleRepost = async () => {
+        if (!currentUser) return;
+        setIsPosting(true);
+        setError(null);
+        setEmptyMessage(null);
+        try {
+            if (documentType === 'SALES') {
+                let tx = transactionRecord;
+                if (!tx) {
+                    const rows = await db.select<any>(
+                        `SELECT * FROM sales_bill WHERE id = ? OR invoice_number = ? LIMIT 1`,
+                        [invoiceId, invoiceNumber]
+                    );
+                    if (!rows.length) {
+                        throw new Error(`Sales invoice ${invoiceNumber || invoiceId} details could not be loaded.`);
+                    }
+                    tx = rows[0];
+                    if (typeof tx.items === 'string') {
+                        try { tx.items = JSON.parse(tx.items); } catch (e) {}
+                    }
+                }
+                await syncSalesLedger(tx, currentUser);
+            } else {
+                let purchase = transactionRecord;
+                if (!purchase) {
+                    const rows = await db.select<any>(
+                        `SELECT * FROM purchases WHERE id = ? OR invoice_number = ? LIMIT 1`,
+                        [invoiceId, invoiceNumber]
+                    );
+                    if (!rows.length) {
+                        throw new Error(`Purchase invoice ${invoiceNumber || invoiceId} details could not be loaded.`);
+                    }
+                    purchase = rows[0];
+                    if (typeof purchase.items === 'string') {
+                        try { purchase.items = JSON.parse(purchase.items); } catch (e) {}
+                    }
+                }
+                await syncPurchaseLedger(purchase, currentUser);
+            }
+            setReloadCounter(prev => prev + 1);
+        } catch (err: any) {
+            console.error('[JournalEntryViewerModal] Re-post failed:', err);
+            setError(err?.message || 'Failed to generate/re-post journal entry.');
+        } finally {
+            setIsPosting(false);
+        }
+    };
+
     useEffect(() => {
-        if (!isOpen) return;
+        if (!isOpen) {
+            setEntries([]);
+            setSelectedEntryId('');
+            setLines([]);
+            setError(null);
+            setEmptyMessage(null);
+            return;
+        }
         if (!canView) {
             setError('You do not have permission to view journal entries.');
             setLines([]);
@@ -89,67 +150,99 @@ const JournalEntryViewerModal: React.FC<JournalEntryViewerModalProps> = ({
             setError(null);
             setEmptyMessage(null);
             try {
-                const queryByReferenceType = async (candidate: string) => supabase
-                    .from('journal_entry_header')
-                    .select('*')
-                    .eq('reference_type', referenceType)
-                    .eq('reference_id', candidate)
-                    .order('posting_date', { ascending: false })
-                    .order('created_at', { ascending: false });
-
+                // 1. Try local SQLite query first
                 let headerRows: any[] = [];
-                let headerError: any = null;
+                try {
+                    const placeholders = referenceCandidates.map(() => '?').join(', ');
+                    headerRows = await db.select(
+                        `SELECT * FROM journal_entry_header 
+                         WHERE organization_id = ? AND reference_type = ? AND reference_id IN (${placeholders})
+                         ORDER BY posting_date DESC, created_at DESC`,
+                        [currentUser!.organization_id, referenceType, ...referenceCandidates]
+                    );
+                } catch (localErr) {
+                    console.warn('[JournalEntryViewerModal] Local header query failed:', localErr);
+                }
 
-                for (const candidate of referenceCandidates) {
-                    const response = await queryByReferenceType(candidate);
-                    if (response.error) {
-                        headerError = response.error;
-                        break;
-                    }
-                    if (response.data?.length) {
-                        headerRows = response.data;
-                        break;
+                // 2. Fallback local query
+                if (!headerRows.length) {
+                    try {
+                        const documentTypes = [documentType, referenceType];
+                        const placeholders = referenceCandidates.map(() => '?').join(', ');
+                        const typePlaceholders = documentTypes.map(() => '?').join(', ');
+                        headerRows = await db.select(
+                            `SELECT * FROM journal_entry_header 
+                             WHERE organization_id = ? AND reference_document_id IN (${placeholders}) AND document_type IN (${typePlaceholders})
+                             ORDER BY posting_date DESC, created_at DESC`,
+                            [currentUser!.organization_id, ...referenceCandidates, ...documentTypes]
+                        );
+                    } catch (localErr) {
+                        console.warn('[JournalEntryViewerModal] Local fallback header query failed:', localErr);
                     }
                 }
 
-                if (isMissingTableError(headerError, 'journal_entry_header')) {
-                    setEntries([]);
-                    setLines([]);
-                    setEmptyMessage('Journal module is not configured in this environment yet. Please create the accounting journal tables and refresh schema cache.');
-                    return;
-                }
+                // 3. Fallback to Supabase if local SQLite returned nothing
+                if (!headerRows.length && navigator.onLine) {
+                    const queryByReferenceType = async (candidate: string) => supabase
+                        .from('journal_entry_header')
+                        .select('*')
+                        .eq('reference_type', referenceType)
+                        .eq('reference_id', candidate)
+                        .order('posting_date', { ascending: false })
+                        .order('created_at', { ascending: false });
 
-                let fallbackRows: any[] = headerRows || [];
-                if (!headerError && !fallbackRows.length) {
-                    const documentTypes = [documentType, referenceType];
+                    let headerError: any = null;
+
                     for (const candidate of referenceCandidates) {
-                        for (const docTypeCandidate of documentTypes) {
-                            const fallbackResponse = await supabase
-                                .from('journal_entry_header')
-                                .select('*')
-                                .eq('reference_document_id', candidate)
-                                .eq('document_type', docTypeCandidate)
-                                .order('posting_date', { ascending: false })
-                                .order('created_at', { ascending: false });
-
-                            if (fallbackResponse.error) {
-                                headerError = fallbackResponse.error;
-                                break;
-                            }
-
-                            if (fallbackResponse.data?.length) {
-                                fallbackRows = fallbackResponse.data;
-                                break;
-                            }
+                        const response = await queryByReferenceType(candidate);
+                        if (response.error) {
+                            headerError = response.error;
+                            break;
                         }
-
-                        if (headerError || fallbackRows.length) break;
+                        if (response.data?.length) {
+                            headerRows = response.data;
+                            break;
+                        }
                     }
+
+                    if (isMissingTableError(headerError, 'journal_entry_header')) {
+                        setEntries([]);
+                        setLines([]);
+                        setEmptyMessage('Journal module is not configured in this environment yet. Please create the accounting journal tables and refresh schema cache.');
+                        return;
+                    }
+
+                    if (!headerError && !headerRows.length) {
+                        const documentTypes = [documentType, referenceType];
+                        for (const candidate of referenceCandidates) {
+                            for (const docTypeCandidate of documentTypes) {
+                                const fallbackResponse = await supabase
+                                    .from('journal_entry_header')
+                                    .select('*')
+                                    .eq('reference_document_id', candidate)
+                                    .eq('document_type', docTypeCandidate)
+                                    .order('posting_date', { ascending: false })
+                                    .order('created_at', { ascending: false });
+
+                                if (fallbackResponse.error) {
+                                    headerError = fallbackResponse.error;
+                                    break;
+                                }
+
+                                if (fallbackResponse.data?.length) {
+                                    headerRows = fallbackResponse.data;
+                                    break;
+                                }
+                            }
+
+                            if (headerError || headerRows.length) break;
+                        }
+                    }
+
+                    if (headerError) throw headerError;
                 }
 
-                if (headerError) throw headerError;
-
-                const normalizedHeaders = (fallbackRows || []).map((row: any) => ({
+                const normalizedHeaders = (headerRows || []).map((row: any) => ({
                     id: String(row.id),
                     entryNumber: String(row.journal_entry_number || row.entry_number || row.id || '—'),
                     postingDate: String(row.posting_date || ''),
@@ -168,7 +261,7 @@ const JournalEntryViewerModal: React.FC<JournalEntryViewerModalProps> = ({
 
                 setEntries(normalizedHeaders);
                 const firstEntry = normalizedHeaders[0];
-                setSelectedEntryId((prev) => prev || firstEntry.id);
+                setSelectedEntryId(firstEntry.id);
             } catch (e: any) {
                 setError(e?.message || 'Unable to fetch journal entry.');
                 setLines([]);
@@ -178,7 +271,7 @@ const JournalEntryViewerModal: React.FC<JournalEntryViewerModalProps> = ({
         };
 
         load();
-    }, [isOpen, invoiceId, documentType, canView, isPosted, referenceType, invoiceNumber]);
+    }, [isOpen, invoiceId, documentType, canView, isPosted, referenceType, invoiceNumber, currentUser, reloadCounter]);
 
     useEffect(() => {
         if (!isOpen || !selectedEntryId || !isPosted) return;
@@ -187,40 +280,73 @@ const JournalEntryViewerModal: React.FC<JournalEntryViewerModalProps> = ({
             try {
                 let lineRows: any[] = [];
 
-                const byHeaderId = await supabase
-                    .from('journal_entry_lines')
-                    .select('*')
-                    .eq('journal_entry_id', selectedEntryId)
-                    .order('id', { ascending: true });
-
-                if (isMissingTableError(byHeaderId.error, 'journal_entry_lines')) {
-                    setLines([]);
-                    setEmptyMessage('Journal lines table is missing in this environment. Please run accounting journal migrations and refresh schema cache.');
-                    return;
+                // 1. Try local SQLite query first
+                try {
+                    lineRows = await db.select(
+                        `SELECT * FROM journal_entry_lines 
+                         WHERE organization_id = ? AND journal_entry_id = ?
+                         ORDER BY id ASC`,
+                        [currentUser!.organization_id, selectedEntryId]
+                    );
+                } catch (localErr) {
+                    console.warn('[JournalEntryViewerModal] Local lines query failed:', localErr);
                 }
 
-                if (!byHeaderId.error && byHeaderId.data?.length) {
-                    lineRows = byHeaderId.data;
-                } else {
-                    const documentTypes = [documentType, referenceType];
-                    for (const candidate of referenceCandidates) {
-                        for (const docTypeCandidate of documentTypes) {
-                            const byReference = await supabase
-                                .from('journal_entry_lines')
-                                .select('*')
-                                .eq('reference_document_id', candidate)
-                                .eq('document_type', docTypeCandidate)
-                                .order('id', { ascending: true });
+                // 2. Fallback local query by reference document
+                if (!lineRows.length) {
+                    try {
+                        const documentTypes = [documentType, referenceType];
+                        const placeholders = referenceCandidates.map(() => '?').join(', ');
+                        const typePlaceholders = documentTypes.map(() => '?').join(', ');
+                        const tempRows = await db.select(
+                            `SELECT * FROM journal_entry_lines 
+                             WHERE organization_id = ? AND reference_document_id IN (${placeholders}) AND document_type IN (${typePlaceholders})
+                             ORDER BY id ASC`,
+                            [currentUser!.organization_id, ...referenceCandidates, ...documentTypes]
+                        );
+                        lineRows = tempRows.filter((row: any) => String(row.journal_entry_id || '') === selectedEntryId || !row.journal_entry_id);
+                    } catch (localErr) {
+                        console.warn('[JournalEntryViewerModal] Local fallback lines query failed:', localErr);
+                    }
+                }
 
-                            if (byReference.error) throw byReference.error;
+                // 3. Fallback to Supabase
+                if (!lineRows.length && navigator.onLine) {
+                    const byHeaderId = await supabase
+                        .from('journal_entry_lines')
+                        .select('*')
+                        .eq('journal_entry_id', selectedEntryId)
+                        .order('id', { ascending: true });
 
-                            if (byReference.data?.length) {
-                                lineRows = byReference.data.filter((row: any) => String(row.journal_entry_id || '') === selectedEntryId || !row.journal_entry_id);
-                                if (lineRows.length) break;
+                    if (isMissingTableError(byHeaderId.error, 'journal_entry_lines')) {
+                        setLines([]);
+                        setEmptyMessage('Journal lines table is missing in this environment. Please run accounting journal migrations and refresh schema cache.');
+                        return;
+                    }
+
+                    if (!byHeaderId.error && byHeaderId.data?.length) {
+                        lineRows = byHeaderId.data;
+                    } else {
+                        const documentTypes = [documentType, referenceType];
+                        for (const candidate of referenceCandidates) {
+                            for (const docTypeCandidate of documentTypes) {
+                                const byReference = await supabase
+                                    .from('journal_entry_lines')
+                                    .select('*')
+                                    .eq('reference_document_id', candidate)
+                                    .eq('document_type', docTypeCandidate)
+                                    .order('id', { ascending: true });
+
+                                if (byReference.error) throw byReference.error;
+
+                                if (byReference.data?.length) {
+                                    lineRows = byReference.data.filter((row: any) => String(row.journal_entry_id || '') === selectedEntryId || !row.journal_entry_id);
+                                    if (lineRows.length) break;
+                                }
                             }
-                        }
 
-                        if (lineRows.length) break;
+                            if (lineRows.length) break;
+                        }
                     }
                 }
 
@@ -242,7 +368,7 @@ const JournalEntryViewerModal: React.FC<JournalEntryViewerModalProps> = ({
         };
 
         loadLines();
-    }, [isOpen, selectedEntryId, documentType, isPosted, referenceCandidates, referenceType]);
+    }, [isOpen, selectedEntryId, documentType, isPosted, referenceCandidates, referenceType, currentUser, reloadCounter]);
 
     const totals = useMemo(() => {
         const totalDebit = lines.reduce((sum, row) => sum + row.debit, 0);
@@ -295,7 +421,22 @@ const JournalEntryViewerModal: React.FC<JournalEntryViewerModalProps> = ({
 
                     {isLoading && <div className="p-4 border border-blue-200 bg-blue-50 text-blue-700 no-print">Loading accounting entry...</div>}
                     {!isLoading && error && <div className="p-4 border border-red-200 bg-red-50 text-red-700 no-print">{error}</div>}
-                    {!isLoading && !error && emptyMessage && <div className="p-4 border border-amber-200 bg-amber-50 text-amber-800 no-print">{emptyMessage}</div>}
+                    {!isLoading && !error && emptyMessage && (
+                        <div className="p-4 border border-amber-200 bg-amber-50 text-amber-800 flex flex-col md:flex-row md:items-center justify-between gap-3 no-print">
+                            <div>
+                                <p className="font-bold">{emptyMessage}</p>
+                                <p className="text-[10px] opacity-80 mt-0.5">This transaction might have been created while offline or before journal posting was activated.</p>
+                            </div>
+                            <button
+                                type="button"
+                                disabled={isPosting}
+                                onClick={handleRepost}
+                                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold uppercase disabled:opacity-50 transition-colors shrink-0"
+                            >
+                                {isPosting ? 'Posting...' : 'Re-post / Generate Journal'}
+                            </button>
+                        </div>
+                    )}
 
                     {!isLoading && !error && !emptyMessage && (
                         <>

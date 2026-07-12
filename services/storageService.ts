@@ -3549,8 +3549,6 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
             lines: Array<{ glId: string; debit: number; credit: number; memo: string }>;
         }
     ) => {
-        if (!navigator.onLine) return;
-
         if (!isValidUuid(args.setOfBooksId) || !isValidUuid(args.companyCodeId) || !isValidUuid(user.organization_id)) {
             console.warn('Skipping journal post: Invalid UUID in posting context', { setOfBooksId: args.setOfBooksId, companyCodeId: args.companyCodeId });
             return;
@@ -3640,50 +3638,213 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
             throw new Error('Generated accounting journals are not balanced.');
         }
 
-        const { data: companyRow } = await supabase
-            .from('company_codes')
-            .select('code')
-            .eq('id', args.companyCodeId)
-            .maybeSingle();
+        let companyCode = '';
+        try {
+            const ccRows = await sqliteDb.select<{ code: string }>(
+                `SELECT code FROM company_codes WHERE organization_id = ? AND id = ? LIMIT 1`,
+                [user.organization_id, args.companyCodeId]
+            );
+            if (ccRows && ccRows.length > 0) {
+                companyCode = ccRows[0].code;
+            }
+        } catch (err) {
+            console.warn('[postJournal] SQLite query for company_codes failed:', err);
+        }
 
-        const { data: header, error: headerError } = await supabase
-            .from('journal_entry_header')
-            .insert({
-                organization_id: user.organization_id,
-                journal_entry_number: buildJournalNumber(args.documentType === 'SALES' ? 'SAL' : 'PUR'),
-                posting_date: args.postingDate,
-                status: 'Posted',
-                reference_type: args.referenceType,
-                reference_id: args.referenceId,
-                reference_document_id: args.referenceId,
-                document_type: args.documentType,
-                document_reference: args.documentReference,
-                company: companyRow?.code || args.companyCodeId,
-                company_code_id: args.companyCodeId,
-                set_of_books: setOfBooks.set_of_books_id || args.setOfBooksId,
-                set_of_books_id: args.setOfBooksId,
-                total_debit: totalDebit,
-                total_credit: totalCredit,
-            })
-            .select('id')
-            .single();
-        if (headerError) throw headerError;
+        if (!companyCode && navigator.onLine) {
+            try {
+                const { data } = await supabase
+                    .from('company_codes')
+                    .select('code')
+                    .eq('id', args.companyCodeId)
+                    .maybeSingle();
+                if (data) companyCode = data.code;
+            } catch (err) {
+                console.warn('[postJournal] Supabase query for company_codes failed:', err);
+            }
+        }
 
-        const { error: lineError } = await supabase
-            .from('journal_entry_lines')
-            .insert(enrichedLines.map((line, index) => ({
-                organization_id: user.organization_id,
-                journal_entry_id: header.id,
-                reference_document_id: args.referenceId,
-                document_type: args.documentType,
-                line_number: index + 1,
-                gl_code: line.gl_code,
-                gl_name: line.gl_name,
-                debit: Number(line.debit.toFixed(2)),
-                credit: Number(line.credit.toFixed(2)),
-                line_memo: line.memo,
-            })));
-        if (lineError) throw lineError;
+        // Check if journal entry header already exists for this reference to prevent duplicate postings
+        let existingHeader: any = null;
+        try {
+            const rows = await sqliteDb.select<any>(
+                `SELECT id, journal_entry_number FROM journal_entry_header 
+                 WHERE organization_id = ? AND reference_id = ? LIMIT 1`,
+                [user.organization_id, args.referenceId]
+            );
+            if (rows && rows.length > 0) {
+                existingHeader = rows[0];
+            }
+        } catch (err) {
+            console.warn('[postJournal] Failed to query existing local header:', err);
+        }
+
+        if (!existingHeader && navigator.onLine) {
+            try {
+                const { data } = await supabase
+                    .from('journal_entry_header')
+                    .select('id, journal_entry_number')
+                    .eq('organization_id', user.organization_id)
+                    .eq('reference_id', args.referenceId)
+                    .maybeSingle();
+                if (data) {
+                    existingHeader = data;
+                }
+            } catch (err) {
+                console.warn('[postJournal] Failed to query existing remote header:', err);
+            }
+        }
+
+        const getDeterministicUuid = (source: string): string => {
+            if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(source)) {
+                return 'a' + source.substring(1);
+            }
+            let hash = 0;
+            for (let i = 0; i < source.length; i++) {
+                hash = (hash << 5) - hash + source.charCodeAt(i);
+                hash |= 0;
+            }
+            const hex = Math.abs(hash).toString(16).padEnd(32, '0');
+            return `${hex.substring(0,8)}-${hex.substring(8,12)}-4${hex.substring(12,15)}-a${hex.substring(15,18)}-${hex.substring(18,30)}`;
+        };
+
+        const headerId = existingHeader?.id || getDeterministicUuid(args.referenceId);
+        const journalNumber = existingHeader?.journal_entry_number || buildJournalNumber(args.documentType === 'SALES' ? 'SAL' : 'PUR');
+
+        // Delete old lines locally first to prevent orphans/imbalances when re-posting
+        try {
+            await sqliteDb.execute(
+                `DELETE FROM journal_entry_lines WHERE journal_entry_id = ?`,
+                [headerId]
+            );
+        } catch (err) {
+            console.warn('[postJournal] Failed to delete existing local lines:', err);
+        }
+
+        // If online, also delete existing remote lines to prepare for updated rewrite
+        if (navigator.onLine) {
+            try {
+                await ensureLiveAuth();
+                await supabase
+                    .from('journal_entry_lines')
+                    .delete()
+                    .eq('journal_entry_id', headerId);
+            } catch (err) {
+                console.warn('[postJournal] Failed to clean remote lines:', err);
+            }
+        }
+
+        const headerPayload = {
+            id: headerId,
+            organization_id: user.organization_id,
+            journal_entry_number: journalNumber,
+            posting_date: args.postingDate,
+            status: 'Posted',
+            reference_type: args.referenceType,
+            reference_id: args.referenceId,
+            reference_document_id: args.referenceId,
+            document_type: args.documentType,
+            document_reference: args.documentReference,
+            company: companyCode || args.companyCodeId,
+            company_code_id: args.companyCodeId,
+            set_of_books: setOfBooks.set_of_books_id || args.setOfBooksId,
+            set_of_books_id: args.setOfBooksId,
+            total_debit: totalDebit,
+            total_credit: totalCredit,
+            currency_code: 'INR',
+            created_by: user.id || null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            _sync_status: navigator.onLine ? 'synced' : 'pending'
+        };
+
+        const linePayloads = enrichedLines.map((line, index) => ({
+            id: getDeterministicUuid(`${headerId}-line-${index}`),
+            organization_id: user.organization_id,
+            journal_entry_id: headerId,
+            reference_document_id: args.referenceId,
+            document_type: args.documentType,
+            line_number: index + 1,
+            gl_code: line.gl_code,
+            gl_name: line.gl_name,
+            account_code: line.gl_code,
+            account_name: line.gl_name,
+            ledger_code: line.gl_code,
+            ledger_name: line.gl_name,
+            debit: Number(line.debit.toFixed(2)),
+            credit: Number(line.credit.toFixed(2)),
+            line_memo: line.memo,
+            created_at: new Date().toISOString(),
+            _sync_status: navigator.onLine ? 'synced' : 'pending'
+        }));
+
+        // Write locally to SQLite first
+        await sqliteDb.upsert('journal_entry_header', headerPayload);
+        await sqliteDb.bulkUpsert('journal_entry_lines', linePayloads);
+
+        if (navigator.onLine) {
+            try {
+                await ensureLiveAuth();
+
+                const { error: remoteHeaderErr } = await supabase
+                    .from('journal_entry_header')
+                    .insert(toSnake({
+                        id: headerPayload.id,
+                        organization_id: headerPayload.organization_id,
+                        journal_entry_number: headerPayload.journal_entry_number,
+                        posting_date: headerPayload.posting_date,
+                        status: headerPayload.status,
+                        reference_type: headerPayload.reference_type,
+                        reference_id: headerPayload.reference_id,
+                        reference_document_id: headerPayload.reference_document_id,
+                        document_type: headerPayload.document_type,
+                        document_reference: headerPayload.document_reference,
+                        company: headerPayload.company,
+                        company_code_id: headerPayload.company_code_id,
+                        set_of_books: headerPayload.set_of_books,
+                        set_of_books_id: headerPayload.set_of_books_id,
+                        total_debit: headerPayload.total_debit,
+                        total_credit: headerPayload.total_credit,
+                        currency_code: headerPayload.currency_code,
+                        created_by: headerPayload.created_by
+                    }));
+                if (remoteHeaderErr) throw remoteHeaderErr;
+
+                const { error: remoteLinesErr } = await supabase
+                    .from('journal_entry_lines')
+                    .insert(linePayloads.map(line => toSnake({
+                        organization_id: line.organization_id,
+                        journal_entry_id: line.journal_entry_id,
+                        reference_document_id: line.reference_document_id,
+                        document_type: line.document_type,
+                        line_number: line.line_number,
+                        gl_code: line.gl_code,
+                        gl_name: line.gl_name,
+                        debit: line.debit,
+                        credit: line.credit,
+                        line_memo: line.line_memo
+                    })));
+                if (remoteLinesErr) throw remoteLinesErr;
+
+            } catch (remoteErr) {
+                console.warn('[postJournal] Supabase insertion failed, queuing for sync instead:', remoteErr);
+                await sqliteDb.execute(`UPDATE journal_entry_header SET _sync_status = 'pending' WHERE id = ?`, [headerId]);
+                await sqliteDb.execute(`UPDATE journal_entry_lines SET _sync_status = 'pending' WHERE journal_entry_id = ?`, [headerId]);
+
+                await enqueueForSync('journal_entry_header', false, headerPayload, user.organization_id);
+                for (const line of linePayloads) {
+                    await enqueueForSync('journal_entry_lines', false, line, user.organization_id);
+                }
+            }
+        } else {
+            await sqliteDb.execute(`UPDATE journal_entry_header SET _sync_status = 'pending' WHERE id = ?`, [headerId]);
+            await sqliteDb.execute(`UPDATE journal_entry_lines SET _sync_status = 'pending' WHERE journal_entry_id = ?`, [headerId]);
+
+            await enqueueForSync('journal_entry_header', false, headerPayload, user.organization_id);
+            for (const line of linePayloads) {
+                await enqueueForSync('journal_entry_lines', false, line, user.organization_id);
+            }
+        }
     };
 
     // idb.getAll always returns [] (IDB disabled), so these used to always
@@ -3784,8 +3945,7 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
                     true
                 );
             }
-            console.info('[storage:syncSalesLedger] Offline — customer ledger written locally, GL/journal posting deferred for', tx.invoiceNumber || tx.id);
-            return;
+            console.info('[storage:syncSalesLedger] Offline — customer ledger written locally, proceeding with journal generation');
         }
 
         const postingContext = await ensurePostingContext(tx, user);
@@ -4035,11 +4195,8 @@ export const fetchBankMasters = async (user: RegisteredPharmacy): Promise<Array<
 
         if (purchase.status === 'cancelled') return;
 
-        // Offline path stops here: supplier ledger is queued for sync, journal
-        // posting (GL master/RPCs) is recomputed when the bill flushes online.
         if (!navigator.onLine) {
-            console.info('[storage:syncPurchaseLedger] Offline — supplier ledger written locally, GL/journal posting deferred for', purchase.invoiceNumber || purchase.id);
-            return;
+            console.info('[storage:syncPurchaseLedger] Offline — supplier ledger written locally, proceeding with journal generation');
         }
 
         const postingContext = await ensurePostingContext(purchase, user);

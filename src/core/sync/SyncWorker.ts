@@ -462,15 +462,11 @@ export function normalizeForSupabase(row: Record<string, unknown>, tableName: st
   // adaptRowForSqlite now that migration 013 added the suffixed columns
   // to the local table.
   if (tableName === 'journal_entry_lines') {
-    if (typeof out.debit === 'number' && out.debit_amount === undefined) {
-      out.debit_amount = out.debit;
-    }
-    if (typeof out.credit === 'number' && out.credit_amount === undefined) {
-      out.credit_amount = out.credit;
-    }
-    // Keep debit/credit in the payload only if they aren't already mirrored —
-    // some deployments may have the legacy bare names; the drift cache will
-    // strip whichever the server doesn't have.
+    // Supabase has a bigint primary key identity on this table; do not send client UUID text
+    delete out.id;
+    // Server has debit_amount/credit_amount as generated columns; do not send values for them
+    delete out.debit_amount;
+    delete out.credit_amount;
   }
 
   // Generic UUID guard: any *_id field that's neither a valid UUID nor a

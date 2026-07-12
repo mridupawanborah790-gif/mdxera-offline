@@ -525,7 +525,7 @@ const POS = forwardRef<any, POSProps>(({
 
             const completed = allTx.filter((t: Transaction) =>
                 t.organization_id === currentUser.organization_id &&
-                (t.status === 'completed' || t.status === 'Completed') &&
+                (String(t.status) === 'completed' || String(t.status) === 'Completed') &&
                 (!selectedCustomer?.id || t.customerId === selectedCustomer.id || (t as any).customer_id === selectedCustomer.id)
             );
 

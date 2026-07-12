@@ -1054,10 +1054,17 @@ const POS = forwardRef<any, POSProps>(({
                 });
 
                 for (const item of cartItems) {
+                    const currentInvItem = item.inventoryItemId ? inventoryMapById.get(item.inventoryItemId) : undefined;
+                    const matchedMed = resolveMedicineForInventoryItem(medicines, currentInvItem, item.name, item.brand, item.inventoryItemId);
+                    const policy = getInventoryPolicy(currentInvItem || { name: item.name, brand: item.brand } as any, medicines);
+                    
+                    if (!policy.inventorised || matchedMed?.materialMasterType === 'service_material') {
+                        continue;
+                    }
+
                     const normalizedBatch = (item.batch || '').trim();
                     const normalizedItemName = (item.name || '').trim().toLowerCase();
                     const normalizedItemBrand = (item.brand || '').trim().toLowerCase();
-                    const currentInvItem = item.inventoryItemId ? inventoryMapById.get(item.inventoryItemId) : undefined;
                     const byNameRows = inventoryGroupedByName.get(normalizedItemName) || [];
                     const relatedInventoryRows = byNameRows.filter(i => {
                         const sameId = item.inventoryItemId && i.id === item.inventoryItemId;
@@ -1968,13 +1975,15 @@ const POS = forwardRef<any, POSProps>(({
             return;
         }
 
-        if (shouldPreventNegativeStock && Number(batch.stock || 0) <= 0) {
+        const linkedMedicine = resolveMedicineForInventoryItem(medicines, batch, batch.name, batch.brand, batch.id);
+        const isService = linkedMedicine?.materialMasterType === 'service_material';
+
+        if (shouldPreventNegativeStock && batchPolicy.inventorised && !isService && Number(batch.stock || 0) <= 0) {
             addNotification('Insufficient stock in selected batch. Billing not allowed due to Strict Stock Enforcement.', 'error');
             return;
         }
 
         const activePriceRecord = resolveActivePriceRecord(batch, medicines, invoiceDate);
-        const linkedMedicine = resolveMedicineForInventoryItem(medicines, batch, batch.name, batch.brand, batch.id);
         const pricingSource = activePriceRecord ? {
             mrp: Number(activePriceRecord.mrp || batch.mrp || 0),
             gstPercent: batch.gstPercent,

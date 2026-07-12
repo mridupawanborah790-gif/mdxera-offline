@@ -3410,7 +3410,7 @@ const App: React.FC = () => {
                         onRecordDownPaymentAdjustment={handleRecordCustomerDownPaymentAdjustment}
                         onRecordInvoicePaymentAdjustment={handleRecordCustomerInvoicePaymentAdjustment}
                         onCancelPaymentEntry={handleCancelPartyPaymentEntry}
-                        currentUser={currentUser}
+                        currentUser={buildBillPharmacy() || currentUser}
                     />;
                 case 'accountPayable':
                     return <AccountPayable
@@ -3421,7 +3421,7 @@ const App: React.FC = () => {
                         onRecordDownPaymentAdjustment={handleRecordSupplierDownPaymentAdjustment}
                         onRecordInvoicePaymentAdjustment={handleRecordSupplierInvoicePaymentAdjustment}
                         onCancelPaymentEntry={handleCancelPartyPaymentEntry}
-                        currentUser={currentUser}
+                        currentUser={buildBillPharmacy() || currentUser}
                     />;
                 default:
                     return <Dashboard

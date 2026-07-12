@@ -77,12 +77,12 @@ const PrintCustomerVoucherModal: React.FC<PrintCustomerVoucherModalProps> = ({
     const paymentModeText = voucher.paymentMode || 'Bank';
     const bankAccount = voucher.bankName || bankOptions.find(option => option.id === voucher.bankAccountId)?.bankName || 'N/A';
     const amountReceived = Number(voucher.credit || 0);
-    const receiptAgainstInvoice = formatVoucherNo(voucher.referenceInvoiceNumber || voucher.referenceInvoiceId) || '-';
-    const narration = voucher.description || 'Payment Received';
-    const isAutoReceipt = voucher.id.startsWith('auto-') || /auto[-\s]?/i.test(narration);
-    const linkedDetails = (voucher.referenceInvoiceNumber || voucher.referenceInvoiceId)
-        ? `${formatVoucherNo(voucher.referenceInvoiceNumber) || '-'} (${voucher.referenceInvoiceId || '-'})`
-        : '-';
+    const receiptAgainstInvoice = formatVoucherNo(voucher.referenceInvoiceNumber) || '-';
+    const narration = (voucher.description || 'Payment Received')
+        .replace(/\s*\[AUTO_LEDGER\]:[a-f0-9\-]+/gi, '')
+        .trim() || 'Payment Received';
+    const isAutoReceipt = voucher.id.startsWith('auto-') || /auto[-\s]?/i.test(voucher.description || '');
+    const linkedDetails = formatVoucherNo(voucher.referenceInvoiceNumber) || '-';
 
     const companyName = pharmacy.pharmacy_name || 'Pharmacy';
     const companyAddress = [pharmacy.address, pharmacy.address_line2, pharmacy.district, pharmacy.state, pharmacy.pincode].filter(Boolean).join(', ');
@@ -129,8 +129,10 @@ const PrintCustomerVoucherModal: React.FC<PrintCustomerVoucherModalProps> = ({
                                     <td className="p-2.5 text-gray-900 font-medium">{customer.name}</td>
                                 </tr>
                                 <tr className="border-b border-gray-300">
-                                    <td className="p-2.5 font-bold bg-gray-50 border-r border-gray-300 text-gray-700">Customer Code / ID</td>
-                                    <td className="p-2.5 text-gray-600">{customer.id}</td>
+                                    <td className="p-2.5 font-bold bg-gray-50 border-r border-gray-300 text-gray-700">Customer Address</td>
+                                    <td className="p-2.5 text-gray-900 font-medium">
+                                        {[customer.address || customer.address_line1, customer.address_line2, customer.area, customer.city, customer.district, customer.state, customer.pincode].filter(Boolean).join(', ') || '—'}
+                                    </td>
                                 </tr>
                                 <tr className="border-b border-gray-300">
                                     <td className="p-2.5 font-bold bg-gray-50 border-r border-gray-300 text-gray-700">Receipt Against Invoice No.</td>

@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import type { Distributor, RegisteredPharmacy, TransactionLedgerItem } from '@core/types';
+import type { Distributor, RegisteredPharmacy, TransactionLedgerItem, Purchase } from '@core/types';
 import { numberToWords } from '@core/utils/numberToWords';
 
 const formatDisplayDate = (value?: string): string => {
@@ -39,6 +39,7 @@ interface PrintSupplierVoucherModalProps {
     pharmacy: RegisteredPharmacy | null;
     bankOptions: BankOption[];
     summary: VoucherAllocationSummary | null;
+    purchases?: Purchase[];
 }
 
 const PrintSupplierVoucherModal: React.FC<PrintSupplierVoucherModalProps> = ({
@@ -49,6 +50,7 @@ const PrintSupplierVoucherModal: React.FC<PrintSupplierVoucherModalProps> = ({
     pharmacy,
     bankOptions,
     summary,
+    purchases = [],
 }) => {
     useEffect(() => {
         if (isOpen && voucher && distributor) {
@@ -82,12 +84,26 @@ const PrintSupplierVoucherModal: React.FC<PrintSupplierVoucherModalProps> = ({
     const paymentModeText = voucher.paymentMode || 'Bank';
     const bankAccount = voucher.bankName || bankOptions.find(option => option.id === voucher.bankAccountId)?.bankName || 'N/A';
     const amountPaid = getPaymentAmount(voucher);
-    const narration = voucher.description || 'Supplier payment posted';
-    const paymentAgainstInvoice = voucher.referenceInvoiceNumber || voucher.referenceInvoiceId || '-';
-    const linkedDetails = (voucher.referenceInvoiceNumber || voucher.referenceInvoiceId)
-        ? `${voucher.referenceInvoiceNumber || '-'} (${voucher.referenceInvoiceId || '-'})`
-        : '-';
-    const isAutoPayment = voucher.id.startsWith('auto-') || /auto[-\s]?/i.test(narration);
+    const narration = (voucher.description || 'Supplier payment posted')
+        .replace(/\s*\[AUTO_LEDGER\]:[a-f0-9\-]+/gi, '')
+        .trim() || 'Supplier payment posted';
+
+    const resolvedInvoiceNo = (() => {
+        const refNo = voucher.referenceInvoiceNumber;
+        if (refNo && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(refNo)) {
+            return refNo;
+        }
+        const refId = voucher.referenceInvoiceId || refNo;
+        if (refId && purchases.length > 0) {
+            const found = purchases.find(p => p.id === refId);
+            if (found) return found.invoiceNumber;
+        }
+        return refNo || '-';
+    })();
+
+    const paymentAgainstInvoice = resolvedInvoiceNo;
+    const linkedDetails = resolvedInvoiceNo;
+    const isAutoPayment = voucher.id.startsWith('auto-') || /auto[-\s]?/i.test(voucher.description || '');
 
     const companyName = pharmacy.pharmacy_name || 'Pharmacy';
     const companyAddress = [pharmacy.address, pharmacy.district, pharmacy.state, pharmacy.pincode].filter(Boolean).join(', ');
@@ -134,8 +150,10 @@ const PrintSupplierVoucherModal: React.FC<PrintSupplierVoucherModalProps> = ({
                                     <td className="p-2.5 text-gray-900 font-medium">{distributor.name}</td>
                                 </tr>
                                 <tr className="border-b border-gray-300">
-                                    <td className="p-2.5 font-bold bg-gray-50 border-r border-gray-300 text-gray-700">Supplier Code / ID</td>
-                                    <td className="p-2.5 text-gray-600">{distributor.id}</td>
+                                    <td className="p-2.5 font-bold bg-gray-50 border-r border-gray-300 text-gray-700">Supplier Address</td>
+                                    <td className="p-2.5 text-gray-900 font-medium">
+                                        {[distributor.address || distributor.address_line1, distributor.address_line2, distributor.area, distributor.city, distributor.district, distributor.state, distributor.pincode].filter(Boolean).join(', ') || '—'}
+                                    </td>
                                 </tr>
                                 <tr className="border-b border-gray-300">
                                     <td className="p-2.5 font-bold bg-gray-50 border-r border-gray-300 text-gray-700">Payment Against Invoice No.</td>

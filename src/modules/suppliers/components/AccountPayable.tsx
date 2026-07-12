@@ -1062,10 +1062,27 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
                                                             <>
                                                     <td className="p-2">{formatDisplayDate(item.date)}</td>
                                                     <td className="p-2">{item.entryCategory === 'down_payment' ? 'DOWN PAYMENT' : item.entryCategory === 'down_payment_adjustment' ? 'DP ADJUSTMENT' : item.entryCategory === 'invoice_payment_adjustment' ? 'INVOICE ADJUSTMENT' : item.entryCategory === 'payment_cancellation' || item.entryCategory === 'down_payment_cancellation' ? 'CANCELLATION' : 'PAYMENT'}</td>
-                                                    <td className="p-2">{formatVoucherNo(item.referenceInvoiceNumber) || item.referenceInvoiceId || '-'}</td>
+                                                    <td className="p-2">
+                                                        {(() => {
+                                                            const refNo = item.referenceInvoiceNumber;
+                                                            if (refNo && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(refNo)) {
+                                                                return refNo;
+                                                            }
+                                                            const refId = item.referenceInvoiceId || refNo;
+                                                            if (refId && purchases.length > 0) {
+                                                                const found = purchases.find(p => p.id === refId);
+                                                                if (found) return found.invoiceNumber;
+                                                            }
+                                                            return refNo || refId || '-';
+                                                        })()}
+                                                    </td>
                                                     <td className="p-2">{item.paymentMode || '-'}</td>
                                                     <td className="p-2">{item.bankName || '-'}</td>
-                                                    <td className="p-2">{item.entryCategory === 'down_payment' ? 'Advance Paid' : item.description}</td>
+                                                    <td className="p-2">
+                                                        {item.entryCategory === 'down_payment' 
+                                                            ? 'Advance Paid' 
+                                                            : (item.description || '').replace(/\s*\[AUTO_LEDGER\]:[a-f0-9\-]+/gi, '').trim() || item.description}
+                                                    </td>
                                                     <td className="p-2 font-bold">₹{getPaymentAmount(item).toFixed(2)}</td>
                                                     <td className="p-2">₹{summary.adjustedAmount.toFixed(2)}</td>
                                                     <td className="p-2">₹{summary.remainingAmount.toFixed(2)}</td>
@@ -1091,7 +1108,61 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
                             </div>
 
                             <div>
-                                <p className="text-[10px] font-black uppercase tracking-wider mb-2">Complete ledger transactions (including accounting-linked payment entries)</p>
+                                <div className="flex items-center justify-between mb-2">
+                                    <p className="text-[10px] font-black uppercase tracking-wider">Complete ledger transactions (including accounting-linked payment entries)</p>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const win = window.open('', '_blank', 'width=900,height=700');
+                                            if (!win) return;
+                                            const rows = ledgerRows.map(item => `
+                                                <tr>
+                                                    <td>${formatDisplayDate(item.date)}</td>
+                                                    <td style="text-transform:uppercase">${item.type ?? '-'}</td>
+                                                    <td>${(item.description || '').replace(/\s*\[AUTO_LEDGER\]:[a-f0-9\-]+/gi, '').trim() || '-'}</td>
+                                                    <td>₹${Number(item.debit || 0).toFixed(2)}</td>
+                                                    <td>₹${Number(item.credit || 0).toFixed(2)}</td>
+                                                    <td><strong>₹${Number(item.balance || 0).toFixed(2)}</strong></td>
+                                                    <td>${formatVoucherNo(item.journalEntryNumber) || item.journalEntryNumber || '-'}</td>
+                                                </tr>`).join('');
+                                            win.document.write(`<!DOCTYPE html><html><head><title>Ledger - ${selectedDistributor?.name || ''}</title>
+                                                <style>
+                                                    body { font-family: Arial, sans-serif; font-size: 12px; color: #000; margin: 24px; }
+                                                    h2 { margin: 0 0 4px; font-size: 16px; }
+                                                    h3 { margin: 0 0 2px; font-size: 13px; font-weight: normal; }
+                                                    p.sub { font-size: 10px; color: #555; margin: 0 0 16px; text-transform: uppercase; letter-spacing: 0.05em; }
+                                                    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+                                                    th { background: #f3f4f6; text-align: left; padding: 6px 8px; font-size: 10px; text-transform: uppercase; border: 1px solid #d1d5db; }
+                                                    td { padding: 6px 8px; border: 1px solid #d1d5db; vertical-align: top; }
+                                                    tr:nth-child(even) { background: #f9fafb; }
+                                                    .meta { display: flex; justify-content: space-between; margin-bottom: 16px; }
+                                                    @media print { body { margin: 0; } }
+                                                </style></head><body>
+                                                <div class="meta">
+                                                    <div>
+                                                        <h2>${selectedDistributor?.name || 'Supplier'}</h2>
+                                                        <h3>Complete Ledger Statement</h3>
+                                                        <p class="sub">Including accounting-linked payment entries</p>
+                                                    </div>
+                                                    <div style="text-align:right;font-size:11px;color:#555">
+                                                        <div>Printed: ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+                                                        <div>Total Entries: ${ledgerRows.length}</div>
+                                                    </div>
+                                                </div>
+                                                <table>
+                                                    <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Debit</th><th>Credit</th><th>Balance</th><th>Voucher</th></tr></thead>
+                                                    <tbody>${rows}</tbody>
+                                                </table>
+                                                <script>window.onload = function(){ window.print(); }<\/script>
+                                            </body></html>`);
+                                            win.document.close();
+                                        }}
+                                        className="px-3 py-1 border border-gray-400 bg-white text-[10px] font-black uppercase hover:bg-gray-50 flex items-center gap-1.5 flex-shrink-0"
+                                    >
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                                        Print Ledger
+                                    </button>
+                                </div>
                                 <div className="overflow-auto border border-gray-200">
                                     <table className="min-w-full text-xs">
                                         <thead className="bg-gray-100 uppercase"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Type</th><th className="p-2 text-left">Description</th><th className="p-2 text-left">Debit</th><th className="p-2 text-left">Credit</th><th className="p-2 text-left">Balance</th><th className="p-2 text-left">Voucher</th></tr></thead>
@@ -1100,7 +1171,7 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
                                                 <tr key={item.id} className="border-t">
                                                     <td className="p-2">{formatDisplayDate(item.date)}</td>
                                                     <td className="p-2 uppercase">{item.type}</td>
-                                                    <td className="p-2">{item.description}</td>
+                                                    <td className="p-2">{(item.description || '').replace(/\s*\[AUTO_LEDGER\]:[a-f0-9\-]+/gi, '').trim() || item.description}</td>
                                                     <td className="p-2">₹{Number(item.debit || 0).toFixed(2)}</td>
                                                     <td className="p-2">₹{Number(item.credit || 0).toFixed(2)}</td>
                                                     <td className="p-2 font-bold">₹{Number(item.balance || 0).toFixed(2)}</td>
@@ -1358,6 +1429,7 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
                 pharmacy={currentUser}
                 bankOptions={bankOptions}
                 summary={printingVoucher ? getVoucherAllocationSummary(printingVoucher) : null}
+                purchases={purchases}
             />
         </main>
     );

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { Customer, RegisteredPharmacy, TransactionLedgerItem } from '@core/types';
 import { numberToWords } from '@core/utils/numberToWords';
 import { formatVoucherNo } from '@core/utils/helpers';
+import { useOfflineAsset } from '@core/hooks/useOfflineAsset';
 
 const formatDisplayDate = (value?: string): string => {
     if (!value) return '-';
@@ -45,6 +46,8 @@ const PrintCustomerVoucherModal: React.FC<PrintCustomerVoucherModalProps> = ({
     bankOptions,
     summary,
 }) => {
+    const logoUrl = useOfflineAsset(pharmacy?.pharmacy_logo_url);
+
     useEffect(() => {
         if (isOpen && voucher && customer) {
             const originalTitle = document.title;
@@ -110,15 +113,17 @@ const PrintCustomerVoucherModal: React.FC<PrintCustomerVoucherModalProps> = ({
                             </div>
                         )}
 
-                        <div className="flex justify-between items-start border-b border-gray-300 pb-4 mb-6">
-                            <div>
-                                <h1 className="text-xl font-bold uppercase leading-none tracking-tight text-gray-900">{voucherType}</h1>
-                                <h2 className="text-sm font-bold mt-2 text-gray-800">{companyName}</h2>
-                                <p className="text-xs mt-1 text-gray-600 whitespace-pre-line max-w-sm">{companyAddress}</p>
-                            </div>
-                            <div className="text-right text-xs">
+                        <div className="flex flex-col items-center border-b border-gray-300 pb-4 mb-6 text-center">
+                            {logoUrl && (
+                                <img src={logoUrl} alt="Logo" className="w-20 h-20 object-contain border border-gray-100 rounded bg-gray-50 p-1 mb-3" />
+                            )}
+                            <h1 className="text-xl font-bold uppercase leading-none tracking-tight text-gray-900 mb-1">{voucherType}</h1>
+                            <h2 className="text-sm font-bold text-gray-800 uppercase">{companyName}</h2>
+                            <p className="text-xs mt-1 text-gray-600 max-w-lg">{companyAddress}</p>
+                            
+                            <div className="w-full flex justify-between items-center mt-4 text-xs pt-2 border-t border-dashed border-gray-250">
                                 <div><strong>Voucher No.:</strong> <span className="font-bold">{voucherNumber}</span></div>
-                                <div className="mt-1"><strong>Voucher Date:</strong> {voucherDate}</div>
+                                <div><strong>Voucher Date:</strong> {voucherDate}</div>
                             </div>
                         </div>
 
@@ -197,9 +202,12 @@ const PrintCustomerVoucherModal: React.FC<PrintCustomerVoucherModalProps> = ({
             </div>
             <style>{`
                 @media print {
+                    @page {
+                        margin: 10mm;
+                    }
                     body { margin: 0; padding: 0; background: white; }
                     .no-print { display: none !important; }
-                    #voucher-print-area { padding: 0 !important; border: none !important; width: 100% !important; max-width: none !important; }
+                    #voucher-print-area { padding: 8mm 12mm !important; border: none !important; width: 100% !important; max-width: none !important; }
                     body > *:not(#print-voucher-modal-container) {
                         display: none !important;
                     }

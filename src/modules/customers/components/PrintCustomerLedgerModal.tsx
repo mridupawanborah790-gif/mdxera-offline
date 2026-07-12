@@ -1,8 +1,9 @@
-﻿
+
 import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import type { Customer, RegisteredPharmacy } from '@core/types';
 import { numberToWords } from '@core/utils/numberToWords';
+import { useOfflineAsset } from '@core/hooks/useOfflineAsset';
 
 declare const html2pdf: any;
 
@@ -14,6 +15,8 @@ interface PrintCustomerLedgerModalProps {
 }
 
 const PrintCustomerLedgerModal: React.FC<PrintCustomerLedgerModalProps> = ({ isOpen, onClose, customer, pharmacy }) => {
+  const logoUrl = useOfflineAsset(pharmacy?.pharmacy_logo_url);
+
   useEffect(() => {
     if (isOpen && customer) {
       const originalTitle = document.title;
@@ -66,18 +69,20 @@ const PrintCustomerLedgerModal: React.FC<PrintCustomerLedgerModalProps> = ({ isO
 
         <div className="flex-1 overflow-y-auto bg-gray-50 p-8 print:p-0 print:bg-white">
           <div id="customer-ledger-print-area" className="bg-white p-8 shadow-sm mx-auto print:shadow-none min-h-[297mm] w-full max-w-[210mm] text-black font-sans">
-            <div className="flex justify-between items-start border-b-2 border-black pb-4 mb-6">
-                <div>
-                    <h1 className="text-2xl font-black uppercase text-black leading-none">{pharmacy.pharmacy_name}</h1>
-                    <p className="text-xs mt-2 opacity-80 whitespace-pre-line max-w-sm">{pharmacy.address}</p>
-                    <div className="text-[10px] font-bold mt-2 space-y-0.5">
-                        <p>GSTIN: {pharmacy.gstin}</p>
-                        <p>Phone: {pharmacy.mobile}</p>
-                    </div>
+            <div className="flex flex-col items-center border-b-2 border-black pb-4 mb-6 text-center">
+                {logoUrl && (
+                    <img src={logoUrl} alt="Logo" className="w-20 h-20 object-contain border border-gray-100 rounded bg-gray-50 p-1 mb-3" />
+                )}
+                <h1 className="text-2xl font-black uppercase text-black leading-none">{pharmacy.pharmacy_name}</h1>
+                <p className="text-xs mt-2 opacity-80 max-w-lg">{pharmacy.address}</p>
+                <div className="text-[10px] font-bold mt-2 flex gap-4 justify-center">
+                    {pharmacy.gstin && <p>GSTIN: {pharmacy.gstin}</p>}
+                    {pharmacy.mobile && <p>Phone: {pharmacy.mobile}</p>}
                 </div>
-                <div className="text-right">
-                    <h2 className="text-xl font-black uppercase tracking-widest bg-black text-white px-4 py-1 inline-block">Account Statement</h2>
-                    <p className="text-[10px] font-bold mt-2">Print Date: {new Date().toLocaleDateString('en-GB')}</p>
+                
+                <div className="w-full flex justify-between items-center mt-4 pt-2 border-t border-dashed border-gray-300">
+                    <h2 className="text-xs font-black uppercase tracking-widest bg-black text-white px-3 py-0.5">Account Statement</h2>
+                    <p className="text-[10px] font-bold">Print Date: {new Date().toLocaleDateString('en-GB')}</p>
                 </div>
             </div>
 
@@ -151,9 +156,12 @@ const PrintCustomerLedgerModal: React.FC<PrintCustomerLedgerModalProps> = ({ isO
       </div>
       <style>{`
         @media print {
+          @page {
+              margin: 10mm;
+          }
           body { margin: 0; padding: 0; background: white; }
           .no-print { display: none !important; }
-          #customer-ledger-print-area { padding: 0 !important; width: 100% !important; max-width: none !important; }
+          #customer-ledger-print-area { padding: 8mm 12mm !important; width: 100% !important; max-width: none !important; }
         }
       `}</style>
     </div>,

@@ -1,7 +1,7 @@
-﻿import React from 'react';
+import React from 'react';
 import Modal from '@core/components/ui/Modal';
 import { Supplier } from '@core/types';
-import { getOutstandingBalance } from '@core/utils/helpers';
+import { getOutstandingBalance, formatVoucherNo } from '@core/utils/helpers';
 
 interface SupplierLedgerModalProps {
     isOpen: boolean;
@@ -58,7 +58,16 @@ const SupplierLedgerModal: React.FC<SupplierLedgerModalProps> = ({ isOpen, onClo
                                                 {new Date(entry.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
                                             </td>
                                             <td className="px-4 py-3 font-semibold text-app-text-primary uppercase truncate max-w-xs">
-                                                {entry.description}
+                                                {(() => {
+                                                    let desc = (entry.description || '').replace(/\s*\[AUTO_LEDGER\]:[a-z0-9\-]+/gi, '').trim() || entry.description;
+                                                    if (entry.referenceInvoiceNumber && !desc.toLowerCase().includes(entry.referenceInvoiceNumber.toLowerCase())) {
+                                                        const formattedRef = formatVoucherNo(entry.referenceInvoiceNumber);
+                                                        if (formattedRef && !desc.toLowerCase().includes(formattedRef.toLowerCase())) {
+                                                            desc = `${desc} (${formattedRef})`;
+                                                        }
+                                                    }
+                                                    return desc;
+                                                })()}
                                                 {entry.type === 'openingBalance' && <span className="ml-2 px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-[8px] rounded uppercase font-black">Opening</span>}
                                             </td>
                                             <td className="px-4 py-3 text-right font-black text-red-600">

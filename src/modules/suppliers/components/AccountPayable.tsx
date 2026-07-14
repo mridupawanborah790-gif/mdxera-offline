@@ -692,7 +692,7 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
                         referenceInvoiceId: invoice.id,
                         referenceInvoiceNumber: invoice.invoiceNumber,
                         amount: allocation.allocated,
-                        description: 'Payment adjusted against invoice',
+                        description: `Payment adjusted against invoice ${invoice.invoiceNumber || invoice.id}`,
                     });
                 }
             }
@@ -743,7 +743,7 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
                     referenceInvoiceId: invoice.id,
                     referenceInvoiceNumber: invoice.invoiceNumber,
                     amount: allocation.allocated,
-                    description: 'Advance adjusted against invoice',
+                    description: `Advance adjusted against invoice ${invoice.invoiceNumber || invoice.id}`,
                 });
             }
             setShowDownPaymentForm(false);
@@ -794,7 +794,7 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
                         referenceInvoiceId: invoice.id,
                         referenceInvoiceNumber: invoice.invoiceNumber,
                         amount: allocation.allocated,
-                        description: 'Advance adjusted against old / pending invoice',
+                        description: `Advance adjusted against old / pending invoice ${invoice.invoiceNumber || invoice.id}`,
                     });
                 } else {
                     await onRecordInvoicePaymentAdjustment({
@@ -804,7 +804,7 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
                         referenceInvoiceId: invoice.id,
                         referenceInvoiceNumber: invoice.invoiceNumber,
                         amount: allocation.allocated,
-                        description: 'Payment adjusted against old / pending invoice',
+                        description: `Payment adjusted against old / pending invoice ${invoice.invoiceNumber || invoice.id}`,
                     });
                 }
             }
@@ -1096,13 +1096,22 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
                                                     <td className="p-2">
                                                         {item.entryCategory === 'down_payment' 
                                                             ? 'Advance Paid' 
-                                                            : (item.description || '').replace(/\s*\[AUTO_LEDGER\]:[a-f0-9\-]+/gi, '').trim() || item.description}
+                                                            : (() => {
+                                                                let desc = (item.description || '').replace(/\s*\[AUTO_LEDGER\]:[a-z0-9\-]+/gi, '').trim() || item.description;
+                                                                if (item.referenceInvoiceNumber && !desc.toLowerCase().includes(item.referenceInvoiceNumber.toLowerCase())) {
+                                                                    const formattedRef = formatVoucherNo(item.referenceInvoiceNumber);
+                                                                    if (formattedRef && !desc.toLowerCase().includes(formattedRef.toLowerCase())) {
+                                                                        desc = `${desc} (${formattedRef})`;
+                                                                    }
+                                                                }
+                                                                return desc;
+                                                            })()}
                                                     </td>
                                                     <td className="p-2 font-bold">₹{getPaymentAmount(item).toFixed(2)}</td>
                                                     <td className="p-2">₹{summary.adjustedAmount.toFixed(2)}</td>
                                                     <td className="p-2">₹{summary.remainingAmount.toFixed(2)}</td>
                                                     <td className="p-2">{summary.status}</td>
-                                                    <td className="p-2">{formatVoucherNo(item.journalEntryNumber) || item.journalEntryId || '-'}</td>
+                                                    <td className="p-2">{formatVoucherNo(item.journalEntryNumber || item.journalEntryId) || '-'}</td>
                                                     <td className="p-2 flex gap-2">
                                                         <button type="button" onClick={() => printVoucher(item)} className="px-2 py-1 border border-gray-300 font-bold uppercase text-[10px] hover:bg-gray-100">Print</button>
                                                         {(item.entryCategory === 'invoice_payment' || item.entryCategory === 'down_payment') && item.status !== 'cancelled' && (
@@ -1142,11 +1151,22 @@ const AccountPayable: React.FC<AccountPayableProps> = ({ distributors, purchases
                                                 <tr key={item.id} className="border-t">
                                                     <td className="p-2">{formatDisplayDate(item.date)}</td>
                                                     <td className="p-2 uppercase">{item.type}</td>
-                                                    <td className="p-2">{(item.description || '').replace(/\s*\[AUTO_LEDGER\]:[a-f0-9\-]+/gi, '').trim() || item.description}</td>
+                                                    <td className="p-2">
+                                                        {(() => {
+                                                            let desc = (item.description || '').replace(/\s*\[AUTO_LEDGER\]:[a-z0-9\-]+/gi, '').trim() || item.description;
+                                                            if (item.referenceInvoiceNumber && !desc.toLowerCase().includes(item.referenceInvoiceNumber.toLowerCase())) {
+                                                                const formattedRef = formatVoucherNo(item.referenceInvoiceNumber);
+                                                                if (formattedRef && !desc.toLowerCase().includes(formattedRef.toLowerCase())) {
+                                                                    desc = `${desc} (${formattedRef})`;
+                                                                }
+                                                            }
+                                                            return desc;
+                                                        })()}
+                                                    </td>
                                                     <td className="p-2">₹{Number(item.debit || 0).toFixed(2)}</td>
                                                     <td className="p-2">₹{Number(item.credit || 0).toFixed(2)}</td>
                                                     <td className="p-2 font-bold">₹{Number(item.balance || 0).toFixed(2)}</td>
-                                                    <td className="p-2">{formatVoucherNo(item.journalEntryNumber) || item.journalEntryId || '-'}</td>
+                                                    <td className="p-2">{formatVoucherNo(item.journalEntryNumber || item.journalEntryId) || '-'}</td>
                                                 </tr>
                                             ))}
                                         </tbody>

@@ -228,6 +228,7 @@ interface PurchaseFormProps {
     onAddsupplier: (data: Omit<Supplier, 'id' | 'ledger' | 'organization_id'>, balance: number, date: string) => Promise<SupplierQuickResult>;
     onAddInventoryItemDirectly?: (item: Omit<InventoryItem, 'id'>) => Promise<InventoryItem>;
     onSaveMapping: (map: Partial<SupplierProductMap>) => Promise<void>;
+    onUnlinkMapping?: (id: string) => Promise<void>;
     setIsDirty: (isDirty: boolean) => void;
     addNotification: (message: string, type?: 'success' | 'error' | 'warning') => void;
     title: string;
@@ -246,7 +247,7 @@ interface PurchaseFormProps {
 }
 
 const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
-    onAddPurchase, onUpdatePurchase, inventory, suppliers, medicines = [], mappings = [], purchases, purchaseToEdit, draftItems, draftSupplier, draftInvoiceNumber, draftDate, draftSourceId, onClearDraft, currentUser, onAddMedicineMaster, onUpdateMedicineMaster, onAddsupplier, onSaveMapping, onCancel, onPrint, title, className, configurations, addNotification, isReadOnly = false,
+    onAddPurchase, onUpdatePurchase, inventory, suppliers, medicines = [], mappings = [], purchases, purchaseToEdit, draftItems, draftSupplier, draftInvoiceNumber, draftDate, draftSourceId, onClearDraft, currentUser, onAddMedicineMaster, onUpdateMedicineMaster, onAddsupplier, onSaveMapping, onUnlinkMapping, onCancel, onPrint, title, className, configurations, addNotification, isReadOnly = false,
     isManualEntry = false, isChallan = false, disableAIInput = false, mobileSyncSessionId, setMobileSyncSessionId,
     organizationId, config,
 }, ref) => {
@@ -813,6 +814,8 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
             setInvoiceNumber(draftInvoiceNumber || '');
             setDate(draftDate || new Date().toISOString().split('T')[0]);
             const matchedDist = suppliers.find(d => (d.name || '').toLowerCase().trim() === (draftSupplier || '').toLowerCase().trim());
+            if (matchedDist) setSupplierGst(matchedDist.gst_number || '');
+            else setSupplierGst('');
             const newItems = Array.isArray(draftItems) ? draftItems.map(item => ({
                 ...createBlankItem(), ...item, expiry: formatExpiryToMMYY(String(item.expiry || '')), quantity: item.quantity, freeQuantity: item.freeQuantity || 0, purchasePrice: item.purchasePrice, matchStatus: 'pending' as const
             })) : [];
@@ -979,6 +982,8 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
             const poSourceParts = (draftSourceId || '').split('|').map(part => part.trim());
             const poSourceNumber = poSourceParts.find(part => part.startsWith('po:'))?.replace(/^po:/, '');
             const poSourceId = poSourceParts.find(part => part.startsWith('poid:'))?.replace(/^poid:/, '');
+            const dcSourceId = (draftSourceId || '').startsWith('dcids:') ? (draftSourceId || '').replace(/^dcids:/, '') : undefined;
+            const linkedChallans = dcSourceId ? dcSourceId.split(',') : undefined;
 
             const payload = {
                 purchaseSerialId: purchaseSerialId!,
@@ -1000,7 +1005,8 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
                 schemeDiscount: 0,
                 referenceDocNumber: poSourceNumber || undefined,
                 sourcePurchaseOrderId: poSourceId || undefined,
-                sourceReceiveMode: poSourceNumber || poSourceId ? 'POST_RECEIVED_ENTRY' : undefined
+                sourceReceiveMode: poSourceNumber || poSourceId ? 'POST_RECEIVED_ENTRY' : undefined,
+                linkedChallans: linkedChallans || undefined
             };
 
             let saved: any;
@@ -2790,6 +2796,7 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
                 <LinkToMasterModal
                     isOpen={isLinkModalOpen} onClose={() => setIsLinkModalOpen(false)} supplier={reconciliationSupplier as any} medicines={medicines} mappings={mappings}
                     onLink={onSaveMapping}
+                    onUnlink={onUnlinkMapping}
                     scannedItems={(pendingReconciliationItems || items).filter(i => (i.name || "").trim())}
                     onFinalize={(reconciled) => {
                         commitVoucherDraftAndOpen(reconciled);

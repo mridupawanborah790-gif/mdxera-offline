@@ -1660,6 +1660,14 @@ const App: React.FC = () => {
                     setPurchaseOrders(prev => prev.map(po => po.id === poPatch.id ? poPatch : po));
                 }
             }
+            if (savedPurchase?.linkedChallans?.length) {
+                const openLinkedChallans = deliveryChallans.filter(ch => savedPurchase.linkedChallans?.includes(ch.id) && ch.status === DeliveryChallanStatus.OPEN);
+                await Promise.all(
+                    openLinkedChallans.map(ch =>
+                        storage.saveData('delivery_challans', { ...ch, status: DeliveryChallanStatus.CONVERTED }, currentUser, true)
+                    )
+                );
+            }
             loadData(currentUser, 'background');
             addNotification("Purchase entry posted.", "success");
             return savedPurchase;
@@ -2583,8 +2591,25 @@ const App: React.FC = () => {
     };
 
     const handleConvertToPurchase = (items: PurchaseItem[], supplier: string, ids: string[]) => {
-        setSourceChallansForPurchase({ items, supplier, ids });
-        handleNavigate('manualSupplierInvoice');
+        setPurchaseCopyDraft({
+            sourceId: `dcids:${ids.join(',')}`,
+            items,
+            supplier,
+            invoiceNumber: '',
+            date: new Date().toISOString().slice(0, 10),
+        });
+        handleNavigate('manualPurchaseEntry');
+    };
+
+    const handleUnlinkMapping = async (id: string) => {
+        if (!currentUser) return;
+        try {
+            await storage.deleteData('supplier_product_map', id, currentUser);
+            await loadData(currentUser, 'background');
+            addNotification("Supplier product mapping unlinked.", "success");
+        } catch (e) {
+            addNotification("Failed to unlink product mapping.", "error");
+        }
     };
 
     const handleConvertToInvoice = (items: BillItem[], customer: Customer, ids: string[]) => {
@@ -3001,6 +3026,7 @@ const App: React.FC = () => {
                         onClearDraft={() => setSourceChallansForPurchase(null)}
                         currentUser={currentUser} onAddMedicineMaster={handleAddMedicineMaster} onUpdateMedicineMaster={handleUpdateMedicineMaster}
                         onAddsupplier={handleAddDistributor} onSaveMapping={(map) => storage.saveData('supplier_product_map', map, currentUser).then(() => loadData(currentUser!, 'background'))}
+                        onUnlinkMapping={handleUnlinkMapping}
                         setIsDirty={() => { }} addNotification={addNotification}
                         title="AI-Powered Automated Purchase"
                         isManualEntry={false}
@@ -3027,6 +3053,7 @@ const App: React.FC = () => {
                         onClearDraft={() => setPurchaseCopyDraft(null)}
                         currentUser={currentUser} onAddMedicineMaster={handleAddMedicineMaster} onUpdateMedicineMaster={handleUpdateMedicineMaster}
                         onAddsupplier={handleAddDistributor} onSaveMapping={(map) => storage.saveData('supplier_product_map', map, currentUser).then(() => loadData(currentUser!, 'background'))}
+                        onUnlinkMapping={handleUnlinkMapping}
                         setIsDirty={() => { }} addNotification={addNotification}
                         title="Manual Purchase Entry"
                         isManualEntry={true}

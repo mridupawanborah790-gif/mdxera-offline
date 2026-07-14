@@ -58,7 +58,7 @@ const PrintCustomerLedgerModal: React.FC<PrintCustomerLedgerModalProps> = ({ isO
   const isA5 = pageSize === 'a5';
 
   return createPortal(
-    <div className="fixed inset-0 bg-black/60 z-[1000] flex justify-center items-center backdrop-blur-sm print:bg-white print:p-0 overflow-y-auto">
+    <div id="print-customer-ledger-modal-container" className="fixed inset-0 bg-black/60 z-[1000] flex justify-center items-center backdrop-blur-sm print:bg-white print:p-0 overflow-y-auto">
       <div className="bg-white rounded-lg shadow-2xl w-full max-w-5xl flex flex-col max-h-[95vh] print:max-h-none print:shadow-none print:rounded-none">
         <div className="flex justify-between items-center p-4 border-b no-print bg-white sticky top-0 z-10">
           <h3 className="text-lg font-bold text-gray-800 uppercase tracking-tighter">Customer Account Statement</h3>
@@ -189,12 +189,43 @@ const PrintCustomerLedgerModal: React.FC<PrintCustomerLedgerModalProps> = ({ isO
               margin: 5mm;
               size: ${pageSize.toUpperCase()};
           }
-          body { margin: 0; padding: 0; background: white; }
+          html, body {
+              margin: 0 !important;
+              padding: 0 !important;
+              background: white !important;
+              overflow: visible !important;
+              height: auto !important;
+          }
+          ::-webkit-scrollbar {
+              display: none !important;
+          }
           .no-print { display: none !important; }
+          #print-customer-ledger-modal-container {
+              position: absolute !important;
+              left: 0 !important;
+              top: 0 !important;
+              width: 100% !important;
+              height: auto !important;
+              overflow: visible !important;
+              display: block !important;
+          }
+          #print-customer-ledger-modal-container > div {
+              width: auto !important;
+              max-width: none !important;
+              max-height: none !important;
+              height: auto !important;
+              overflow: visible !important;
+          }
+          #print-customer-ledger-modal-container * {
+              overflow: visible !important;
+          }
           #customer-ledger-print-area { 
               padding: ${isA5 ? '8mm 10mm' : '15mm 20mm'} !important; 
               width: 100% !important; 
               max-width: none !important; 
+          }
+          body > *:not(#print-customer-ledger-modal-container) {
+              display: none !important;
           }
         }
       `}</style>

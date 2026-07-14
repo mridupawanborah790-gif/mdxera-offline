@@ -913,13 +913,23 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
         isSubmittingRef.current = true;
         setIsSubmitting(true);
         
-        // Field Validations with Notifications
         if (!supplier.trim()) { 
             setSupplierNameError("Supplier name is required."); 
             addNotification("Please select or enter a Supplier name.", "warning");
             isSubmittingRef.current = false;
             setIsSubmitting(false);
             return null; 
+        }
+
+        if (isChallan) {
+            const matchedSupplier = suppliers.find(s => s.name.trim().toLowerCase() === supplier.trim().toLowerCase());
+            if (!matchedSupplier) {
+                setSupplierNameError("Please select a registered supplier."); 
+                addNotification("Please select a registered supplier from Supplier Master for Delivery Challan.", "error");
+                isSubmittingRef.current = false;
+                setIsSubmitting(false);
+                return null; 
+            }
         }
         if (!invoiceNumber.trim()) { 
             setInvoiceNumberError("Invoice number is required."); 
@@ -2293,7 +2303,9 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
                     )}
                     {isFieldVisible('fieldSupplier') && (
                         <div className="md:col-span-6 relative">
-                            <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Particulars (Supplier Name)</label>
+                            <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">
+                                Particulars (Supplier Name){isChallan && <span className="text-red-500 ml-0.5 font-black">*</span>}
+                            </label>
                             <input
                                 ref={supplierNameInputRef}
                                 type="text"

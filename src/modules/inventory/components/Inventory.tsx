@@ -121,6 +121,7 @@ const Inventory: React.FC<InventoryProps> = ({
     const [expiryFilter, setExpiryFilter] = useState<'all' | 'nearExpiry' | 'expired'>('all');
     const columnSelectorRef = useRef<HTMLDivElement>(null);
     const tableBodyRef = useRef<HTMLTableSectionElement>(null);
+    const searchInputRef = useRef<HTMLInputElement>(null);
 
     const inventoryModuleFields = useMemo(() => 
         configurableModules.find(m => m.id === 'inventory')?.fields || [], 
@@ -332,7 +333,12 @@ const Inventory: React.FC<InventoryProps> = ({
                 setSelectedIndex(prev => Math.min(prev + 1, paginatedItems.length - 1));
             } else if (e.key === 'ArrowUp') {
                 e.preventDefault();
-                setSelectedIndex(prev => Math.max(prev - 1, 0));
+                if (selectedIndex === 0) {
+                    searchInputRef.current?.focus();
+                    searchInputRef.current?.select();
+                } else {
+                    setSelectedIndex(prev => Math.max(prev - 1, 0));
+                }
             } else if (e.key === 'ArrowRight' && currentPage < totalPages) {
                 e.preventDefault();
                 setCurrentPage(p => p + 1);
@@ -357,7 +363,7 @@ const Inventory: React.FC<InventoryProps> = ({
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [paginatedItems, selectedIndex, itemToEdit, isAddModalOpen, isExportModalOpen, isColumnSelectorOpen, currentPage, totalPages, detailRowKey, perms.entry, perms.export]);
+    }, [paginatedItems, selectedIndex, itemToEdit, isAddModalOpen, isExportModalOpen, isColumnSelectorOpen, currentPage, totalPages, detailRowKey, perms.entry, perms.export, searchInputRef]);
 
     const isFieldVisible = (fieldId: string) => config?.fields?.[fieldId] !== false;
 
@@ -578,6 +584,7 @@ const Inventory: React.FC<InventoryProps> = ({
                         <div className="relative flex-1 max-w-sm">
                             <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                             <input 
+                                ref={searchInputRef}
                                 type="text" 
                                 placeholder="Filter by Name, Brand, Batch..." 
                                 value={searchTerm} 
@@ -586,6 +593,13 @@ const Inventory: React.FC<InventoryProps> = ({
                                     setSelectedIndex(0);
                                     setCurrentPage(1);
                                 }} 
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === 'ArrowDown') {
+                                        e.preventDefault();
+                                        setSelectedIndex(0);
+                                        searchInputRef.current?.blur();
+                                    }
+                                }}
                                 className="w-full pl-9 pr-3 py-1.5 border border-gray-400 rounded-none bg-white text-sm font-normal outline-none focus:bg-yellow-50"
                             />
                         </div>

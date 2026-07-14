@@ -23,10 +23,26 @@ const DASHBOARD_FIELDS: DashboardField[] = [
 interface FeatureEntry {
   id: string;
   name: string;
+  children?: FeatureEntry[];
 }
 
 const FEATURES: FeatureEntry[] = [
-  { id: 'profitVisibility', name: 'Sales Profit Visibility' },
+  {
+    id: 'profitVisibility',
+    name: 'Sales Profit Visibility',
+    children: [
+      { id: 'salesHistoryTotalProfit', name: 'Sales History - Total Profit' },
+      { id: 'salesHistorySelectedBillProfit', name: 'Sales History - Selected Bill Profit' },
+      { id: 'posTotalProfit', name: 'POS Sales - Total Profit (Bottom Status Bar)' },
+      { id: 'posItemProfit', name: 'POS Sales - Line Item Profit Column' },
+      { id: 'posProfitQuotient', name: 'POS Sales - Profit Quotient Panel (Intelligence Hub)' },
+      { id: 'posProductInsightsProfit', name: 'POS Sales - Product Insights Panel (F4)' }
+    ]
+  },
+  {
+    id: 'salesHistorySummaryInfo',
+    name: 'Sales History - Sales Summary Information'
+  }
 ];
 
 interface ModuleVisibilityProps {
@@ -62,14 +78,39 @@ function renderNavRow(
   );
 }
 
+function renderFeatureRow(
+  item: FeatureEntry,
+  hiddenFeatures: Set<string>,
+  toggleFeature: (id: string) => void,
+  depth: number,
+  isParentHidden: boolean
+): React.ReactNode {
+  const isHidden = hiddenFeatures.has(item.id) || isParentHidden;
+  return (
+    <div key={item.id} className="space-y-1">
+      <Row
+        label={item.name}
+        hidden={isHidden}
+        onToggle={() => toggleFeature(item.id)}
+        indent={depth}
+        disabled={isParentHidden}
+      />
+      {item.children?.map((child) =>
+        renderFeatureRow(child, hiddenFeatures, toggleFeature, depth + 1, isHidden)
+      )}
+    </div>
+  );
+}
+
 const Row: React.FC<{
   label: string;
   hidden: boolean;
   onToggle: () => void;
   indent?: number;
-}> = ({ label, hidden, onToggle, indent = 0 }) => (
+  disabled?: boolean;
+}> = ({ label, hidden, onToggle, indent = 0, disabled = false }) => (
   <label
-    className={`flex items-center justify-between gap-3 px-3 py-2 border border-gray-300 ${hidden ? 'bg-red-50' : 'bg-white'} hover:bg-yellow-50 cursor-pointer`}
+    className={`flex items-center justify-between gap-3 px-3 py-2 border border-gray-300 ${hidden ? 'bg-red-50' : 'bg-white'} ${disabled ? 'opacity-50 cursor-not-allowed bg-gray-50' : 'hover:bg-yellow-50 cursor-pointer'}`}
     style={{ marginLeft: indent * 18 }}
   >
     <span className="text-[11px] font-bold uppercase tracking-wide text-gray-800">
@@ -83,6 +124,7 @@ const Row: React.FC<{
         type="checkbox"
         checked={!hidden}
         onChange={onToggle}
+        disabled={disabled}
         className="w-4 h-4 accent-primary"
       />
     </span>
@@ -228,15 +270,10 @@ const ModuleVisibility: React.FC<ModuleVisibilityProps> = ({ currentUser, addNot
               </p>
             </div>
 
-            <div className="space-y-1">
-              {FEATURES.map((feature) => (
-                <Row
-                  key={feature.id}
-                  label={feature.name}
-                  hidden={hiddenFeatures.has(feature.id)}
-                  onToggle={() => toggleFeature(feature.id)}
-                />
-              ))}
+            <div className="space-y-2">
+              {FEATURES.map((feature) =>
+                renderFeatureRow(feature, hiddenFeatures, toggleFeature, 0, false)
+              )}
             </div>
           </Card>
         </div>

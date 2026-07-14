@@ -405,7 +405,10 @@ const POS = forwardRef<any, POSProps>(({
 }, ref) => {
     const [searchTerm, setSearchTerm] = useState('');
     const { isFeatureHidden } = useModuleVisibility();
-    const showProfit = !isFeatureHidden('profitVisibility');
+    const showTotalProfit = !isFeatureHidden('posTotalProfit');
+    const showItemProfit = !isFeatureHidden('posItemProfit');
+    const showProfitQuotient = !isFeatureHidden('posProfitQuotient');
+    const showProfit = showTotalProfit || showItemProfit;
     const [isProfitVisible, setIsProfitVisible] = useState(false);
     const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
     const [customerSearch, setCustomerSearch] = useState('');
@@ -1018,6 +1021,22 @@ const POS = forwardRef<any, POSProps>(({
         if (isSaving || cartItems.length === 0) return;
         setIsSaving(true);
 
+        if (isChallan) {
+            const normalizedName = (customerSearch || selectedCustomer?.name || '').trim();
+            if (!normalizedName) {
+                addNotification('Customer Name is mandatory for Sales Challan.', 'error');
+                setIsSaving(false);
+                return;
+            }
+            if (currentUser?.organization_type === 'Distributor') {
+                if (!selectedCustomer?.id || normalizedName !== selectedCustomer.name.trim()) {
+                    addNotification('Please select a registered customer from Customer Master for Sales Challan.', 'error');
+                    setIsSaving(false);
+                    return;
+                }
+            }
+        }
+
         const targetStatus = forcedStatus || 'completed';
 
         if (targetStatus === 'completed') {
@@ -1475,7 +1494,7 @@ const POS = forwardRef<any, POSProps>(({
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [handleSave, cartItems, inventory, customerSearch, customerPhone, billMode, billCategory, invoiceDate, referredBy, addNotification, isCustomerSearchModalOpen, schemeItem, pendingBatchSelection, isSearchModalOpen, isEditMaterialModalOpen]);
+    }, [handleSave, cartItems, inventory, customerSearch, customerPhone, billMode, billCategory, invoiceDate, referredBy, addNotification, isCustomerSearchModalOpen, schemeItem, pendingBatchSelection, isSearchModalOpen, isEditMaterialModalOpen, showProfit, setIsProfitVisible]);
 
     useImperativeHandle(ref, () => ({
         handleSave,
@@ -2594,7 +2613,7 @@ const POS = forwardRef<any, POSProps>(({
                     )}
                 </div>
                 <div className="flex items-center gap-4">
-                    {showProfit && (
+                    {showTotalProfit && (
                         <span className="text-[10px] font-black uppercase text-emerald-400">
                             Total Profit: {isProfitVisible ? `₹${billProfit.toFixed(2)}` : '₹*.**'}
                         </span>
@@ -2621,7 +2640,9 @@ const POS = forwardRef<any, POSProps>(({
                     )}
                     {isFieldVisible('colCustomer') && (
                         <div className="relative" style={{ width: '24%', minWidth: '220px', flexGrow: 1 }}>
-                            <label className="text-[9px] font-bold text-gray-500 uppercase block mb-0.5 ml-0.5">Particulars (Customer Name)</label>
+                            <label className="text-[9px] font-bold text-gray-500 uppercase block mb-0.5 ml-0.5">
+                                Particulars (Customer Name){isChallan && <span className="text-red-500 ml-0.5 font-black">*</span>}
+                            </label>
                             <input
                                 ref={customerSearchInputRef}
                                 type="text"
@@ -2756,7 +2777,7 @@ const POS = forwardRef<any, POSProps>(({
                                     {isFieldVisible('colDisc') && <th className="p-2 border-r border-gray-400 text-center w-16">Disc%</th>}
                                     {isFieldVisible('colGst') && <th className="p-2 border-r border-gray-400 text-center w-16">GST%</th>}
                                     {isFieldVisible('colSch') && <th className="p-2 border-r border-gray-400 text-center w-20">Sch%</th>}
-                                    {showProfit && <th className="p-2 border-r border-gray-400 text-right w-24">Profit</th>}
+                                    {showItemProfit && <th className="p-2 border-r border-gray-400 text-right w-24">Profit</th>}
                                     {isFieldVisible('colAmount') && <th className="p-2 text-right w-32">Amount</th>}
                                 </tr>
                             </thead>
@@ -3075,7 +3096,7 @@ const POS = forwardRef<any, POSProps>(({
                                                     </button>
                                                 </td>
                                             )}
-                                            {showProfit && (() => {
+                                            {showItemProfit && (() => {
                                                 const unitsPerPack = resolveUnitsPerStrip(item.unitsPerPack, item.packType);
                                                 const billedQty = (item.quantity || 0) + ((item.looseQuantity || 0) / (unitsPerPack || 1));
                                                 const lineCost = billedQty * (item.purchasePrice || 0);
@@ -3468,7 +3489,7 @@ const POS = forwardRef<any, POSProps>(({
                                             </div>
                                         )}
 
-                                        {isFieldVisible('intelProfit') && (
+                                        {isFieldVisible('intelProfit') && showProfitQuotient && (
                                             <div className="bg-white/50 dark:bg-zinc-800/50 p-4 border border-primary/5 shadow-sm">
                                                 <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-3 opacity-70">Profit Quotient</p>
                                                 <div className="flex justify-between items-center mb-2">

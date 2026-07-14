@@ -105,6 +105,14 @@ const RxIcon = (props: React.SVGProps<SVGSVGElement>) => (
     </svg>
 );
 
+const InfoIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="16" x2="12" y2="12"/>
+        <line x1="12" y1="8" x2="12.01" y2="8"/>
+    </svg>
+);
+
 type RxAsset = {
     /** Original data:/http URI — used directly for <img src>; cheap and stable. */
     displaySrc: string;
@@ -437,7 +445,12 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
     const [rxViewingTransaction, setRxViewingTransaction] = useState<Transaction | null>(null);
 
     const { isFeatureHidden } = useModuleVisibility();
-    const showProfit = !isFeatureHidden('profitVisibility');
+    const showTotalProfit = !isFeatureHidden('salesHistoryTotalProfit');
+    const showSelectedBillProfit = !isFeatureHidden('salesHistorySelectedBillProfit');
+    const showProfit = showTotalProfit || showSelectedBillProfit;
+    const hideSummaryInfo = isFeatureHidden('salesHistorySummaryInfo');
+    const [isProfitVisible, setIsProfitVisible] = useState(false);
+    const [isSummaryOpen, setIsSummaryOpen] = useState(false);
 
     const requestSort = (key: SortableKeys) => {
         let direction: 'ascending' | 'descending' = 'ascending';
@@ -680,6 +693,18 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
+            const activeScreen = document.body.dataset.activeScreen;
+            if (activeScreen === 'salesHistory') {
+                if (viewingTransaction || rxViewingTransaction || journalTransaction || isConfirmOpen) return;
+
+                if (showProfit && (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'p') {
+                    e.preventDefault();
+                    setIsProfitVisible(prev => !prev);
+                    return;
+                }
+            }
+
+            if (viewingTransaction || rxViewingTransaction || journalTransaction || isConfirmOpen || isSummaryOpen) return;
             if (!shouldHandleScreenShortcut(e, 'salesHistory', { allowedKeysWhenInputFocused: ['F5'] })) return;
             if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
                 e.preventDefault();
@@ -735,7 +760,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [paginatedTransactions, selectedTransaction, handleViewSelected, handleEditSelected, handleReturnOrderSelected, handleViewJournalSelected, handlePrintSelected, handleCancelSelected, handleExportSelected, handleViewRxSelected, currentPage, totalPages]);
+    }, [paginatedTransactions, selectedTransaction, handleViewSelected, handleEditSelected, handleReturnOrderSelected, handleViewJournalSelected, handlePrintSelected, handleCancelSelected, handleExportSelected, handleViewRxSelected, currentPage, totalPages, showProfit, viewingTransaction, rxViewingTransaction, journalTransaction, isConfirmOpen, isSummaryOpen]);
 
     const renderPageNumbers = () => {
         const delta = 2;
@@ -806,17 +831,17 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
     const totalRevenue = useMemo(() => filteredAndSortedTransactions.reduce((sum, t) => sum + (t.status !== 'cancelled' ? t.total : 0), 0), [filteredAndSortedTransactions]);
 
     const selectedBillProfit = useMemo(() => {
-        if (!showProfit || !selectedTransaction || selectedTransaction.status === 'cancelled') return null;
+        if (!showSelectedBillProfit || !selectedTransaction || selectedTransaction.status === 'cancelled') return null;
         const cost = (selectedTransaction.items || []).reduce((c, item) => {
             const unitsPerPack = resolveUnitsPerStrip(item.unitsPerPack, item.packType);
             const billedQty = (item.quantity || 0) + ((item.looseQuantity || 0) / (unitsPerPack || 1));
             return c + billedQty * (item.purchasePrice || 0);
         }, 0);
         return parseFloat(((selectedTransaction.total || 0) - cost).toFixed(2));
-    }, [selectedTransaction, showProfit]);
+    }, [selectedTransaction, showSelectedBillProfit]);
 
     const totalProfit = useMemo(() => {
-        if (!showProfit) return 0;
+        if (!showTotalProfit) return 0;
         return filteredAndSortedTransactions.reduce((sum, tx) => {
             if (tx.status === 'cancelled') return sum;
             const cost = (tx.items || []).reduce((c, item) => {
@@ -826,7 +851,61 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
             }, 0);
             return sum + ((tx.total || 0) - cost);
         }, 0);
-    }, [filteredAndSortedTransactions, showProfit]);
+    }, [filteredAndSortedTransactions, showTotalProfit]);
+
+    const summaryStats = useMemo(() => {
+        const now = new Date();
+        const startOfToday = new Date(now); startOfToday.setHours(0, 0, 0, 0);
+
+        const startOf7Days = new Date(now); startOf7Days.setDate(now.getDate() - 7); startOf7Days.setHours(0, 0, 0, 0);
+        const startOf1Month = new Date(now); startOf1Month.setMonth(now.getMonth() - 1); startOf1Month.setHours(0, 0, 0, 0);
+        const startOf3Months = new Date(now); startOf3Months.setMonth(now.getMonth() - 3); startOf3Months.setHours(0, 0, 0, 0);
+        const startOf6Months = new Date(now); startOf6Months.setMonth(now.getMonth() - 6); startOf6Months.setHours(0, 0, 0, 0);
+        const startOf1Year = new Date(now); startOf1Year.setFullYear(now.getFullYear() - 1); startOf1Year.setHours(0, 0, 0, 0);
+
+        const stats = {
+            today: { qty: 0, value: 0, profit: 0 },
+            last7Days: { qty: 0, value: 0, profit: 0 },
+            last1Month: { qty: 0, value: 0, profit: 0 },
+            last3Months: { qty: 0, value: 0, profit: 0 },
+            last6Months: { qty: 0, value: 0, profit: 0 },
+            last1Year: { qty: 0, value: 0, profit: 0 }
+        };
+
+        (transactions || []).forEach(tx => {
+            if (tx.status === 'cancelled') return;
+            const txTime = new Date(tx.date).getTime();
+
+            const qty = (tx.items || []).reduce((sum, item) => {
+                const unitsPerPack = resolveUnitsPerStrip(item.unitsPerPack, item.packType);
+                const billedQty = (item.quantity || 0) + ((item.looseQuantity || 0) / (unitsPerPack || 1));
+                return sum + billedQty;
+            }, 0);
+
+            const cost = (tx.items || []).reduce((c, item) => {
+                const unitsPerPack = resolveUnitsPerStrip(item.unitsPerPack, item.packType);
+                const billedQty = (item.quantity || 0) + ((item.looseQuantity || 0) / (unitsPerPack || 1));
+                return c + billedQty * (item.purchasePrice || 0);
+            }, 0);
+
+            const profit = (tx.total || 0) - cost;
+
+            const addTx = (period: keyof typeof stats) => {
+                stats[period].qty += qty;
+                stats[period].value += tx.total || 0;
+                stats[period].profit += profit;
+            };
+
+            if (txTime >= startOfToday.getTime()) addTx('today');
+            if (txTime >= startOf7Days.getTime()) addTx('last7Days');
+            if (txTime >= startOf1Month.getTime()) addTx('last1Month');
+            if (txTime >= startOf3Months.getTime()) addTx('last3Months');
+            if (txTime >= startOf6Months.getTime()) addTx('last6Months');
+            if (txTime >= startOf1Year.getTime()) addTx('last1Year');
+        });
+
+        return stats;
+    }, [transactions]);
 
     const applySearch = useCallback(() => {
         setSearchTerm(searchInput.trim());
@@ -837,9 +916,9 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
             <div className="bg-primary text-white h-7 flex items-center px-4 justify-between border-b border-gray-600 shadow-md flex-shrink-0">
                 <span className="text-[10px] font-black uppercase tracking-widest">Sales Register (Accounting)</span>
                 <div className="flex items-center gap-4">
-                    {showProfit && (
+                    {showTotalProfit && (
                         <span className="text-[10px] font-black uppercase text-emerald-300">
-                            Total Profit: ₹{totalProfit.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            Total Profit: {isProfitVisible ? `₹${totalProfit.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '₹*.**'}
                         </span>
                     )}
                     <span className="text-[10px] font-black uppercase text-accent">Total Revenue: ₹{totalRevenue.toLocaleString()}</span>
@@ -907,8 +986,10 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                             {' '}| Customer: <span className="uppercase">{selectedTransaction?.customerName || '-'}</span>
                             {' '}| Voucher ID: <span className="font-mono">{formatVoucherNo(selectedTransaction?.invoiceNumber || selectedTransaction?.id) || '-'}</span>
                             {' '}| Amount: <span className="font-black">₹{(selectedTransaction?.total || 0).toFixed(2)}</span>
-                            {showProfit && selectedBillProfit !== null && (
-                                <> | Profit: <span className={`font-black ${selectedBillProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>₹{selectedBillProfit.toFixed(2)}</span></>
+                            {showSelectedBillProfit && selectedBillProfit !== null && (
+                                <> | Profit: <span className={`font-black ${selectedBillProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                    {isProfitVisible ? `₹${selectedBillProfit.toFixed(2)}` : '₹*.**'}
+                                </span></>
                             )}
                             {selectedTransaction?.narration && (
                                 <> | Narration: <span className="text-indigo-600 italic font-medium">{selectedTransaction.narration}</span></>
@@ -938,6 +1019,15 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                             </button>
                             <button disabled={!selectedTransaction} onClick={handleCancelSelected} className="px-3 py-1.5 tally-border bg-white text-[10px] font-black uppercase text-red-700 disabled:opacity-50">Delete: Cancel</button>
                             <button disabled={!selectedTransaction} onClick={handleExportSelected} className="px-3 py-1.5 tally-border bg-white text-[10px] font-black uppercase disabled:opacity-50">F3: Export</button>
+                            {showProfit && (
+                                <button
+                                    onClick={() => setIsProfitVisible(prev => !prev)}
+                                    className="px-3 py-1.5 tally-border bg-white text-[10px] font-black uppercase hover:bg-gray-100 transition-colors"
+                                    title="Toggle Profit Visibility (Ctrl + Shift + P)"
+                                >
+                                    {isProfitVisible ? 'Hide Profit' : 'Show Profit'}
+                                </button>
+                            )}
                             <button onClick={handleRefresh} disabled={isSyncing} className="px-3 py-1.5 tally-button-primary text-[10px] font-black uppercase disabled:opacity-60">F5: Refresh</button>
                         </div>
                     </div>
@@ -1048,12 +1138,24 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                             </tbody>
                         </table>
                     </div>
-                    {/* Pagination Footer */}
-                    {totalPages > 1 && (
-                        <div className="p-2 bg-gray-100 border-t border-gray-400 flex justify-between items-center flex-shrink-0">
+                    {/* Footer Bar */}
+                    <div className="p-2 bg-gray-100 border-t border-gray-400 flex justify-between items-center flex-shrink-0">
+                        <div className="flex items-center gap-3">
                             <div className="text-[10px] font-black uppercase text-gray-500 tracking-widest ml-2">
                                 Showing {paginatedTransactions.length} of {filteredAndSortedTransactions.length} items
                             </div>
+                            {!hideSummaryInfo && (
+                                <button
+                                    type="button"
+                                    onClick={() => setIsSummaryOpen(true)}
+                                    className="p-1 rounded-none border border-gray-400 bg-white hover:bg-gray-100 text-primary transition-colors flex items-center justify-center h-6 w-6"
+                                    title="View Sales & Profit Summary Information (ℹ️)"
+                                >
+                                    <InfoIcon className="w-3.5 h-3.5 text-blue-600 font-black" />
+                                </button>
+                            )}
+                        </div>
+                        {totalPages > 1 && (
                             <div className="flex items-center gap-1">
                                 <button 
                                     disabled={currentPage === 1}
@@ -1075,11 +1177,11 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                                     Next
                                 </button>
                             </div>
-                            <div className="text-[9px] font-bold text-gray-400 uppercase mr-2 italic">
-                                Use ← → keys to flip pages
-                            </div>
+                        )}
+                        <div className="text-[9px] font-bold text-gray-400 uppercase mr-2 italic">
+                            {totalPages > 1 ? 'Use ← → keys to flip pages' : ''}
                         </div>
-                    )}
+                    </div>
                 </Card>
             </div>
             <ConfirmModal isOpen={isConfirmOpen} onClose={() => setIsConfirmOpen(false)} onConfirm={handleConfirmCancel} title="Cancel Invoice" message="Are you sure you want to cancel this invoice? Inventory will be reversed." />
@@ -1087,13 +1189,72 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
             <JournalEntryViewerModal
                 isOpen={!!journalTransaction}
                 onClose={() => setJournalTransaction(null)}
-                invoiceId={journalTransaction?.id}
-                invoiceNumber={journalTransaction?.invoiceNumber || journalTransaction?.id}
                 documentType="SALES"
                 currentUser={currentUser}
                 isPosted={(journalTransaction?.status || '') === 'completed'}
                 transactionRecord={journalTransaction}
             />
+
+            {isSummaryOpen && (
+                <Modal
+                    isOpen={isSummaryOpen}
+                    onClose={() => setIsSummaryOpen(false)}
+                    title="Sales & Profit Summary Information"
+                    widthClass="max-w-lg"
+                >
+                    <div className="p-4 bg-white space-y-4">
+                        <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                            Store-wide aggregate sales and profit overview.
+                        </p>
+                        
+                        <div className="overflow-x-auto border border-gray-300">
+                            <table className="min-w-full border-collapse text-sm">
+                                <thead className="bg-gray-50 border-b border-gray-300">
+                                    <tr className="text-[10px] font-black uppercase text-gray-600 select-none">
+                                        <th className="p-2 border-r border-gray-300 text-left">Period</th>
+                                        <th className="p-2 border-r border-gray-300 text-right">Qty Sold</th>
+                                        <th className="p-2 border-r border-gray-300 text-right">Sales Value</th>
+                                        {showTotalProfit && <th className="p-2 text-right">Profit</th>}
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-200">
+                                    {[
+                                        { label: 'Today', data: summaryStats.today },
+                                        { label: 'Last 7 Days', data: summaryStats.last7Days },
+                                        { label: 'Last 1 Month', data: summaryStats.last1Month },
+                                        { label: 'Last 3 Months', data: summaryStats.last3Months },
+                                        { label: 'Last 6 Months', data: summaryStats.last6Months },
+                                        { label: 'Last 1 Year', data: summaryStats.last1Year },
+                                    ].map((row, idx) => (
+                                        <tr key={idx} className="hover:bg-gray-50">
+                                            <td className="p-2 border-r border-gray-200 font-bold text-gray-700 text-xs uppercase select-none">{row.label}</td>
+                                            <td className="p-2 border-r border-gray-200 text-right font-mono font-semibold">{row.data.qty.toFixed(1)}</td>
+                                            <td className="p-2 border-r border-gray-200 text-right font-mono font-black text-gray-900">₹{row.data.value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                            {showTotalProfit && (
+                                                <td className={`p-2 text-right font-mono font-black ${row.data.profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                                    {isProfitVisible 
+                                                        ? `₹${row.data.profit.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` 
+                                                        : '₹*.**'
+                                                    }
+                                                </td>
+                                            )}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div className="flex justify-end pt-2 border-t border-gray-200">
+                            <button
+                                onClick={() => setIsSummaryOpen(false)}
+                                className="px-4 py-2 bg-primary text-white text-[11px] font-black uppercase tracking-wider hover:bg-primary-dark transition-colors"
+                            >
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </Modal>
+            )}
 
             {viewingTransaction && (
                 <Modal

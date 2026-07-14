@@ -1,5 +1,6 @@
-﻿import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import type { InventoryItem, Purchase, Transaction } from '@core/types';
+import { useModuleVisibility } from '@core/visibility/useModuleVisibility';
 
 type Props = {
   isOpen: boolean;
@@ -15,6 +16,8 @@ const fmtDate = (value?: string) => value ? new Date(value).toLocaleDateString('
 const fmtMoney = (value: number) => `₹${(Number.isFinite(value) ? value : 0).toFixed(2)}`;
 
 const ProductInsightsPanel: React.FC<Props> = ({ isOpen, product, purchases, sales, loading = false, onClose }) => {
+  const { isFeatureHidden } = useModuleVisibility();
+  const showProfit = !isFeatureHidden('posProductInsightsProfit');
   useEffect(() => {
     if (!isOpen) return;
 
@@ -169,11 +172,13 @@ const ProductInsightsPanel: React.FC<Props> = ({ isOpen, product, purchases, sal
           </div>
           <table className="w-full border border-gray-300 text-sm leading-relaxed sm:text-[15px]"><thead><tr className="bg-gray-50"><th className="border border-gray-300 px-2 py-2 text-left text-[15px] font-bold sm:text-base">Date</th><th className="border border-gray-300 px-2 py-2 text-left text-[15px] font-bold sm:text-base">Customer</th><th className="border border-gray-300 px-2 py-2 text-left text-[15px] font-bold sm:text-base">Bill</th><th className="border border-gray-300 px-2 py-2 text-left text-[15px] font-bold sm:text-base">Qty</th><th className="border border-gray-300 px-2 py-2 text-left text-[15px] font-bold sm:text-base">Rate</th><th className="border border-gray-300 px-2 py-2 text-left text-[15px] font-bold sm:text-base">Disc</th><th className="border border-gray-300 px-2 py-2 text-left text-[15px] font-bold sm:text-base">GST</th><th className="border border-gray-300 px-2 py-2 text-left text-[15px] font-bold sm:text-base">Net</th></tr></thead><tbody>{salesRows.map((r,idx)=><tr key={idx} className="h-9"><td className="border border-gray-300 px-2 py-1.5">{fmtDate(r.date)}</td><td className="border border-gray-300 px-2 py-1.5">{r.customer}</td><td className="border border-gray-300 px-2 py-1.5">{r.billId}</td><td className="border border-gray-300 px-2 py-1.5">{r.qty}</td><td className="border border-gray-300 px-2 py-1.5">{fmtMoney(r.rate)}</td><td className="border border-gray-300 px-2 py-1.5">{r.discount.toFixed(2)}%</td><td className="border border-gray-300 px-2 py-1.5">{r.gst}%</td><td className="border border-gray-300 px-2 py-1.5">{fmtMoney(r.net)}</td></tr>)}</tbody></table>
 
-          <div className="border border-gray-300 p-4">
-            <p className="text-base font-black uppercase text-gray-500 sm:text-lg">Profit / Margin Summary</p>
-            <p className={`${margin.currentMargin < 5 ? 'text-red-600' : 'text-gray-900'} text-sm font-bold sm:text-[15px]`}>Current Margin: {margin.currentMargin.toFixed(2)}%</p>
-            <p className={`${margin.profitPerUnit < 0 ? 'text-red-600' : 'text-gray-900'} text-sm font-bold sm:text-[15px]`}>Profit per unit: {fmtMoney(margin.profitPerUnit)}</p>
-          </div>
+          {showProfit && (
+            <div className="border border-gray-300 p-4">
+              <p className="text-base font-black uppercase text-gray-500 sm:text-lg">Profit / Margin Summary</p>
+              <p className={`${margin.currentMargin < 5 ? 'text-red-600' : 'text-gray-900'} text-sm font-bold sm:text-[15px]`}>Current Margin: {margin.currentMargin.toFixed(2)}%</p>
+              <p className={`${margin.profitPerUnit < 0 ? 'text-red-600' : 'text-gray-900'} text-sm font-bold sm:text-[15px]`}>Profit per unit: {fmtMoney(margin.profitPerUnit)}</p>
+            </div>
+          )}
         </div>)}
       </div>
     </div>

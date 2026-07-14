@@ -12,7 +12,21 @@ export function useModuleVisibility() {
     () => ({
       isScreenHidden: (screenId: string) => hiddenScreens.has(screenId),
       isDashboardFieldHidden: (fieldId: string) => hiddenDashboardFields.has(fieldId),
-      isFeatureHidden: (featureId: string) => hiddenFeatures.has(featureId),
+      isFeatureHidden: (featureId: string) => {
+        if (hiddenFeatures.has(featureId)) return true;
+        const profitSubFeatures = [
+          'salesHistoryTotalProfit',
+          'salesHistorySelectedBillProfit',
+          'posTotalProfit',
+          'posItemProfit',
+          'posProfitQuotient',
+          'posProductInsightsProfit',
+        ];
+        if (profitSubFeatures.includes(featureId) && hiddenFeatures.has('profitVisibility')) {
+          return true;
+        }
+        return false;
+      },
       hiddenScreens,
       hiddenDashboardFields,
       hiddenFeatures,

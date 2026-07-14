@@ -246,8 +246,36 @@ const PrintCustomerVoucherModal: React.FC<PrintCustomerVoucherModalProps> = ({
                         margin: 5mm;
                         size: ${pageSize.toUpperCase()};
                     }
-                    body { margin: 0; padding: 0; background: white; }
+                    html, body {
+                        margin: 0 !important;
+                        padding: 0 !important;
+                        background: white !important;
+                        overflow: visible !important;
+                        height: auto !important;
+                    }
+                    ::-webkit-scrollbar {
+                        display: none !important;
+                    }
                     .no-print { display: none !important; }
+                    #print-voucher-modal-container {
+                        position: absolute !important;
+                        left: 0 !important;
+                        top: 0 !important;
+                        width: 100% !important;
+                        height: auto !important;
+                        overflow: visible !important;
+                        display: block !important;
+                    }
+                    #print-voucher-modal-container > div {
+                        width: auto !important;
+                        max-width: none !important;
+                        max-height: none !important;
+                        height: auto !important;
+                        overflow: visible !important;
+                    }
+                    #print-voucher-modal-container * {
+                        overflow: visible !important;
+                    }
                     #voucher-print-area { 
                         padding: ${isA5 ? '8mm 10mm' : '15mm 20mm'} !important; 
                         border: none !important; 

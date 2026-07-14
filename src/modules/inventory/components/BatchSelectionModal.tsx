@@ -1,8 +1,9 @@
-﻿
+
 import React, { useEffect, useRef, useState } from 'react';
 import Modal from '@core/components/ui/Modal';
 import { InventoryItem } from '@core/types';
 import { checkIsExpired } from '@core/utils/helpers';
+import { resolveUnitsPerStrip } from '@core/utils/pack';
 
 interface BatchSelectionModalProps {
     isOpen: boolean;
@@ -112,9 +113,27 @@ const BatchSelectionModal: React.FC<BatchSelectionModalProps> = ({ isOpen, onClo
                                             </span>
                                         </td>
                                         <td className="p-4 text-right">
-                                            <span className={`text-xs font-black ${batch.stock > 10 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                                {batch.stock}
-                                            </span>
+                                            <div className="inline-flex flex-col items-end">
+                                                <span className={`text-xs font-black ${batch.stock > 10 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                                    {batch.stock}
+                                                </span>
+                                                {resolveUnitsPerStrip(batch.unitsPerPack, batch.packType) > 1 && (
+                                                    <span className="text-[10px] text-gray-500 font-bold mt-0.5 whitespace-nowrap">
+                                                        {(() => {
+                                                            const uPP = resolveUnitsPerStrip(batch.unitsPerPack, batch.packType);
+                                                            const strips = Math.floor(batch.stock / uPP);
+                                                            const loose = batch.stock % uPP;
+                                                            if (strips > 0 && loose > 0) {
+                                                                return `${strips} Strip${strips > 1 ? 's' : ''} + ${loose} L`;
+                                                            } else if (strips > 0) {
+                                                                return `${strips} Strip${strips > 1 ? 's' : ''}`;
+                                                            } else {
+                                                                return `${loose} L`;
+                                                            }
+                                                        })()}
+                                                    </span>
+                                                )}
+                                            </div>
                                         </td>
                                     </tr>
                                 );

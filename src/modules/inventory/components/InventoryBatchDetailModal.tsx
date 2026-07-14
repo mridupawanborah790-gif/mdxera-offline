@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { InventoryItem } from '@core/types';
 import { formatExpiryToMMYY, normalizeImportDate } from '@core/utils/helpers';
@@ -393,7 +393,7 @@ const InventoryBatchDetailModal: React.FC<InventoryBatchDetailModalProps> = ({
     };
 
     return createPortal(
-        <div className="fixed inset-0 z-[220] bg-black/60 flex items-center justify-center p-2" onClick={onClose}>
+        <div className="fixed inset-0 z-[220] bg-black/60 flex items-center justify-center p-2">
             <div
                 ref={modalRef}
                 className="w-[74vw] min-w-[320px] max-w-[1400px] max-h-[70vh] bg-white border-2 border-primary shadow-2xl flex flex-col overflow-hidden outline-none"

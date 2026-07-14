@@ -610,7 +610,7 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
                 paymentMode,
                 bankAccountId,
                 referenceInvoiceId: paymentType === 'against_invoice' && allocations.length === 1 ? allocations[0].invoiceId : undefined,
-                referenceInvoiceNumber: paymentType === 'against_invoice' && allocations.length === 1 ? allocations[0].invoiceId : undefined,
+                referenceInvoiceNumber: paymentType === 'against_invoice' && allocations.length === 1 ? (invoiceRows.find(i => i.id === allocations[0].invoiceId)?.invoiceNumber || allocations[0].invoiceId) : undefined,
                 entryCategory: 'invoice_payment',
             });
             if (paymentType === 'against_invoice') {
@@ -622,9 +622,9 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
                         date,
                         sourcePaymentId: paymentResult.ledgerEntryId,
                         referenceInvoiceId: invoice.id,
-                        referenceInvoiceNumber: invoice.id,
+                        referenceInvoiceNumber: invoice.invoiceNumber || invoice.id,
                         amount: allocation.allocated,
-                        description: 'Payment adjusted against invoice',
+                        description: `Payment adjusted against invoice ${invoice.invoiceNumber || invoice.id}`,
                     });
                 }
             }
@@ -673,9 +673,9 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
                     date,
                     downPaymentId: downPaymentResult.ledgerEntryId,
                     referenceInvoiceId: invoice.id,
-                    referenceInvoiceNumber: invoice.id,
+                    referenceInvoiceNumber: invoice.invoiceNumber || invoice.id,
                     amount: allocation.allocated,
-                    description: 'Advance adjusted against invoice',
+                    description: `Advance adjusted against invoice ${invoice.invoiceNumber || invoice.id}`,
                 });
             }
             setShowDownPaymentForm(false);
@@ -727,7 +727,7 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
                         referenceInvoiceId: invoice.id,
                         referenceInvoiceNumber: invoice.invoiceNumber || invoice.id,
                         amount: allocation.allocated,
-                        description: 'Receipt advance adjusted against old / pending invoice',
+                        description: `Receipt advance adjusted against old / pending invoice ${invoice.invoiceNumber || invoice.id}`,
                     });
                 } else {
                     await onRecordInvoicePaymentAdjustment({
@@ -737,7 +737,7 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
                         referenceInvoiceId: invoice.id,
                         referenceInvoiceNumber: invoice.invoiceNumber || invoice.id,
                         amount: allocation.allocated,
-                        description: 'Receipt adjusted against old / pending invoice',
+                        description: `Receipt adjusted against old / pending invoice ${invoice.invoiceNumber || invoice.id}`,
                     });
                 }
             }
@@ -1008,7 +1008,19 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
                                                     <td className="p-2">{formatVoucherNo(item.referenceInvoiceNumber || item.referenceInvoiceId) || '-'}</td>
                                                     <td className="p-2">{item.paymentMode || '-'}</td>
                                                     <td className="p-2">{item.bankName || '-'}</td>
-                                                    <td className="p-2">{item.entryCategory === 'down_payment' ? 'Advance Received' : item.description}</td>
+                                                    <td className="p-2">
+                                                        {(() => {
+                                                            if (item.entryCategory === 'down_payment') return 'Advance Received';
+                                                            let desc = (item.description || '').replace(/\s*\[AUTO_LEDGER\]:[a-z0-9\-]+/gi, '').trim() || item.description;
+                                                            if (item.referenceInvoiceNumber && !desc.toLowerCase().includes(item.referenceInvoiceNumber.toLowerCase())) {
+                                                                const formattedRef = formatVoucherNo(item.referenceInvoiceNumber);
+                                                                if (formattedRef && !desc.toLowerCase().includes(formattedRef.toLowerCase())) {
+                                                                    desc = `${desc} (${formattedRef})`;
+                                                                }
+                                                            }
+                                                            return desc;
+                                                        })()}
+                                                    </td>
                                                     <td className="p-2 font-bold">₹{Number(item.credit || item.debit || 0).toFixed(2)}</td>
                                                     <td className="p-2">₹{summary.adjustedAmount.toFixed(2)}</td>
                                                     <td className="p-2">₹{summary.remainingAmount.toFixed(2)}</td>
@@ -1053,7 +1065,18 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
                                                 <tr key={item.id} className="border-t">
                                                     <td className="p-2">{item.date}</td>
                                                     <td className="p-2 uppercase">{item.type}</td>
-                                                    <td className="p-2">{(item.description || '').replace(/\s*\[AUTO_LEDGER\]:[a-f0-9\-]+/gi, '').trim() || item.description}</td>
+                                                    <td className="p-2">
+                                                        {(() => {
+                                                            let desc = (item.description || '').replace(/\s*\[AUTO_LEDGER\]:[a-z0-9\-]+/gi, '').trim() || item.description;
+                                                            if (item.referenceInvoiceNumber && !desc.toLowerCase().includes(item.referenceInvoiceNumber.toLowerCase())) {
+                                                                const formattedRef = formatVoucherNo(item.referenceInvoiceNumber);
+                                                                if (formattedRef && !desc.toLowerCase().includes(formattedRef.toLowerCase())) {
+                                                                    desc = `${desc} (${formattedRef})`;
+                                                                }
+                                                            }
+                                                            return desc;
+                                                        })()}
+                                                    </td>
                                                     <td className="p-2">₹{Number(item.debit || 0).toFixed(2)}</td>
                                                     <td className="p-2">₹{Number(item.credit || 0).toFixed(2)}</td>
                                                     <td className="p-2 font-bold">₹{Number(item.balance || 0).toFixed(2)}</td>
@@ -1311,6 +1334,7 @@ const AccountReceivable: React.FC<AccountReceivableProps> = ({ customers, transa
                 pharmacy={currentUser}
                 bankOptions={bankOptions}
                 summary={printingVoucher ? getVoucherAllocationSummary(printingVoucher) : null}
+                transactions={transactions}
             />
             {selectedCustomer && (
                 <PrintCustomerLedgerModal

@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Card from '@core/components/ui/Card';
 import Modal from '@core/components/ui/Modal';
@@ -19,8 +18,8 @@ import { getOutstandingBalance } from '@core/utils/helpers';
 
 const uniformTextStyle = "text-2xl font-normal tracking-tight uppercase leading-tight";
 
-const addressFields: Array<{ label: string; key: 'address_line1' | 'address_line2' | 'area' | 'city' | 'district' | 'state' | 'pincode' | 'country' }> = [
-    { label: 'Address Line 1', key: 'address_line1' },
+const addressFields: Array<{ label: string; key: 'address' | 'address_line2' | 'area' | 'city' | 'district' | 'state' | 'pincode' | 'country' }> = [
+    { label: 'Address Line 1', key: 'address' },
     { label: 'Address Line 2', key: 'address_line2' },
     { label: 'Area / Locality', key: 'area' },
     { label: 'City', key: 'city' },
@@ -63,7 +62,7 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
-    const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+    const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'blocked'>('all');
     const [isPriceListModalOpen, setIsPriceListModalOpen] = useState(false);
@@ -85,6 +84,11 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
         const found = glMasters.find((g) => g.id === id);
         return found ? `${found.glName}${found.glCode ? ` (${found.glCode})` : ''}` : id;
     };
+
+    const selectedCustomer = useMemo(() => {
+        if (!selectedCustomerId || !Array.isArray(customers)) return null;
+        return customers.find(c => c.id === selectedCustomerId) || null;
+    }, [customers, selectedCustomerId]);
 
     const filteredCustomers = useMemo(() => {
         return customers
@@ -160,7 +164,7 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
                             <button
                                 key={cust.id}
                                 type="button"
-                                onClick={() => setSelectedCustomer(cust)}
+                                onClick={() => setSelectedCustomerId(cust.id)}
                                 className={`w-full text-left p-3 transition-all border-l-[6px] ${selectedCustomer?.id === cust.id ? 'bg-primary text-white border-primary shadow-lg' : 'border-transparent hover:bg-primary hover:text-white group'}`}
                             >
                                 <p className={`${uniformTextStyle} !text-xl truncate ${selectedCustomer?.id === cust.id ? 'text-white' : 'group-hover:text-white'}`}>{cust.name}</p>
@@ -219,7 +223,7 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
                                                     if (!window.confirm('Delete this customer?')) return;
                                                     const result = await onDeleteCustomer(selectedCustomer);
                                                     alert(result.message);
-                                                    if (result.success) setSelectedCustomer(null);
+                                                    if (result.success) setSelectedCustomerId(null);
                                                 }}
                                                 className="px-4 py-2 border border-red-700 bg-red-50 text-red-700 font-black text-[10px] uppercase shadow-sm"
                                             >
@@ -279,19 +283,19 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
                                     </div>
                                     <div className="p-3 border border-gray-200">
                                         <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Current Outstanding</p>
-                                        <p className="text-sm font-bold text-gray-900">₹{Number(getOutstandingBalance(selectedCustomer)).toFixed(2)}</p>
+                                        <p className="text-sm font-bold text-gray-900">₹{getOutstandingBalance(selectedCustomer).toFixed(2)}</p>
                                     </div>
                                     <div className="p-3 border border-gray-200">
                                         <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Available Credit</p>
-                                        <p className="text-sm font-bold text-gray-900">₹{Number((selectedCustomer.creditLimit || 0) - getOutstandingBalance(selectedCustomer)).toFixed(2)}</p>
+                                        <p className="text-sm font-bold text-gray-900">₹{(Number(selectedCustomer.creditLimit || 0) - getOutstandingBalance(selectedCustomer)).toFixed(2)}</p>
                                     </div>
                                     <div className="p-3 border border-gray-200">
                                         <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Credit Status</p>
-                                        <p className="text-sm font-bold text-gray-900">{(selectedCustomer.creditStatus || 'active').toUpperCase()}</p>
+                                        <p className="text-sm font-bold text-gray-900 uppercase">{selectedCustomer.creditStatus || 'ACTIVE'}</p>
                                     </div>
                                     <div className="p-3 border border-gray-200">
                                         <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Credit Days</p>
-                                        <p className="text-sm font-bold text-gray-900">{Number(selectedCustomer.creditDays || 0)}</p>
+                                        <p className="text-sm font-bold text-gray-900">{selectedCustomer.creditDays || 0}</p>
                                     </div>
                                 </div>
                             </div>

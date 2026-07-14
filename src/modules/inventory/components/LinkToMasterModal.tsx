@@ -12,6 +12,7 @@ interface LinkToMasterModalProps {
     medicines?: Medicine[];
     mappings?: SupplierProductMap[];
     onLink: (map: SupplierProductMap) => Promise<void>;
+    onUnlink?: (mappingId: string) => Promise<void>;
     scannedItems: PurchaseItem[];
     onFinalize: (reconciledItems: PurchaseItem[]) => void;
     onAddMedicineMaster: (med: Omit<Medicine, 'id'>) => Promise<Medicine>;
@@ -39,6 +40,7 @@ const LinkToMasterModal: React.FC<LinkToMasterModalProps> = ({
     medicines = [],
     mappings = [],
     onLink,
+    onUnlink,
     scannedItems,
     onFinalize,
     onAddMedicineMaster,
@@ -144,9 +146,11 @@ const LinkToMasterModal: React.FC<LinkToMasterModalProps> = ({
 
     useEffect(() => {
         const handleGlobalShortcut = (e: KeyboardEvent) => {
-            if (isOpen && e.ctrlKey && (e.key === '+' || e.key === '=')) {
-                e.preventDefault();
-                setIsAddMedicineSubModalOpen(true);
+            if (isOpen) {
+                if ((e.ctrlKey && (e.key === '+' || e.key === '=')) || (e.ctrlKey && e.key === 'Enter')) {
+                    e.preventDefault();
+                    setIsAddMedicineSubModalOpen(true);
+                }
             }
         };
         window.addEventListener('keydown', handleGlobalShortcut);
@@ -246,6 +250,46 @@ const LinkToMasterModal: React.FC<LinkToMasterModalProps> = ({
             setStatusToast('Reconciliation completed. Items added to Purchase Voucher.');
             onFinalize(updatedItems);
         }
+    };
+
+    const handleUnlinkItem = async (item: PurchaseItem) => {
+        const rawNomenclatureName = (item as any).extractedName || item.name;
+        
+        const existingMap = (mappings || []).find(m =>
+            m.supplier_id === supplier.id &&
+            m.supplier_product_name.toLowerCase().trim() === rawNomenclatureName.toLowerCase().trim()
+        );
+
+        if (existingMap && onUnlink) {
+            try {
+                await onUnlink(existingMap.id);
+            } catch (err) {
+                console.error("Failed to delete mapping", err);
+            }
+        }
+
+        const updatedItems = reconciledItems.map((i) => {
+            const itemOriginalName = (i as any).extractedName || i.name;
+            if (itemOriginalName.toLowerCase().trim() === rawNomenclatureName.toLowerCase().trim()) {
+                const orig = scannedItems.find(o => o.id === i.id) || i;
+                return {
+                    ...i,
+                    name: (orig as any).extractedName || orig.name,
+                    brand: orig.brand || '',
+                    hsnCode: orig.hsnCode || '',
+                    gstPercent: orig.gstPercent || 0,
+                    mrp: orig.mrp || 0,
+                    inventoryItemId: undefined,
+                    unitsPerPack: orig.unitsPerPack || 1,
+                    packType: orig.packType || '',
+                    matchStatus: 'pending' as const
+                };
+            }
+            return i;
+        });
+
+        setReconciledItems(updatedItems);
+        setStatusToast(`Unlinked mapping for: ${rawNomenclatureName}`);
     };
 
     const handleFinalize = (e?: React.MouseEvent | React.KeyboardEvent) => {
@@ -460,11 +504,11 @@ const LinkToMasterModal: React.FC<LinkToMasterModalProps> = ({
                                     const isResolved = item.matchStatus === 'matched';
                                     const hasAutoMatch = !!suggestions[item.id];
                                     return (
-                                        <button
+                                        <div
                                             key={item.id}
                                             data-scanned-idx={sourceIndex}
                                             onClick={() => { setActiveScannedIndex(sourceIndex); scannedListRef.current?.focus(); }}
-                                            className={`w-full py-2.5 px-4 border-b border-gray-200 text-left transition-all flex items-center gap-4 ${isActive ? 'bg-blue-600 text-white z-10 shadow-lg' : isResolved ? 'bg-emerald-100 hover:bg-emerald-200' : 'bg-white hover:bg-gray-50'}`}
+                                            className={`w-full py-2.5 px-4 border-b border-gray-200 text-left transition-all flex items-center gap-4 cursor-pointer ${isActive ? 'bg-blue-600 text-white z-10 shadow-lg' : isResolved ? 'bg-emerald-100 hover:bg-emerald-200' : 'bg-white hover:bg-gray-50'}`}
                                         >
                                             <div className={`w-8 h-8 rounded-none flex items-center justify-center font-black text-sm flex-shrink-0 ${isActive ? 'bg-white/20' : isResolved ? 'bg-emerald-600 text-white' : (hasAutoMatch ? 'bg-amber-100 text-amber-700 animate-pulse' : 'bg-red-50 text-red-600 border border-red-200')}`}>
                                                 {isResolved ? '✓' : hasAutoMatch ? '✨' : '!'}
@@ -472,8 +516,19 @@ const LinkToMasterModal: React.FC<LinkToMasterModalProps> = ({
                                             <div className="flex-1 min-w-0">
                                                 <p className={`truncate leading-none ${uniformTextStyle} ${isActive ? 'text-white' : isResolved ? 'text-emerald-900' : 'text-gray-950'}`}>{item.name}</p>
                                             </div>
-                                            <span className={`text-[9px] font-black uppercase tracking-widest ${isActive ? 'text-white/90' : isResolved ? 'text-emerald-700' : 'text-red-600'}`}>{isResolved ? 'Matched' : 'Unmatched'}</span>
-                                        </button>
+                                            {isResolved && (
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleUnlinkItem(item);
+                                                    }}
+                                                    className={`px-2 py-1 text-[9px] font-black uppercase tracking-wider rounded border-2 shadow-sm shrink-0 ${isActive ? 'bg-red-500 hover:bg-red-600 text-white border-red-400' : 'bg-red-50 text-red-700 hover:bg-red-100 border-red-200'}`}
+                                                >
+                                                    Unlink
+                                                </button>
+                                            )}
+                                            <span className={`text-[9px] font-black uppercase tracking-widest shrink-0 ${isActive ? 'text-white/90' : isResolved ? 'text-emerald-700' : 'text-red-600'}`}>{isResolved ? 'Matched' : 'Unmatched'}</span>
+                                        </div>
                                     );
                                 })}
                             </div>
@@ -488,7 +543,7 @@ const LinkToMasterModal: React.FC<LinkToMasterModalProps> = ({
                                     </div>
                                 </div>
                                 <div className="relative">
-                                    <input ref={searchInputRef} type="text" value={searchTerm} onChange={e => { setSearchTerm(e.target.value); setMasterSelectedIndex(0); }} onKeyDown={handleSearchKeyDown} placeholder="Search catalog manually... (Ctrl + + to create new)" className={`w-full h-11 p-2.5 pl-10 border-2 border-gray-400 bg-white focus:border-primary focus:bg-[#fffde7] outline-none shadow-sm ${uniformTextStyle}`} />
+                                    <input ref={searchInputRef} type="text" value={searchTerm} onChange={e => { setSearchTerm(e.target.value); setMasterSelectedIndex(0); }} onKeyDown={handleSearchKeyDown} placeholder="Search catalog manually... (Ctrl + Enter / Ctrl + + to create new)" className={`w-full h-11 p-2.5 pl-10 border-2 border-gray-400 bg-white focus:border-primary focus:bg-[#fffde7] outline-none shadow-sm ${uniformTextStyle}`} />
                                     <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
                                 </div>
                             </div>

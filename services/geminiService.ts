@@ -117,7 +117,7 @@ export const extractPurchaseDetailsFromBill = async (
     pharmacyName: string
 ): Promise<ExtractedPurchaseBill> => {
     try {
-        const prompt = `Analyze purchase invoice images for \"${pharmacyName}\". Extract supplier, GSTIN, PAN, supplier phone, supplier address, invoice number, date and items. Return JSON only with fields: supplier, supplierGstNumber, supplierPanNumber, supplierPhone, supplierAddress, invoiceNumber, date, items: [{name, batch, packType, expiry, quantity, purchasePrice, mrp, gstPercent, discountPercent}].`;
+        const prompt = `Analyze ALL the provided purchase invoice images for \"${pharmacyName}\" (this is a multi-page document). Please extract ALL items from ALL the pages/images. For general fields (supplier, GSTIN, invoice number, date, etc.), look at the first page or appropriate header pages. For the items array, make sure to extract and compile items from ALL pages of the invoice. Return JSON only with fields: supplier, supplierGstNumber, supplierPanNumber, supplierPhone, supplierAddress, invoiceNumber, date, items: [{name, batch, packType, expiry, quantity, purchasePrice, mrp, gstPercent, discountPercent}].`;
 
         const responseData = await callGeminiOcr({
             prompt,

@@ -319,7 +319,7 @@ const LinkToMasterModal: React.FC<LinkToMasterModalProps> = ({
         } else if (e.key === 'ArrowUp') {
             e.preventDefault();
             setActiveScannedIndex(prev => (prev - 1 + reconciledItems.length) % reconciledItems.length);
-        } else if (e.key === 'Enter') {
+        } else if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
             e.preventDefault();
             const currentItem = reconciledItems[activeScannedIndex];
             if (isComplete) {
@@ -360,7 +360,7 @@ const LinkToMasterModal: React.FC<LinkToMasterModalProps> = ({
         } else if (e.key === 'ArrowUp') {
             e.preventDefault();
             setMasterSelectedIndex(prev => (prev - 1 + masterResults.length) % Math.max(1, masterResults.length));
-        } else if (e.key === 'Enter') {
+        } else if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
             e.preventDefault();
             const selectedMaster = masterResults[masterSelectedIndex];
             if (selectedMaster) {

@@ -2365,7 +2365,7 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
                         >
                             Reconcile Again
                         </button>
-                        <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,application/pdf" />
+                        <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,application/pdf" multiple />
                     </div>
 
                     {(importWorkflowStage !== 'idle' || importWorkflowError) && (

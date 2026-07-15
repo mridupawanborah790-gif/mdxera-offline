@@ -3,6 +3,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Card from '@core/components/ui/Card';
 import Modal from '@core/components/ui/Modal';
 import BarcodeScannerModal from '../components/BarcodeScannerModal';
+import BatchSelectionModal from './BatchSelectionModal';
 import type { InventoryItem, Medicine, PhysicalInventorySession, PhysicalInventoryCountItem } from '@core/types';
 import { PhysicalInventoryStatus } from '@core/types';
 import { fuzzyMatch } from '@core/utils/search';
@@ -206,6 +207,7 @@ const CountingView: React.FC<{
 }> = ({ session, inventory, medicines, onUpdate, onFinalize, onCancel }) => {
     const [countedItems, setCountedItems] = useState<PhysicalInventoryCountItem[]>(session.items || []);
     const [reason, setReason] = useState(session.reason || '');
+    const [pendingBatchSelection, setPendingBatchSelection] = useState<{ item: InventoryItem; batches: InventoryItem[] } | null>(null);
     const [isDiscoveryModalOpen, setIsDiscoveryModalOpen] = useState(false);
     const [modalSearchTerm, setModalSearchTerm] = useState('');
     const [selectedDiscoveryIndex, setSelectedDiscoveryIndex] = useState(0);
@@ -242,7 +244,7 @@ const CountingView: React.FC<{
     const discoveryResults = useMemo(() => {
         const term = modalSearchTerm.trim();
 
-        const grouped = new Map<string, InventoryItem>();
+        const grouped = new Map<string, { item: InventoryItem; totalStock: number; batches: InventoryItem[] }>();
 
         inventory.forEach(i => {
             const invPolicy = getInventoryPolicy(i, medicines);
@@ -253,7 +255,18 @@ const CountingView: React.FC<{
                 (i.barcode && fuzzyMatch(i.barcode, term)) ||
                 (i.code && fuzzyMatch(i.code, term))
             ) {
-                grouped.set(`${i.name.toLowerCase()}|${(i.brand || '').toLowerCase()}`, i);
+                const key = `${i.name.toLowerCase()}|${(i.brand || '').toLowerCase()}`;
+                const existing = grouped.get(key);
+                if (existing) {
+                    existing.totalStock += (Number(i.stock) || 0);
+                    existing.batches.push(i);
+                } else {
+                    grouped.set(key, {
+                        item: { ...i },
+                        totalStock: Number(i.stock) || 0,
+                        batches: [i]
+                    });
+                }
             }
         });
 
@@ -269,31 +282,38 @@ const CountingView: React.FC<{
                 const key = `${m.name.toLowerCase()}|${(m.brand || '').toLowerCase()}`;
                 if (!grouped.has(key)) {
                     grouped.set(key, {
-                        id: `mm-${m.id}`,
-                        organization_id: m.organization_id || '',
-                        name: m.name,
-                        code: m.materialCode,
-                        brand: m.brand || '',
-                        category: 'Medicine',
-                        manufacturer: m.manufacturer || '',
-                        stock: 0,
-                        unitsPerPack: parseInt(m.pack?.match(/\d+/)?.[0] || '1', 10),
-                        minStockLimit: 0,
-                        batch: medPolicy.inventorised ? 'UNTRACKED' : '',
-                        expiry: medPolicy.inventorised ? 'N/A' : '',
-                        purchasePrice: 0,
-                        mrp: parseFloat(m.mrp || '0'),
-                        gstPercent: m.gstRate || 0,
-                        hsnCode: m.hsnCode || '',
-                        composition: m.composition || '',
-                        barcode: m.barcode || '',
-                        is_active: true,
+                        item: {
+                            id: `mm-${m.id}`,
+                            organization_id: m.organization_id || '',
+                            name: m.name,
+                            code: m.materialCode,
+                            brand: m.brand || '',
+                            category: 'Medicine',
+                            manufacturer: m.manufacturer || '',
+                            stock: 0,
+                            unitsPerPack: parseInt(m.pack?.match(/\d+/)?.[0] || '1', 10),
+                            minStockLimit: 0,
+                            batch: 'UNTRACKED',
+                            expiry: 'N/A',
+                            purchasePrice: 0,
+                            mrp: parseFloat(m.mrp || '0'),
+                            gstPercent: m.gstRate || 0,
+                            hsnCode: m.hsnCode || '',
+                            composition: m.composition || '',
+                            barcode: m.barcode || '',
+                            is_active: true,
+                        },
+                        totalStock: 0,
+                        batches: []
                     });
                 }
             }
         });
 
-        return Array.from(grouped.values()).sort((a, b) => a.name.localeCompare(b.name));
+        return Array.from(grouped.values()).map(g => {
+            g.item.stock = g.totalStock;
+            return g;
+        }).sort((a, b) => a.item.name.localeCompare(b.item.name));
     }, [modalSearchTerm, inventory, medicines]);
 
     useEffect(() => {
@@ -354,10 +374,16 @@ const CountingView: React.FC<{
         });
     };
 
-    const addItemFromDiscovery = (item: InventoryItem) => {
-        addItemToCount(item);
+    const addItemFromDiscovery = (result: { item: InventoryItem; batches: InventoryItem[] }) => {
         setAddProductQuery('');
         setIsDiscoveryModalOpen(false);
+        if (result.batches.length > 1) {
+            setPendingBatchSelection(result);
+        } else if (result.batches.length === 1) {
+            addItemToCount(result.batches[0]);
+        } else {
+            addItemToCount(result.item);
+        }
     };
 
     const openDiscoveryModal = (initialSearchTerm = '') => {
@@ -599,6 +625,16 @@ const CountingView: React.FC<{
                 </Card>
             </div>
             <BarcodeScannerModal isOpen={isScannerOpen} onClose={() => setIsScannerOpen(false)} onScanSuccess={handleScanSuccess} />
+            <BatchSelectionModal
+                isOpen={!!pendingBatchSelection}
+                onClose={() => setPendingBatchSelection(null)}
+                productName={pendingBatchSelection?.item.name || ''}
+                batches={pendingBatchSelection?.batches || []}
+                onSelect={(batch) => {
+                    addItemToCount(batch);
+                    setPendingBatchSelection(null);
+                }}
+            />
             <ReviewModal isOpen={isReviewOpen} onClose={() => setIsReviewOpen(false)} session={{...session, items: countedItems, reason: reason, totalVarianceValue}} onConfirm={handleFinalizeClick} />
             <Modal
                 isOpen={isDiscoveryModalOpen}
@@ -638,14 +674,15 @@ const CountingView: React.FC<{
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {discoveryResults.map((item, idx) => {
+                                    {discoveryResults.map((result, idx) => {
+                                        const item = result.item;
                                         const isSelected = idx === selectedDiscoveryIndex;
                                         return (
                                             <tr
                                                 key={item.id}
                                                 data-index={idx}
                                                 onMouseEnter={() => setSelectedDiscoveryIndex(idx)}
-                                                onClick={() => addItemFromDiscovery(item)}
+                                                onClick={() => addItemFromDiscovery(result)}
                                                 className={`cursor-pointer transition-all border-b border-gray-100 ${isSelected ? 'bg-primary text-white scale-[1.01] z-10 shadow-xl' : 'hover:bg-green-100'}`}
                                             >
                                                 <td className="p-1.5 px-3 border-r border-gray-200">

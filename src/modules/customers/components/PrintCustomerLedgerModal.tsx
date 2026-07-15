@@ -223,6 +223,7 @@ const PrintCustomerLedgerModal: React.FC<PrintCustomerLedgerModalProps> = ({ isO
               padding: ${isA5 ? '8mm 10mm' : '15mm 20mm'} !important; 
               width: 100% !important; 
               max-width: none !important; 
+              min-height: 0 !important; 
           }
           body > *:not(#print-customer-ledger-modal-container) {
               display: none !important;

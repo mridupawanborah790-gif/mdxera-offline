@@ -296,6 +296,7 @@ const PrintReturnModal: React.FC<PrintReturnModalProps> = ({
                         border: none !important; 
                         width: 100% !important; 
                         max-width: none !important; 
+                        min-height: 0 !important; 
                     }
                     body > *:not(#print-return-modal-container) {
                         display: none !important;

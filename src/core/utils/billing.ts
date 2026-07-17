@@ -1,4 +1,4 @@
-﻿import type { AppConfigurations, BillItem, LineAmountCalculationMode } from '@core/types';
+import type { AppConfigurations, BillItem, LineAmountCalculationMode } from '@core/types';
 
 export type SchemeDiscountCalculationBase = 'subtotal' | 'after_trade_discount' | 'ask_user';
 export type TaxCalculationBaseOption = 'subtotal' | 'after_trade_discount' | 'after_all_discounts';
@@ -113,7 +113,9 @@ export const calculateBillingTotals = ({ items, billDiscount = 0, adjustment = 0
   items.forEach(item => {
     const unitsPerPack = item.unitsPerPack || 1;
     const billedQty = (item.quantity || 0) + ((item.looseQuantity || 0) / unitsPerPack);
-    const itemGross = billedQty * getDisplayRateForLine(item, organizationType, effectivePricingMode, configurations);
+    const useFkPrice = configurations?.displayOptions?.customerPricingMode === 'fk' && item.fkPrice !== undefined && item.fkPrice > 0;
+    const rateForCalc = useFkPrice ? item.fkPrice! : getDisplayRateForLine(item, organizationType, effectivePricingMode, configurations);
+    const itemGross = billedQty * rateForCalc;
     const itemTradeDisc = itemGross * ((item.discountPercent || 0) / 100);
     const itemFlatDisc = Math.max(0, item.itemFlatDiscount || 0);
     const lineAfterTrade = Math.max(0, itemGross - itemTradeDisc - itemFlatDisc);

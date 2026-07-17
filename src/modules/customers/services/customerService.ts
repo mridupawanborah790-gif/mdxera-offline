@@ -59,27 +59,63 @@ export async function deleteCustomer(id: string, user: RegisteredPharmacy): Prom
   await SyncQueue.enqueue('UPDATE', TABLE.CUSTOMERS, id, { id, is_active: 0 }, user.organization_id);
 }
 
+function deserializePriceListEntry(row: Record<string, unknown>): Record<string, unknown> {
+  const r = { ...row };
+  if (r.material_id) {
+    r.inventoryItemId = r.material_id;
+    delete r.material_id;
+  }
+  if (r.special_price !== undefined) {
+    r.price = r.special_price;
+    delete r.special_price;
+  }
+  if (r.discount_percent !== undefined) {
+    r.discountPercent = r.discount_percent;
+    delete r.discount_percent;
+  }
+  return r;
+}
+
+function serializePriceListEntry(entry: Record<string, unknown>): Record<string, unknown> {
+  const r = serialize(entry);
+  if (r.inventoryItemId) {
+    r.material_id = r.inventoryItemId;
+    delete r.inventoryItemId;
+  }
+  if (r.price !== undefined) {
+    r.special_price = r.price;
+    delete r.price;
+  }
+  if (r.discountPercent !== undefined) {
+    r.discount_percent = r.discountPercent;
+    delete r.discountPercent;
+  }
+  return r;
+}
+
 export async function fetchCustomerPriceList(user: RegisteredPharmacy) {
   const rows = await db.select(
     `SELECT * FROM ${TABLE.CUSTOMER_PRICE_LIST} WHERE organization_id = ?`,
     [user.organization_id]
   );
-  if (rows.length > 0) return rows;
+  if (rows.length > 0) return rows.map(deserializePriceListEntry);
 
   const { data } = await supabase
     .from('customer_price_list')
     .select('*')
     .eq('organization_id', user.organization_id);
 
-  if (data?.length) await db.bulkUpsert(TABLE.CUSTOMER_PRICE_LIST, data.map(serialize));
-  return data ?? [];
+  if (data?.length) {
+    await db.bulkUpsert(TABLE.CUSTOMER_PRICE_LIST, data.map(serializePriceListEntry));
+  }
+  return (data ?? []).map(deserializePriceListEntry);
 }
 
 export async function saveCustomerPriceList(
   entry: Record<string, unknown>,
   user: RegisteredPharmacy
 ): Promise<void> {
-  const row = serialize(entry);
+  const row = serializePriceListEntry(entry);
   await db.upsert(TABLE.CUSTOMER_PRICE_LIST, row);
   await SyncQueue.enqueue('INSERT', TABLE.CUSTOMER_PRICE_LIST, row.id as string, row, user.organization_id);
 }

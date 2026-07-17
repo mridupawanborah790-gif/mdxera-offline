@@ -56,7 +56,7 @@ import { parseNetworkAndApiError } from '@core/utils/error';
 import { evaluateCustomerCredit, getCustomerOpenChallanExposure } from '@core/utils/creditControl';
 import {
     RegisteredPharmacy, InventoryItem, Transaction, BillItem, Purchase, PurchaseItem, Supplier, Distributor,
-    Customer, Medicine, SupplierProductMap, EWayBill, AppConfigurations,
+    Customer, Medicine, SupplierProductMap, EWayBill, AppConfigurations, CustomerPriceListEntry,
     Notification, PhysicalInventorySession, DeliveryChallan, SalesChallan,
     PurchaseOrder, DetailedBill, PhysicalInventoryStatus, SalesReturn, PurchaseReturn, DeliveryChallanStatus, SalesChallanStatus,
     PurchaseOrderStatus, PurchaseOrderReceiveMode, Category, SubCategory, Promotion, OrganizationMember, ModuleConfig, MrpChangeLogEntry, BusinessRole, DoctorMaster
@@ -313,6 +313,7 @@ const App: React.FC = () => {
     const [purchases, setPurchases] = useState<Purchase[]>([]);
     const [suppliers, setSuppliers] = useState<Supplier[]>([]);
     const [customers, setCustomers] = useState<Customer[]>([]);
+    const [customerPriceList, setCustomerPriceList] = useState<CustomerPriceListEntry[]>([]);
     const [doctors, setDoctors] = useState<DoctorMaster[]>([]);
     const [ewayBills, setEwayBills] = useState<EWayBill[]>([]);
     const [mappings, setMappings] = useState<SupplierProductMap[]>([]);
@@ -633,6 +634,7 @@ const App: React.FC = () => {
                     case 'purchases': setPurchases(await storage.fetchPurchases(user, true)); break;
                     case 'suppliers': setSuppliers(await storage.fetchSuppliers(user, true)); break;
                     case 'customers': setCustomers(await storage.fetchCustomers(user, true)); break;
+                    case 'customer_price_list': setCustomerPriceList(await storage.fetchCustomerPriceList(user, true)); break;
                     case 'doctor_master': setDoctors(await storage.fetchDoctors(user, true)); break;
                     case 'configurations':
                         const cfg = await storage.getData('configurations', [], user, true);
@@ -705,7 +707,8 @@ const App: React.FC = () => {
                 ['business roles', withTimeout('Business Roles', storage.getData('business_roles', [], user))],
                 ['configurations', withTimeout('Configurations', storage.getData('configurations', [{ organization_id: orgId }], user))],
                 ['bank masters', withTimeout('Bank Masters', storage.fetchBankMasters(user))],
-                ['mrp logs', withTimeout('MRP Logs', storage.getData('mrp_change_log', [], user))]
+                ['mrp logs', withTimeout('MRP Logs', storage.getData('mrp_change_log', [], user))],
+                ['customer price list', withTimeout('Customer Price List', storage.fetchCustomerPriceList(user))]
             ];
 
             const settled = await Promise.allSettled(loadJobs.map(([, promise]) => promise));
@@ -736,6 +739,7 @@ const App: React.FC = () => {
             const configData = readSettled<AppConfigurations[]>(21, [{ organization_id: orgId } as AppConfigurations]);
             const bankMastersData = readSettled<any[]>(22, []);
             const mrpLogs = readSettled<MrpChangeLogEntry[]>(23, []);
+            const customerPriceListData = readSettled<CustomerPriceListEntry[]>(24, []);
 
             const failedLoads = settled
                 .map((result, index) => ({ result, label: loadJobs[index][0] }))
@@ -756,6 +760,7 @@ const App: React.FC = () => {
             setPurchases(pur || []);
             setSuppliers(supp || []);
             setCustomers(cust || []);
+            setCustomerPriceList(customerPriceListData || []);
             setDoctors(doctorsData || []);
             setEwayBills(ewb || []);
             setMappings(mapData || []);
@@ -1312,6 +1317,7 @@ const App: React.FC = () => {
                 case 'sales_returns':    setSalesReturns(prev => clearStatus(prev as any) as any); break;
                 case 'suppliers':        setSuppliers(prev => clearStatus(prev as any) as any); break;
                 case 'customers':        setCustomers(prev => clearStatus(prev as any) as any); break;
+                case 'customer_price_list': setCustomerPriceList(prev => clearStatus(prev as any) as any); break;
                 case 'inventory':        setInventory(prev => clearStatus(prev as any) as any); break;
                 case 'material_master':  setMedicines(prev => clearStatus(prev as any) as any); break;
                 default: break;
@@ -2314,6 +2320,21 @@ const App: React.FC = () => {
         }
     };
 
+    const handleSavePriceListEntries = async (entries: CustomerPriceListEntry[]) => {
+        if (!currentUser) return;
+        try {
+            for (const entry of entries) {
+                await storage.saveCustomerPriceList(entry, currentUser);
+            }
+            const freshPriceList = await storage.fetchCustomerPriceList(currentUser, true);
+            setCustomerPriceList(freshPriceList || []);
+            addNotification("Price list entries saved/updated.", "success");
+        } catch (err) {
+            console.error("Failed to save price list entries:", err);
+            addNotification("Failed to save price list entries.", "error");
+        }
+    };
+
     const hasCustomerTransactionDependency = useCallback((customer: Customer): boolean => {
         const customerId = customer.id;
         const customerName = (customer.name || '').trim().toLowerCase();
@@ -2744,6 +2765,7 @@ const App: React.FC = () => {
                         ref={isActive ? posRef : undefined}
                         isActive={isActive}
                         inventory={inventory} purchases={purchases} medicines={medicines} customers={customers}
+                        customerPriceList={customerPriceList}
                         transactions={transactions}
                         doctors={doctors}
                         onSaveOrUpdateTransaction={handleSaveOrUpdateTransaction}
@@ -3227,8 +3249,10 @@ const App: React.FC = () => {
                         onBlockCustomer={(customer) => handleSetCustomerBlocked(customer, true)}
                         onUnblockCustomer={(customer) => handleSetCustomerBlocked(customer, false)}
                         onDeleteCustomer={handleDeleteCustomer}
-                        currentUser={currentUser} config={config} inventory={inventory} defaultCustomerControlGlId={defaultCustomerControlGlId}
+                        currentUser={currentUser} config={config} medicines={medicines} defaultCustomerControlGlId={defaultCustomerControlGlId}
                         permissions={getScreenPermissions(pageId, currentUser, teamMembers, businessRoles)}
+                        customerPriceList={customerPriceList}
+                        onSavePriceListEntries={handleSavePriceListEntries}
                     />;
                 case 'doctorsMaster':
                     return <DoctorsMaster

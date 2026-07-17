@@ -206,31 +206,21 @@ describe('SyncWorker.normalizeForSupabase — purchase_orders counterparty remap
 // ────────────────────────────────────────────────────────────────────────────
 
 describe('SyncWorker.normalizeForSupabase — journal_entry_lines amount columns', () => {
-  it('mirrors debit → debit_amount and credit → credit_amount', () => {
+  it('deletes id, debit_amount, and credit_amount as they are auto-generated on the server', () => {
     const out = normalizeForSupabase(
       {
         id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
         organization_id: 'org-123',
         debit: 100.5,
         credit: 0,
+        debit_amount: 100.5,
+        credit_amount: 0,
       },
       'journal_entry_lines',
     );
-    expect(out.debit_amount).toBe(100.5);
-    expect(out.credit_amount).toBe(0);
-  });
-
-  it('preserves explicit *_amount values when both are passed', () => {
-    const out = normalizeForSupabase(
-      {
-        id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-        organization_id: 'org-123',
-        debit: 100,
-        debit_amount: 200,
-      },
-      'journal_entry_lines',
-    );
-    expect(out.debit_amount).toBe(200);
+    expect(out.id).toBeUndefined();
+    expect(out.debit_amount).toBeUndefined();
+    expect(out.credit_amount).toBeUndefined();
   });
 });
 

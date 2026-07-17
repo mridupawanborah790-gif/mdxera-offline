@@ -1,6 +1,6 @@
-﻿import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Modal from '@core/components/ui/Modal';
-import { Customer, InventoryItem, CustomerPriceListEntry, RegisteredPharmacy } from '@core/types';
+import { Customer, Medicine, CustomerPriceListEntry, RegisteredPharmacy } from '@core/types';
 import { downloadCsv } from '@core/utils/csv';
 import { fuzzyMatch } from '@core/utils/search';
 
@@ -8,7 +8,7 @@ interface PriceListManagementModalProps {
     isOpen: boolean;
     onClose: () => void;
     customers: Customer[];
-    inventory: InventoryItem[];
+    medicines: Medicine[];
     priceListEntries: CustomerPriceListEntry[];
     onSaveEntries: (entries: CustomerPriceListEntry[]) => void;
     onImportClick: () => void;
@@ -16,12 +16,13 @@ interface PriceListManagementModalProps {
 }
 
 const PriceListManagementModal: React.FC<PriceListManagementModalProps> = ({ 
-    isOpen, onClose, customers, inventory, priceListEntries, onSaveEntries, onImportClick, currentUser
+    isOpen, onClose, customers, medicines, priceListEntries, onSaveEntries, onImportClick, currentUser
 }) => {
     const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
     const [searchTerm, setSearchTerm] = useState('');
     const [editedPrices, setEditedPrices] = useState<Record<string, number>>({});
     const [editedDiscounts, setEditedDiscounts] = useState<Record<string, number>>({});
+    const [downloadStatus, setDownloadStatus] = useState('');
     
     // Reset state when modal opens
     useEffect(() => {
@@ -30,6 +31,7 @@ const PriceListManagementModal: React.FC<PriceListManagementModalProps> = ({
             setSearchTerm('');
             setEditedPrices({});
             setEditedDiscounts({});
+            setDownloadStatus('');
         }
     }, [isOpen]);
 
@@ -76,80 +78,86 @@ const PriceListManagementModal: React.FC<PriceListManagementModalProps> = ({
         const itemIds = new Set([...Object.keys(editedPrices), ...Object.keys(editedDiscounts)]);
 
         const entriesToSave: CustomerPriceListEntry[] = Array.from(itemIds).map((itemId) => {
-            // Find existing entry ID if it exists to update it, else generate new
             const existingEntry = priceListEntries.find(p => p.customerId === selectedCustomerId && p.inventoryItemId === itemId);
             const price = editedPrices[itemId] || 0;
             const discountPercent = editedDiscounts[itemId] || 0;
 
-            // Add organization_id to the entry object to match CustomerPriceListEntry interface
             return {
                 id: existingEntry ? existingEntry.id : crypto.randomUUID(),
                 organization_id: currentUser?.organization_id || '',
                 customerId: selectedCustomerId,
                 inventoryItemId: itemId,
-                price: Number(price), // Cast to number
+                price: Number(price),
                 discountPercent: Number(discountPercent),
                 updatedAt: new Date().toISOString()
             };
-        }).filter(e => e.price > 0 || (e.discountPercent !== undefined && e.discountPercent > 0)); // Only save meaningful entries
+        }).filter(e => e.price > 0 || (e.discountPercent !== undefined && e.discountPercent > 0));
 
         onSaveEntries(entriesToSave);
-        alert("Price list updated successfully.");
+        alert("FK Price list updated successfully.");
     };
 
     const handleDownloadTemplate = () => {
-        const headers = ['Customer Name', 'Product Name', 'Custom Price', 'Discount %'];
+        setDownloadStatus('Downloading...');
+        const headers = ['Customer Name', 'Product Name', 'FK Price', 'Discount %'];
         const sampleRow1 = ['John Doe Pharmacy', 'Dolo 650', '28.50', '0'];
         const sampleRow2 = ['City Hospital', 'Azithromycin 500', '', '10'];
         const csvContent = [headers.join(','), sampleRow1.join(','), sampleRow2.join(',')].join('\n');
         downloadCsv(csvContent, 'price_list_template.csv');
+        setTimeout(() => setDownloadStatus('Template downloaded!'), 1000);
+        setTimeout(() => setDownloadStatus(''), 4000);
     };
 
-    const filteredInventory = useMemo(() => {
-        // First filter by stock availability (Show only stocked items)
-        let filtered = inventory.filter(i => i.stock > 0);
+    const filteredMedicines = useMemo(() => {
+        let filtered = (medicines || []).filter(m => m.is_active !== false);
 
         if (searchTerm) {
-            filtered = filtered.filter(i => 
-                fuzzyMatch(i.name, searchTerm) || 
-                fuzzyMatch(i.brand, searchTerm) ||
-                fuzzyMatch(i.batch, searchTerm)
+            filtered = filtered.filter(m => 
+                fuzzyMatch(m.name, searchTerm) || 
+                fuzzyMatch(m.brand, searchTerm) ||
+                fuzzyMatch(m.materialCode, searchTerm)
             );
         }
         
-        return filtered.slice(0, 50); // Limit to 50 for performance in modal
-    }, [inventory, searchTerm]);
+        return filtered.slice(0, 100); // Limit to 100 for performance
+    }, [medicines, searchTerm]);
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Customer Price Lists" widthClass="max-w-5xl">
+        <Modal isOpen={isOpen} onClose={onClose} title="FK Price" widthClass="max-w-5xl">
             <div className="flex flex-col h-[80vh]">
                 
                 {/* Header Controls */}
                 <div className="p-4 border-b border-app-border flex flex-col md:flex-row gap-4 justify-between bg-gray-50 dark:bg-gray-800/50">
                     <div className="flex-1 space-y-4 md:space-y-0 md:space-x-4 flex flex-col md:flex-row items-center">
                         <div className="w-full md:w-64">
-                            <label className="block text-xs font-medium text-app-text-secondary mb-1">Select Customer (Retailers Only)</label>
+                            <label className="block text-xs font-medium text-app-text-secondary mb-1">Select Customer</label>
                             <select 
                                 value={selectedCustomerId} 
                                 onChange={e => setSelectedCustomerId(e.target.value)}
                                 className="w-full p-2 border border-app-border rounded-md bg-input-bg text-sm"
                             >
-                                <option value="">-- Choose Retail Customer --</option>
+                                <option value="">-- Choose Customer --</option>
                                 {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                             </select>
-                            {customers.length === 0 && <p className="text-[10px] text-red-500 mt-1">No retail customers found.</p>}
+                            {customers.length === 0 && <p className="text-[10px] text-red-500 mt-1">No customers found.</p>}
                         </div>
                         
                         <div className="w-full md:w-64 relative">
-                            <label className="block text-xs font-medium text-app-text-secondary mb-1">Search Product / Batch</label>
+                            <label className="block text-xs font-medium text-app-text-secondary mb-1">Search Product</label>
                             <input 
                                 type="text" 
-                                placeholder="Type name (e.g. MYOTOPSR)..." 
+                                placeholder="Type name (e.g. Dolo)..." 
                                 value={searchTerm}
                                 onChange={e => setSearchTerm(e.target.value)}
                                 className="w-full p-2 border border-app-border rounded-md bg-input-bg text-sm"
                             />
                         </div>
+
+                        {downloadStatus && (
+                            <div className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-200 animate-pulse font-medium">
+                                {downloadStatus}
+                            </div>
+                        )}
                     </div>
 
                     <div className="flex items-end space-x-2">
@@ -173,7 +181,7 @@ const PriceListManagementModal: React.FC<PriceListManagementModalProps> = ({
                 <div className="flex-1 overflow-auto p-0">
                     {!selectedCustomerId ? (
                         <div className="flex h-full items-center justify-center text-app-text-tertiary">
-                            <p>Please select a customer to view or edit their price list.</p>
+                            <p>Please select a customer to view or edit their FK Price list.</p>
                         </div>
                     ) : (
                         <table className="min-w-full text-sm divide-y divide-app-border">
@@ -181,16 +189,14 @@ const PriceListManagementModal: React.FC<PriceListManagementModalProps> = ({
                                 <tr>
                                     <th className="px-4 py-3 text-left font-medium text-app-text-secondary">Product Name</th>
                                     <th className="px-4 py-3 text-left font-medium text-app-text-secondary">Brand</th>
-                                    <th className="px-4 py-3 text-left font-medium text-app-text-secondary">Batch</th>
-                                    <th className="px-4 py-3 text-right font-medium text-app-text-secondary">Stock</th>
-                                    <th className="px-4 py-3 text-right font-medium text-app-text-secondary">Std Rate</th>
+                                    <th className="px-4 py-3 text-left font-medium text-app-text-secondary">Manufacturer</th>
                                     <th className="px-4 py-3 text-right font-medium text-app-text-secondary">MRP</th>
-                                    <th className="px-4 py-3 text-right font-medium text-app-text-primary w-32">Custom Price</th>
+                                    <th className="px-4 py-3 text-right font-medium text-app-text-primary w-32">FK Price</th>
                                     <th className="px-4 py-3 text-right font-medium text-app-text-primary w-32">Discount %</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-app-border bg-card-bg">
-                                {filteredInventory.map(item => {
+                                {filteredMedicines.map(item => {
                                     const customPrice = editedPrices[item.id];
                                     const hasCustomPrice = customPrice !== undefined && customPrice !== null && customPrice > 0;
                                     const discount = editedDiscounts[item.id];
@@ -199,16 +205,14 @@ const PriceListManagementModal: React.FC<PriceListManagementModalProps> = ({
                                     return (
                                         <tr key={item.id} className={hasCustomPrice || hasDiscount ? "bg-blue-50/50 dark:bg-blue-900/10" : ""}>
                                             <td className="px-4 py-2 font-medium">{item.name}</td>
-                                            <td className="px-4 py-2 text-app-text-secondary">{item.brand}</td>
-                                            <td className="px-4 py-2 text-app-text-secondary font-mono text-xs">{item.batch}</td>
-                                            <td className="px-4 py-2 text-right text-app-text-secondary">{item.stock}</td>
-                                            <td className="px-4 py-2 text-right text-app-text-secondary">₹{item.purchasePrice}</td>
-                                            <td className="px-4 py-2 text-right text-app-text-secondary">₹{item.mrp}</td>
+                                            <td className="px-4 py-2 text-app-text-secondary">{item.brand || 'N/A'}</td>
+                                            <td className="px-4 py-2 text-app-text-secondary">{item.manufacturer || 'N/A'}</td>
+                                            <td className="px-4 py-2 text-right text-app-text-secondary">{item.mrp ? `₹${item.mrp}` : 'N/A'}</td>
                                             <td className="px-4 py-2 text-right">
                                                 <input 
                                                     type="number"
                                                     value={customPrice || ''}
-                                                    placeholder={item.purchasePrice.toString()}
+                                                    placeholder={item.mrp ? String(item.mrp) : '0'}
                                                     onChange={(e) => handlePriceChange(item.id, e.target.value)}
                                                     className={`w-full p-1.5 text-right border rounded bg-input-bg focus:ring-primary focus:border-primary ${hasCustomPrice ? 'border-blue-300 font-bold text-blue-700' : 'border-app-border'}`}
                                                 />
@@ -225,8 +229,8 @@ const PriceListManagementModal: React.FC<PriceListManagementModalProps> = ({
                                         </tr>
                                     );
                                 })}
-                                {filteredInventory.length === 0 && (
-                                    <tr><td colSpan={8} className="text-center py-8 text-app-text-secondary">No stocked products found matching your search.</td></tr>
+                                {filteredMedicines.length === 0 && (
+                                    <tr><td colSpan={6} className="text-center py-8 text-app-text-secondary">No products found matching your search.</td></tr>
                                 )}
                             </tbody>
                         </table>
@@ -236,7 +240,7 @@ const PriceListManagementModal: React.FC<PriceListManagementModalProps> = ({
                 {/* Footer */}
                 <div className="p-4 border-t border-app-border flex justify-between items-center bg-gray-50 dark:bg-gray-800/50">
                     <span className="text-xs text-app-text-tertiary">
-                        Showing top 50 matches (Stock {'>'} 0). Refine search if needed.
+                        Showing top 100 matches. Refine search if needed.
                     </span>
                     <div className="flex space-x-3">
                         <button onClick={onClose} className="px-4 py-2 text-sm font-semibold bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 text-gray-700">

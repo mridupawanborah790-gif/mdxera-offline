@@ -17,7 +17,7 @@ import { isDateInActiveFiscalYear, resolveFiscalYearConfig } from '@core/utils/f
 import { extractPrescription } from '@core/services/geminiService';
 import * as storage from '@core/services/storageService';
 import { supabase } from '@core/db/supabaseClient';
-import { InventoryItem, Customer, Transaction, BillItem, AppConfigurations, RegisteredPharmacy, Medicine, Purchase, FileInput, MasterPriceMaintainRecord, SalesChallan, DoctorMaster, OrganizationMember } from '@core/types';
+import { InventoryItem, Customer, Transaction, BillItem, AppConfigurations, RegisteredPharmacy, Medicine, Purchase, FileInput, MasterPriceMaintainRecord, SalesChallan, DoctorMaster, OrganizationMember, CustomerPriceListEntry } from '@core/types';
 import { handleEnterToNextField } from '@core/utils/navigation';
 import { fuzzyMatch } from '@core/utils/search';
 import { calculateCustomerReceivableBreakdown, formatExpiryToMMYY, getOutstandingBalance, parseNumber, checkIsExpired, formatVoucherNo } from '@core/utils/helpers';
@@ -33,6 +33,7 @@ interface POSProps {
     purchases: Purchase[];
     medicines: Medicine[];
     customers: Customer[];
+    customerPriceList?: CustomerPriceListEntry[];
     transactions?: Transaction[];
     doctors?: DoctorMaster[];
     onSaveOrUpdateTransaction: (transaction: Transaction, isUpdate: boolean, nextCounter?: number) => Promise<void>;
@@ -158,6 +159,43 @@ const resolveSalesRate = (
     const tierRate = resolveCustomerTierRate(item, customerTier);
     if (tierRate !== null) return tierRate;
     return calculateRateExcludingGst(item.mrp, item.gstPercent);
+};
+
+const resolveCustomerPricingForLine = (
+    item: BillItem,
+    customer: Customer | null,
+    customerPriceList: CustomerPriceListEntry[],
+    configurations?: AppConfigurations
+): { rate: number; discountPercent: number; fkPrice?: number } => {
+    let resolvedRate = item.rate || 0;
+    let resolvedDiscount = item.discountPercent || 0;
+    let resolvedFkPrice: number | undefined = undefined;
+
+    const mode = configurations?.displayOptions?.customerPricingMode || 'disabled';
+    if (mode === 'disabled' || !customer || !Array.isArray(customerPriceList)) {
+        return { rate: resolvedRate, discountPercent: resolvedDiscount };
+    }
+
+    const entry = customerPriceList.find(
+        e => e.customerId === customer.id && e.inventoryItemId === item.inventoryItemId
+    );
+
+    if (entry) {
+        if (mode === 'standard') {
+            if (entry.price !== undefined && entry.price > 0) {
+                resolvedRate = entry.price;
+            }
+            if (entry.discountPercent !== undefined && entry.discountPercent > 0) {
+                resolvedDiscount = entry.discountPercent;
+            }
+        } else if (mode === 'fk') {
+            if (entry.price !== undefined && entry.price > 0) {
+                resolvedFkPrice = entry.price;
+            }
+        }
+    }
+
+    return { rate: resolvedRate, discountPercent: resolvedDiscount, fkPrice: resolvedFkPrice };
 };
 
 const medicinesMapCache = new WeakMap<Medicine[], {
@@ -377,6 +415,7 @@ const POS = forwardRef<any, POSProps>(({
     purchases,
     medicines,
     customers,
+    customerPriceList = [],
     transactions = [],
     doctors = [],
     onSaveOrUpdateTransaction,
@@ -1903,6 +1942,33 @@ const POS = forwardRef<any, POSProps>(({
         setCustomerAddress((c as any).address || '');
         setIsCustomerSearchModalOpen(false);
 
+        // Recalculate cart rates based on new customer pricing
+        setCartItems(prev => prev.map(item => {
+            if (!item.inventoryItemId) return item;
+            const batch = inventory.find(i => i.id === item.inventoryItemId);
+            if (!batch) return item;
+            const linkedMedicine = resolveMedicineForInventoryItem(medicines, batch, batch.name, batch.brand, batch.id);
+            const activePriceRecord = resolveActivePriceRecord(batch, medicines, invoiceDate);
+            const pricingSource = activePriceRecord ? {
+                mrp: Number(activePriceRecord.mrp || batch.mrp || 0),
+                gstPercent: batch.gstPercent,
+                rateA: Number(activePriceRecord.rateA || batch.rateA || 0),
+                rateB: Number(activePriceRecord.rateB || batch.rateB || 0),
+                rateC: Number(activePriceRecord.rateC || batch.rateC || 0),
+            } : batch;
+            const stdRate = resolveSalesRate(pricingSource, c.defaultRateTier);
+            const discountVal = Number(activePriceRecord?.defaultDiscountPercent ?? linkedMedicine?.productDiscount ?? c.defaultDiscount ?? 0);
+            
+            const tempItem = { ...item, rate: stdRate, discountPercent: discountVal };
+            const pricingOverride = resolveCustomerPricingForLine(tempItem, c, customerPriceList || [], configurations);
+            return {
+                ...item,
+                rate: pricingOverride.rate,
+                discountPercent: pricingOverride.discountPercent,
+                fkPrice: pricingOverride.fkPrice
+            };
+        }));
+
         // Move to next field (Address, Phone, or Product Search)
         setTimeout(() => {
             if (addressInputRef.current && !addressInputRef.current.disabled) {
@@ -2039,6 +2105,16 @@ const POS = forwardRef<any, POSProps>(({
             unitsPerPack: resolveUnitsPerStrip(batch.unitsPerPack, batch.packType),
             packType: batch.packType
         };
+
+        const pricingOverride = resolveCustomerPricingForLine(
+            selectedItem,
+            selectedCustomer,
+            customerPriceList || [],
+            configurations
+        );
+        selectedItem.rate = pricingOverride.rate;
+        selectedItem.discountPercent = pricingOverride.discountPercent;
+        selectedItem.fkPrice = pricingOverride.fkPrice;
 
         const newItem = normalizePackConversion(selectedItem);
         const isPrescriptionItem = !!linkedMedicine?.isPrescriptionRequired;

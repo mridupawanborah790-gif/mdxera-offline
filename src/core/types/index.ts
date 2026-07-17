@@ -203,6 +203,7 @@ export interface AppConfigurations {
         purchaseLineAmountCalculationMode?: LineAmountCalculationMode;
         posLineAmountCalculationMode?: LineAmountCalculationMode;
         pricingMode?: 'mrp' | 'rate';
+        customerPricingMode?: 'disabled' | 'standard' | 'fk';
         pharmacy_logo_url?: string;
         dashboard_logo_url?: string;
         whatsappEnabled?: boolean;
@@ -359,6 +360,7 @@ export interface BillItem {
     appliedDiscountValue?: number;
     appliedDiscountType?: 'flat' | 'percentage';
     purchasePrice?: number;
+    fkPrice?: number;
 }
 
 export interface Transaction {

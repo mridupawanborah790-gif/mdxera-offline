@@ -429,6 +429,21 @@ export function normalizeForSupabase(row: Record<string, unknown>, tableName: st
     }
   }
 
+  // Mapping for customer specific pricing in customer_price_list
+  if (tableName === 'customer_price_list') {
+    const invId = out.inventory_item_id ?? out.inventoryItemId;
+    if (invId) {
+      out.material_id = invId;
+      delete out.inventory_item_id;
+      delete out.inventoryItemId;
+    }
+    const priceVal = out.price;
+    if (priceVal !== undefined) {
+      out.special_price = priceVal;
+      delete out.price;
+    }
+  }
+
   // purchase_orders: the app's data model calls the counterparty
   // "supplier" / "supplier_id" (matching the local SQLite migration 001
   // schema). Supabase's purchase_orders schema (purchase_orders_schema.sql)

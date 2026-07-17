@@ -8,7 +8,7 @@ import PriceListImportModal from '../components/PriceListImportModal';
 import AddCustomerModal from '@modules/customers/components/AddCustomerModal'; 
 import { EditCustomerModal } from '../components/EditCustomerModal'; 
 import ExportCustomersModal from '../components/ExportCustomersModal';
-import type { Customer, RegisteredPharmacy, ModuleConfig, InventoryItem, CustomerPriceListEntry, OrganizationMember, PermissionSet } from '@core/types';
+import type { Customer, RegisteredPharmacy, ModuleConfig, InventoryItem, CustomerPriceListEntry, OrganizationMember, PermissionSet, Medicine } from '@core/types';
 import { downloadCsv, arrayToCsvRow } from '@core/utils/csv';
 import { handleEnterToNextField } from '@core/utils/navigation';
 import { fetchCustomerPriceList, saveCustomerPriceList, fetchInventory, getData } from '@core/services/storageService';
@@ -41,12 +41,14 @@ interface CustomersProps {
     onDeleteCustomer: (customer: Customer) => Promise<{ success: boolean; message: string }>;
     currentUser: RegisteredPharmacy | null;
     config: ModuleConfig;
-    inventory: InventoryItem[];
+    medicines: Medicine[];
     defaultCustomerControlGlId?: string;
     permissions?: PermissionSet;
+    customerPriceList?: CustomerPriceListEntry[];
+    onSavePriceListEntries?: (entries: CustomerPriceListEntry[]) => Promise<void>;
 }
 
-const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], onAddCustomer, onBulkAddCustomers, onRecordPayment, onUpdateCustomer, onBlockCustomer, onUnblockCustomer, onDeleteCustomer, currentUser, config, inventory, defaultCustomerControlGlId, permissions }) => {
+const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], onAddCustomer, onBulkAddCustomers, onRecordPayment, onUpdateCustomer, onBlockCustomer, onUnblockCustomer, onDeleteCustomer, currentUser, config, medicines, defaultCustomerControlGlId, permissions, customerPriceList = [], onSavePriceListEntries = async () => {} }) => {
     const defaultPermissions: PermissionSet = {
         view: true,
         entry: true,
@@ -66,6 +68,7 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'blocked'>('all');
     const [isPriceListModalOpen, setIsPriceListModalOpen] = useState(false);
+    const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
     const [currentPage, setCurrentPage] = useState(1);
     const pageSize = 10;
@@ -157,6 +160,7 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
                                 <option value="active">Active</option>
                                 <option value="blocked">Blocked</option>
                             </select>
+                            <button onClick={() => setIsPriceListModalOpen(true)} className="px-3 py-1 border border-primary text-primary hover:bg-primary hover:text-white rounded font-black text-[10px] uppercase tracking-wider shadow-sm transition-all duration-200">FK Price</button>
                         </div>
                     </div>
                     <div className="flex-1 overflow-y-auto divide-y divide-gray-200">
@@ -209,7 +213,6 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
                                     </div>
                                 </div>
                                 <div className="flex gap-2 ml-4 flex-shrink-0">
-                                    <button onClick={() => setIsPriceListModalOpen(true)} className="px-4 py-2 tally-border bg-white font-black text-[10px] uppercase shadow-sm">Price List</button>
                                     <button onClick={() => setIsEditModalOpen(true)} className="px-4 py-2 tally-border bg-white font-black text-[10px] uppercase shadow-sm">{perms.edit ? 'Alter' : 'View'}</button>
                                     {perms.edit && (
                                         <>
@@ -336,17 +339,20 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
                     <PriceListManagementModal 
                         isOpen={isPriceListModalOpen}
                         onClose={() => setIsPriceListModalOpen(false)}
-                        customers={customers.filter(c => c.customerType === 'retail')}
-                        inventory={inventory}
-                        priceListEntries={[]} 
-                        onSaveEntries={async (entries) => {
-                            for (const entry of entries) {
-                                await saveCustomerPriceList(entry, currentUser!);
-                            }
-                            alert("Price list entries saved/updated.");
-                        }}
-                        onImportClick={() => {}}
+                        customers={customers}
+                        medicines={medicines}
+                        priceListEntries={customerPriceList} 
+                        onSaveEntries={onSavePriceListEntries}
+                        onImportClick={() => setIsImportModalOpen(true)}
                         currentUser={currentUser}
+                    />
+                    <PriceListImportModal 
+                        isOpen={isImportModalOpen}
+                        onClose={() => setIsImportModalOpen(false)}
+                        customers={customers}
+                        medicines={medicines}
+                        onSaveEntries={onSavePriceListEntries}
+                        organizationId={currentUser?.organization_id || ''}
                     />
                 </>
             )}

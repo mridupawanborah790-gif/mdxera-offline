@@ -22,7 +22,11 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['src/core/sync/__tests__/**/*.test.ts', 'services/__tests__/**/*.test.ts'],
+    include: [
+      'src/core/sync/__tests__/**/*.test.ts',
+      'services/__tests__/**/*.test.ts',
+      'src/core/utils/__tests__/**/*.test.ts'
+    ],
     globals: false,
   },
 });

@@ -695,15 +695,16 @@ const normalizeMaterialMasterType = (value: unknown): string | undefined => {
             }
         }
 
-        // Mapping for linked Purchase Order in purchases table
-        if (tableName === 'purchases') {
-            if (payload.sourcePurchaseOrderId) {
-                // sourcePurchaseOrderId is the app's field, reference_doc_number is the DB's field
-                sanitized.reference_doc_number = payload.sourcePurchaseOrderId;
-                delete sanitized.sourcePurchaseOrderId;
+        // Mapping for customer specific pricing in customer_price_list
+        if (tableName === 'customer_price_list') {
+            if (payload.inventoryItemId) {
+                sanitized.material_id = payload.inventoryItemId;
+                delete sanitized.inventoryItemId;
             }
-            // Strip frontend-only field used for tracking the receive flow mode
-            delete sanitized.sourceReceiveMode;
+            if (payload.price !== undefined) {
+                sanitized.special_price = payload.price;
+                delete sanitized.price;
+            }
         }
 
         // 3. Apply Ownership Tracking Mappings
@@ -916,6 +917,18 @@ const normalizeMaterialMasterType = (value: unknown): string | undefined => {
         if (!payload) return payload;
         let normalized = toCamel(payload);
 
+        // Map database fields to application-friendly model properties
+        if (tableName === 'customer_price_list') {
+            if (normalized.materialId) {
+                normalized.inventoryItemId = normalized.materialId;
+                delete normalized.materialId;
+            }
+            if (normalized.specialPrice !== undefined) {
+                normalized.price = normalized.specialPrice;
+                delete normalized.specialPrice;
+            }
+        }
+
         // Map linked Purchase Order back to sourcePurchaseOrderId for app logic
         if (tableName === 'purchases' && payload.reference_doc_number) {
             normalized.sourcePurchaseOrderId = payload.reference_doc_number;
@@ -1064,6 +1077,16 @@ const normalizeMaterialMasterType = (value: unknown): string | undefined => {
             // is already schema-aware and keeps only columns SQLite actually
             // has, so the local persister can take the raw payload.
             const snake = toSnake(payload);
+            if (tableName === 'customer_price_list') {
+                if (snake.inventory_item_id) {
+                    snake.material_id = snake.inventory_item_id;
+                    delete snake.inventory_item_id;
+                }
+                if (snake.price !== undefined) {
+                    snake.special_price = snake.price;
+                    delete snake.price;
+                }
+            }
             const adapted = await adaptRowForSqlite(tableName, snake, { syncStatus });
             if (!adapted) return; // local table doesn't exist yet
             await sqliteDb.upsert(tableName, adapted);

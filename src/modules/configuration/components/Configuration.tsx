@@ -1160,6 +1160,18 @@ const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
                                                 </select>
                                             </div>
                                             <div className="flex flex-col gap-1.5">
+                                                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Customer Pricing Behavior</label>
+                                                <select 
+                                                    value={localConfigs.displayOptions?.customerPricingMode || 'disabled'}
+                                                    onChange={e => handleConfigChange('displayOptions', 'customerPricingMode', e.target.value)}
+                                                    className="w-full tally-input !text-sm"
+                                                >
+                                                    <option value="disabled">Disabled (Use Inventory Tiers)</option>
+                                                    <option value="standard">Standard (Override Rate and Amount)</option>
+                                                    <option value="fk">FK Price (Override Summary Total only)</option>
+                                                </select>
+                                            </div>
+                                            <div className="flex flex-col gap-1.5">
                                                 <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Default Print Copies</label>
                                                 <input 
                                                     type="number" 

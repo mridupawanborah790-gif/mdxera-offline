@@ -1,18 +1,18 @@
-﻿import React, { useState, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import Modal from '@core/components/ui/Modal';
-import { Customer, InventoryItem, CustomerPriceListEntry } from '@core/types';
+import { Customer, Medicine, CustomerPriceListEntry } from '@core/types';
 import { parseCsvLine } from '@core/utils/csv';
 
 interface PriceListImportModalProps {
     isOpen: boolean;
     onClose: () => void;
     customers: Customer[];
-    inventory: InventoryItem[];
+    medicines: Medicine[];
     onSaveEntries: (entries: CustomerPriceListEntry[]) => void;
     organizationId: string;
 }
 
-const PriceListImportModal: React.FC<PriceListImportModalProps> = ({ isOpen, onClose, customers, inventory, onSaveEntries, organizationId }) => {
+const PriceListImportModal: React.FC<PriceListImportModalProps> = ({ isOpen, onClose, customers, medicines, onSaveEntries, organizationId }) => {
     const [previewData, setPreviewData] = useState<any[]>([]);
     const [isProcessing, setIsProcessing] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -35,11 +35,11 @@ const PriceListImportModal: React.FC<PriceListImportModalProps> = ({ isOpen, onC
             const header = parseCsvLine(lines[0]).map(h => h.toLowerCase().trim());
             const custIdx = header.findIndex(h => h.includes('customer'));
             const prodIdx = header.findIndex(h => h.includes('product') || h.includes('item'));
-            const priceIdx = header.findIndex(h => h.includes('price') || h.includes('rate'));
+            const priceIdx = header.findIndex(h => h.includes('price') || h.includes('rate') || h.includes('fk'));
             const discIdx = header.findIndex(h => h.includes('discount') || h.includes('disc'));
 
             if (custIdx === -1 || prodIdx === -1) {
-                alert("CSV must contain columns: 'Customer Name', 'Product Name'. Optional: 'Price', 'Discount %'.");
+                alert("CSV must contain columns: 'Customer Name', 'Product Name'. Optional: 'FK Price', 'Discount %'.");
                 setIsProcessing(false);
                 return;
             }
@@ -50,8 +50,8 @@ const PriceListImportModal: React.FC<PriceListImportModalProps> = ({ isOpen, onC
             const customerMap = new Map<string, Customer>();
             customers.forEach(c => customerMap.set(c.name.toLowerCase(), c));
 
-            const productMap = new Map<string, InventoryItem>();
-            inventory.forEach(i => productMap.set(i.name.toLowerCase(), i));
+            const productMap = new Map<string, Medicine>();
+            medicines.forEach(m => productMap.set(m.name.toLowerCase(), m));
 
             for (let i = 1; i < lines.length; i++) {
                 const row = parseCsvLine(lines[i]);
@@ -109,16 +109,16 @@ const PriceListImportModal: React.FC<PriceListImportModalProps> = ({ isOpen, onC
         }));
 
         onSaveEntries(entries);
-        alert(`Successfully imported ${entries.length} price entries.`);
+        alert(`Successfully imported ${entries.length} FK Price entries.`);
         onClose();
         setPreviewData([]);
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Import Customer Price List" widthClass="max-w-5xl">
+        <Modal isOpen={isOpen} onClose={onClose} title="Import FK Price" widthClass="max-w-5xl">
             <div className="p-6 flex flex-col h-[70vh]">
                 <div className="mb-4">
-                    <p className="text-sm text-gray-600 mb-2">Upload a CSV file with columns: <strong>Customer Name</strong>, <strong>Product Name</strong>, <strong>Price</strong>, <strong>Discount %</strong>.</p>
+                    <p className="text-sm text-gray-600 mb-2">Upload a CSV file with columns: <strong>Customer Name</strong>, <strong>Product Name</strong>, <strong>FK Price</strong>, <strong>Discount %</strong>.</p>
                     <input 
                         type="file" 
                         ref={fileInputRef}
@@ -134,7 +134,7 @@ const PriceListImportModal: React.FC<PriceListImportModalProps> = ({ isOpen, onC
                             <tr>
                                 <th className="px-4 py-2 text-left">Customer</th>
                                 <th className="px-4 py-2 text-left">Product</th>
-                                <th className="px-4 py-2 text-right">Price</th>
+                                <th className="px-4 py-2 text-right">FK Price</th>
                                 <th className="px-4 py-2 text-right">Discount %</th>
                                 <th className="px-4 py-2 text-center">Status</th>
                             </tr>
@@ -145,9 +145,9 @@ const PriceListImportModal: React.FC<PriceListImportModalProps> = ({ isOpen, onC
                                     <td className="px-4 py-2">{row.custName}</td>
                                     <td className="px-4 py-2">
                                         {row.prodName}
-                                        {row.productObj && <div className="text-xs text-gray-500">Std Rate: {row.productObj.purchasePrice} | MRP: {row.productObj.mrp}</div>}
+                                        {row.productObj && <div className="text-xs text-gray-500">MRP: {row.productObj.mrp || 'N/A'}</div>}
                                     </td>
-                                    <td className="px-4 py-2 text-right">{row.price > 0 ? row.price : '-'}</td>
+                                    <td className="px-4 py-2 text-right">{row.price > 0 ? `₹${row.price}` : '-'}</td>
                                     <td className="px-4 py-2 text-right">{row.discount > 0 ? `${row.discount}%` : '-'}</td>
                                     <td className="px-4 py-2 text-center">
                                         {row.status === 'valid' ? (

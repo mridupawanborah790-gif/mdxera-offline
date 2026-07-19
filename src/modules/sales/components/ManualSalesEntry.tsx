@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Card from '@core/components/ui/Card';
-import { Customer, InventoryItem, RegisteredPharmacy, Transaction, AppConfigurations } from '@core/types';
+import { Customer, InventoryItem, RegisteredPharmacy, Transaction, AppConfigurations, CustomerPriceMasterEntry } from '@core/types';
 import * as storage from '@core/services/storageService';
 import { fuzzyMatch } from '@core/utils/search';
 import { handleEnterToNextField } from '@core/utils/navigation';
 import { fetchGlMasterForBooks, fetchGlAssignmentsForBooks, fetchSetOfBooksById } from '@modules/accounting/services/accountingService';
 import { fetchTransactions } from '@modules/sales/services/salesService';
+import { fetchPriceMaster } from '@modules/customers/services/customerService';
 
 interface ManualSalesEntryProps {
   currentUser: RegisteredPharmacy | null;
@@ -22,7 +23,7 @@ type ManualLine = {
   id: string;
   description: string;
   qty: number;
-  rate: number;
+  rate: number;           // = displayRate (what shows on line item)
   amount: number;
   discount: number;
   taxPercent: number;
@@ -31,6 +32,11 @@ type ManualLine = {
   itemCode?: string;
   inventoryItemId?: string;
   mrp?: number;
+  // Price Master fields
+  displayRate: number;             // actual rate shown on line item and used for system total
+  fkPrice?: number;                // FK Price — stored for print-time use ONLY
+  customerActualPrice?: number;    // from Price Master (audit)
+  pricingModeUsed?: 'fk_price' | 'customer_price_master' | 'inventory'; // audit
 };
 
 const round2 = (n: number) => Number((n || 0).toFixed(2));
@@ -45,6 +51,7 @@ const newLine = (): ManualLine => ({
   taxPercent: 0,
   taxAmount: 0,
   lineTotal: 0,
+  displayRate: 0,
 });
 
 const recalcLine = (line: ManualLine): ManualLine => {
@@ -65,6 +72,7 @@ const ManualSalesEntry = React.forwardRef<any, ManualSalesEntryProps>(({ current
   const [lines, setLines] = useState<ManualLine[]>([newLine()]);
   const [hoveredLineId, setHoveredLineId] = useState<string | null>(null);
   const [activeLineId, setActiveLineId] = useState<string | null>(null);
+  const [priceMasterEntries, setPriceMasterEntries] = useState<CustomerPriceMasterEntry[]>([]);
   const [salesGlId, setSalesGlId] = useState('');
   const [discountGlId, setDiscountGlId] = useState('');
   const [taxGlId, setTaxGlId] = useState('');
@@ -118,6 +126,14 @@ const ManualSalesEntry = React.forwardRef<any, ManualSalesEntryProps>(({ current
   useEffect(() => {
     fetchHistory();
   }, [currentUser, customerId]);
+
+  // Load Price Master data once on mount
+  useEffect(() => {
+    if (!currentUser) return;
+    fetchPriceMaster(currentUser)
+      .then(setPriceMasterEntries)
+      .catch(() => { /* non-fatal: fall back to inventory pricing */ });
+  }, [currentUser]);
 
   const activeLine = useMemo(() => {
     if (hoveredLineId) return lines.find(l => l.id === hoveredLineId);
@@ -224,16 +240,82 @@ const ManualSalesEntry = React.forwardRef<any, ManualSalesEntryProps>(({ current
     return Number(item.mrp || 0);
   };
 
+  /**
+   * Resolve which price to use for a given item+customer based on
+   * the configured pricingPriority. FK Price is stored for print-time
+   * use only — it NEVER changes the system total or displayed rate.
+   */
+  const resolvePricing = (item: InventoryItem, cId: string) => {
+    const inventoryRate = getRateByTier(item);
+
+    // Look up active Price Master entry for this customer+item
+    const priceEntry = cId
+      ? priceMasterEntries.find(
+          p => p.customer_id === cId &&
+               p.material_id === item.id &&
+               p.status === 'active'
+        )
+      : null;
+
+    const customerActualPrice = priceEntry?.special_price != null
+      ? Number(priceEntry.special_price)
+      : undefined;
+    const fkPrice = priceEntry?.fk_price != null
+      ? Number(priceEntry.fk_price)
+      : undefined;
+
+    const priorities = [
+      configurations.pricingPriority?.priority1 ?? 'customer_price_master',
+      configurations.pricingPriority?.priority2 ?? 'fk_price',
+      configurations.pricingPriority?.priority3 ?? 'inventory',
+    ];
+
+    let displayRate = inventoryRate;
+    let resolvedFkPrice: number | undefined;
+    let pricingModeUsed: 'fk_price' | 'customer_price_master' | 'inventory' = 'inventory';
+
+    for (const priority of priorities) {
+      if (priority === 'fk_price' && fkPrice !== undefined) {
+        // FK Price wins for print total only; line item still uses actual/customer rate
+        displayRate = customerActualPrice ?? inventoryRate;
+        resolvedFkPrice = fkPrice;
+        pricingModeUsed = 'fk_price';
+        break;
+      }
+      if (priority === 'customer_price_master' && customerActualPrice !== undefined) {
+        displayRate = customerActualPrice;
+        resolvedFkPrice = undefined; // no FK price involved
+        pricingModeUsed = 'customer_price_master';
+        break;
+      }
+      if (priority === 'inventory') {
+        displayRate = inventoryRate;
+        resolvedFkPrice = undefined;
+        pricingModeUsed = 'inventory';
+        break;
+      }
+    }
+
+    return { displayRate, fkPrice: resolvedFkPrice, customerActualPrice, pricingModeUsed };
+  };
+
   const addItemLine = (item: InventoryItem) => {
     const targetLine = lines.find((line) => !line.description.trim());
+    const { displayRate, fkPrice, customerActualPrice, pricingModeUsed } =
+      resolvePricing(item, customerId);
+
     const basePatch: Partial<ManualLine> = {
       description: item.name,
       itemCode: item.code,
       inventoryItemId: item.id,
       qty: 1,
-      rate: getRateByTier(item),
+      rate: displayRate,
       taxPercent: Number(item.gstPercent || 0),
       mrp: Number(item.mrp || 0),
+      displayRate,
+      fkPrice,
+      customerActualPrice,
+      pricingModeUsed,
     };
 
     if (targetLine) {
@@ -353,6 +435,10 @@ const ManualSalesEntry = React.forwardRef<any, ManualSalesEntryProps>(({ current
         rate: line.rate,
         taxableValue: round2(line.amount - line.discount),
         gstAmount: line.taxAmount,
+        // Price Master audit fields (fk_price stored for print-time use only)
+        fk_price_applied: line.fkPrice ?? null,
+        customer_actual_price: line.customerActualPrice ?? null,
+        pricing_mode_used: line.pricingModeUsed ?? 'inventory',
       } as any)),
       total: metrics.grandTotal,
       itemCount: lines.length,

@@ -1,8 +1,8 @@
-﻿import React, { useMemo } from 'react';
+import React, { useMemo } from 'react';
 import type { DetailedBill, InventoryItem, AppConfigurations } from '@core/types';
 import { numberToWords } from "@core/utils/numberToWords";
 import { formatPackLooseQuantity } from "@core/utils/quantity";
-import { isRateFieldAvailable, resolveEffectivePricingMode, resolvePosLineAmountCalculationMode } from "@core/utils/billing";
+import { isRateFieldAvailable, resolveEffectivePricingMode, resolvePosLineAmountCalculationMode, getPrintGrandTotal } from "@core/utils/billing";
 import BankDetailsInline from './BankDetailsInline';
 
 interface TemplateProps {
@@ -103,8 +103,9 @@ const AbhigyanTemplate: React.FC<TemplateProps> = ({ bill }) => {
     const roundOff = bill.roundOff || 0;
     const adjustment = bill.adjustment || 0;
     const grandTotal = bill.total || 0;
+    const printGrandTotal = getPrintGrandTotal(bill);
 
-    return { items, itemChunks, subTotalTaxable: bill.subtotal || 0, gstSummary, subTotal, totalTax, billDiscount, adjustment, roundOff, grandTotal };
+    return { items, itemChunks, subTotalTaxable: bill.subtotal || 0, gstSummary, subTotal, totalTax, billDiscount, adjustment, roundOff, grandTotal, printGrandTotal };
   }, [bill, isNonGst, isIncludingDiscountMode]);
 
   const totalQty = (bill.items || []).reduce((acc, i) => acc + i.quantity, 0);
@@ -252,7 +253,7 @@ const AbhigyanTemplate: React.FC<TemplateProps> = ({ bill }) => {
                   <td colSpan={4} className="p-1 text-right font-bold uppercase text-[8pt]">Total</td>
                   <td className="p-1 text-center font-bold text-[8.5pt]">{totalQty.toFixed(2)}</td>
                   <td colSpan={2}></td>
-                  <td className="p-1 text-right font-bold text-[9.5pt]">₹ {calculations.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                  <td className="p-1 text-right font-bold text-[9.5pt]">₹ {calculations.printGrandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
               </tr>
           </tfoot>
       </table>
@@ -266,7 +267,7 @@ const AbhigyanTemplate: React.FC<TemplateProps> = ({ bill }) => {
             className="text-[7pt] text-gray-700 leading-none mb-0.5"
           />
           <p className="text-[7pt] text-gray-500 font-bold uppercase leading-none">Amount Chargeable (in words)</p>
-          <p className="font-bold uppercase text-[8pt] italic">{numberToWords(calculations.grandTotal)}</p>
+          <p className="font-bold uppercase text-[8pt] italic">{numberToWords(calculations.printGrandTotal)}</p>
       </div>
 
       {/* Tax Analysis Table */}

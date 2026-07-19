@@ -1,4 +1,4 @@
-﻿import React, { useMemo, useRef, useState, useLayoutEffect, useCallback } from 'react';
+import React, { useMemo, useRef, useState, useLayoutEffect, useCallback } from 'react';
 import type { DetailedBill, InventoryItem, AppConfigurations } from '@core/types';
 import { numberToWords } from "@core/utils/numberToWords";
 import {
@@ -7,7 +7,9 @@ import {
   isRateFieldAvailable,
   resolveEffectivePricingMode,
   resolvePosLineAmountCalculationMode,
+  getPrintGrandTotal,
 } from "@core/utils/billing";
+
 import { calculateCustomerReceivableBreakdown } from "@core/utils/helpers";
 import { formatPackLooseQuantity } from "@core/utils/quantity";
 import BankDetailsInline from './BankDetailsInline';
@@ -98,8 +100,8 @@ const MargTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrait' 
   const isIncludingDiscountMode = posLineAmountMode === 'including_discount';
 
   // ── Pre-compute all item data ──────────────────────────────────────────────
-  const { items, gstSummary, subtotalValue, totalGst, roundOff, grandTotal,
-          tradeDiscount, schemeDiscount, billDiscount, adjustment, taxableValue } = useMemo(() => {
+  const { items, gstSummary, subtotalValue, totalGst, roundOff, grandTotal, printGrandTotal, hasFkPrice,
+          tradeDiscount, schemeDiscount, billDiscount, adjustment, taxableValue, printSubtotal, printTaxAmount } = useMemo(() => {
     let subtotalValue = 0;
     let totalSgst = 0;
     let totalCgst = 0;
@@ -175,10 +177,42 @@ const MargTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrait' 
     const grandTotal     = bill.total || 0;
     const schemeDiscount = (bill.items || []).reduce((s, it) => s + Number(it.schemeDiscountAmount || 0), 0);
 
+    // FK Price: when FK rate is active, recompute sub-total and tax from FK rate so
+    // the entire summary section is consistent with the printed grand total.
+    const hasFkPrice = (bill.items || []).some((it: any) => it.fk_price_applied != null);
+    const printGrandTotal = getPrintGrandTotal(bill);
+
+    let printSubtotal = subtotalValue;
+    let printTaxAmount = totalGst;
+    if (hasFkPrice && !isNonGst) {
+      let fkTaxable = 0;
+      let fkGst = 0;
+      (bill.items || []).forEach((it: any) => {
+        const qty = Number(it.quantity || it.qty || 0);
+        const fkRate = it.fk_price_applied != null ? Number(it.fk_price_applied) : null;
+        if (fkRate != null) {
+          const lineTaxable = qty * fkRate;
+          const lineGst = lineTaxable * (Number(it.gstPercent || 0) / 100);
+          fkTaxable += lineTaxable;
+          fkGst += lineGst;
+        } else {
+          const lineAmount = Number(it.finalAmount || it.amount || 0);
+          const gstPct = Number(it.gstPercent || 0);
+          const lineTaxable = lineAmount / (1 + gstPct / 100);
+          fkTaxable += lineTaxable;
+          fkGst += lineAmount - lineTaxable;
+        }
+      });
+      printSubtotal = fkTaxable;
+      printTaxAmount = fkGst;
+    }
+
     return { items, gstSummary, subtotalValue, totalSgst, totalCgst,
              tradeDiscount, schemeDiscount, billDiscount, adjustment,
-             taxableValue, totalGst, roundOff, grandTotal };
+             taxableValue, totalGst, roundOff, grandTotal, printGrandTotal, hasFkPrice,
+             printSubtotal, printTaxAmount };
   }, [bill, isNonGst, showBillDiscount, isIncludingDiscountMode]);
+
 
   // ── Address helpers ────────────────────────────────────────────────────────
   const toUpper = (v?: string | null) => (v || '').toString().trim().toUpperCase();
@@ -495,7 +529,7 @@ const MargTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrait' 
             />
             <p className="amount-in-words font-black uppercase text-gray-950 leading-tight"
               style={{ fontSize: '7.5pt', borderBottom: '1px dashed #d1d5db', paddingBottom: 4, marginBottom: 4 }}>
-              {numberToWords(grandTotal)}
+              {numberToWords(printGrandTotal)}
             </p>
             <div className="invoice-bottom" style={{ marginTop: 8 }}>
               <div>
@@ -529,7 +563,7 @@ const MargTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrait' 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '8.5pt', fontWeight: 700 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span>SUB TOTAL</span>
-                <span style={{ fontWeight: 900 }}>₹ {(subtotalValue || 0).toFixed(2)}</span>
+                <span style={{ fontWeight: 900 }}>₹ {(printSubtotal || 0).toFixed(2)}</span>
               </div>
               {!isIncludingDiscountMode && tradeDiscount > 0 && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', color: '#4338ca', fontWeight: 900 }}>
@@ -549,7 +583,7 @@ const MargTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrait' 
               {!isNonGst && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', color: '#4b5563' }}>
                   <span>Tax Amount</span>
-                  <span style={{ fontWeight: 900, color: '#111827' }}>{(totalGst || 0).toFixed(2)}</span>
+                  <span style={{ fontWeight: 900, color: '#111827' }}>{(printTaxAmount || 0).toFixed(2)}</span>
                 </div>
               )}
               <div style={{ display: 'flex', justifyContent: 'space-between', color: '#6b7280' }}>
@@ -558,12 +592,13 @@ const MargTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrait' 
               </div>
             </div>
           </div>
-          <div style={{ padding: 8, background: 'white', borderTop: '1px solid black', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ padding: 8, background: 'white', borderTop: '1px solid black', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: '0.875rem', fontWeight: 900, color: '#1f2937', letterSpacing: '-0.025em' }}>GRAND TOTAL</span>
             <span style={{ fontSize: '1.5rem',   fontWeight: 900, color: '#1d4ed8', letterSpacing: '-0.025em' }}>
-              ₹ {grandTotal.toFixed(2)}
+              ₹ {printGrandTotal.toFixed(2)}
             </span>
           </div>
+
         </div>
       </div>
     </div>

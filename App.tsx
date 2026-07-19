@@ -38,6 +38,7 @@ import Returns from '@modules/sales/components/Returns';
 import DeliveryChallans from '@modules/purchase/components/DeliveryChallans';
 import SalesChallans from '@modules/sales/components/SalesChallans';
 import ManualSalesEntry from '@modules/sales/components/ManualSalesEntry';
+import PriceMaster from '@modules/priceMaster/components/PriceMaster';
 import ManualPurchase from '@modules/purchase/components/ManualPurchase';
 import PurchaseOrders from '@modules/purchase/components/PurchaseOrders';
 import Classification from '@modules/reports/components/Classification';
@@ -92,7 +93,8 @@ const PERSISTABLE_SCREENS = new Set([
     'substituteFinder', 'promotions', 'reports', 'dailyReports', 'balanceCarryforward', 'gst', 'eway', 'ewayLoginSetup',
     'businessUsers', 'businessRoles', 'companyConfiguration', 'configuration', 'settings', 'moduleVisibility',
     'classification', 'accountReceivable', 'accountPayable', 'newJournalEntryVoucher', 'syncAndUpdates',
-    'mbcCardDashboard', 'mbcCardList', 'mbcGenerateCard', 'mbcCardTypeMaster', 'mbcCardTemplateMaster', 'mbcCardPrintPreview', 'mbcCardRenewalHistory'
+    'mbcCardDashboard', 'mbcCardList', 'mbcGenerateCard', 'mbcCardTypeMaster', 'mbcCardTemplateMaster', 'mbcCardPrintPreview', 'mbcCardRenewalHistory',
+    'priceMaster'
 ]);
 
 type PersistedScreenState = {
@@ -3229,6 +3231,13 @@ const App: React.FC = () => {
                         onDeleteCustomer={handleDeleteCustomer}
                         currentUser={currentUser} config={config} inventory={inventory} defaultCustomerControlGlId={defaultCustomerControlGlId}
                         permissions={getScreenPermissions(pageId, currentUser, teamMembers, businessRoles)}
+                    />;
+                case 'priceMaster':
+                    return <PriceMaster
+                        currentUser={currentUser}
+                        customers={customers}
+                        inventory={inventory}
+                        addNotification={addNotification}
                     />;
                 case 'doctorsMaster':
                     return <DoctorsMaster

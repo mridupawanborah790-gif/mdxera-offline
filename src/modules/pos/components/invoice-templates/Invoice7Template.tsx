@@ -1,7 +1,7 @@
-﻿import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DetailedBill, InventoryItem, AppConfigurations } from '@core/types';
 import { formatPackLooseQuantity } from "@core/utils/quantity";
-import { isRateFieldAvailable, resolveEffectivePricingMode, resolvePosLineAmountCalculationMode } from "@core/utils/billing";
+import { isRateFieldAvailable, resolveEffectivePricingMode, resolvePosLineAmountCalculationMode, getPrintGrandTotal } from "@core/utils/billing";
 
 interface TemplateProps {
   bill: DetailedBill & { inventory?: InventoryItem[]; configurations: AppConfigurations; };
@@ -73,6 +73,7 @@ const Invoice7Template: React.FC<TemplateProps> = ({ bill }) => {
 
     const adjustment = bill.adjustment || 0;
     const grandTotal = bill.total || 0;
+    const printGrandTotal = getPrintGrandTotal(bill);
     const taxableAmount = Number(bill.subtotal || subtotal || 0);
     const summarySubtotal = Number(taxableAmount + (bill.totalItemDiscount || 0) + (bill.schemeDiscount || 0));
     const discount = Math.max(0, Number(summarySubtotal - taxableAmount));
@@ -86,7 +87,8 @@ const Invoice7Template: React.FC<TemplateProps> = ({ bill }) => {
       totalQty,
       totalDiscountValue,
       adjustment,
-      grandTotal
+      grandTotal,
+      printGrandTotal
     };
   }, [bill, isNonGst, isIncludingDiscountMode]);
 
@@ -304,7 +306,7 @@ const Invoice7Template: React.FC<TemplateProps> = ({ bill }) => {
 
                 <div className="border-t border-b border-dashed border-black mt-1 py-0.5 flex justify-between text-[10px] font-bold">
                   <span>TOTAL</span>
-                  <span>₹{(bill.total || 0).toFixed(2)}</span>
+                  <span>₹{billDetails.printGrandTotal.toFixed(2)}</span>
                 </div>
 
                 <p className="text-center text-[8px] mt-1">Thank You • Visit Again</p>

@@ -227,6 +227,11 @@ export interface AppConfigurations {
         lockPreviousFiscalYear?: boolean;
         voucherNumberingMode?: 'reset' | 'continue';
     };
+    pricingPriority?: {
+        priority1: 'fk_price' | 'customer_price_master' | 'inventory';
+        priority2: 'fk_price' | 'customer_price_master' | 'inventory';
+        priority3: 'fk_price' | 'customer_price_master' | 'inventory';
+    };
     _isDirty?: boolean;
 }
 
@@ -353,6 +358,9 @@ export interface BillItem {
     unitsPerPack?: number;
     baseUnit?: string;
     packUnit?: string;
+    fk_price_applied?: number | null;
+    customer_actual_price?: number | null;
+    pricing_mode_used?: 'fk_price' | 'customer_price_master' | 'inventory';
     packType?: string;
     taxBasis?: TaxCalculationBasis;
     appliedDiscountId?: string;
@@ -932,6 +940,26 @@ export interface CustomerPriceListEntry {
     price: number;
     discountPercent?: number;
     updatedAt: string;
+}
+
+export interface CustomerPriceMasterEntry {
+    id: string;
+    organization_id: string;
+    customer_id: string;
+    material_id: string;
+    special_price?: number;
+    fk_price?: number;
+    discount_percent?: number;
+    status: 'active' | 'inactive';
+    item_name?: string;
+    customer_name?: string;
+    created_at?: string;
+    updated_at?: string;
+    created_by?: string;
+    modified_by?: string;
+    modified_at?: string;
+    _sync_status?: string;
+    _local_only?: number;
 }
 
 export interface ChatMessage {

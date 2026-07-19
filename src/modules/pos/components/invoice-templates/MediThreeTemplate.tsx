@@ -1,7 +1,7 @@
-﻿import React, { useMemo } from 'react';
+import React, { useMemo } from 'react';
 import type { AppConfigurations, DetailedBill, InventoryItem } from '@core/types';
 import { numberToWords } from "@core/utils/numberToWords";
-import { isRateFieldAvailable, resolveEffectivePricingMode, resolvePosLineAmountCalculationMode } from "@core/utils/billing";
+import { isRateFieldAvailable, resolveEffectivePricingMode, resolvePosLineAmountCalculationMode, getPrintGrandTotal } from "@core/utils/billing";
 import { formatPackLooseQuantity } from "@core/utils/quantity";
 import BankDetailsInline from './BankDetailsInline';
 
@@ -9,6 +9,9 @@ interface TemplateProps {
   bill: DetailedBill & { inventory?: InventoryItem[]; configurations: AppConfigurations };
   orientation?: 'portrait' | 'landscape';
 }
+
+const MAX_ITEMS_PER_PAGE = 16;  // intermediate pages
+const MAX_ITEMS_LAST_PAGE = 10; // last page (shares space with footer)
 
 const MediThreeTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrait' }) => {
   const isNonGst = bill.billType === 'non-gst';
@@ -19,11 +22,10 @@ const MediThreeTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portr
   const companyBankName = (bill.pharmacy as any).bank_account_name || (bill.pharmacy as any).bank_name;
   const companyAccountNumber = (bill.pharmacy as any).bank_account_number || (bill.pharmacy as any).account_number;
   const companyIfscCode = (bill.pharmacy as any).bank_ifsc_code || (bill.pharmacy as any).ifsc_code;
-  const MAX_ITEMS_PER_PAGE = 16;  // intermediate pages
-  const MAX_ITEMS_LAST_PAGE = 10; // last page (shares space with footer)
   const showRateColumn = isRateFieldAvailable(bill.configurations);
   const posLineAmountMode = resolvePosLineAmountCalculationMode(bill.configurations);
   const isIncludingDiscountMode = posLineAmountMode === 'including_discount';
+
 
   const calculations = useMemo(() => {
     const effectivePricingMode = resolveEffectivePricingMode(bill.pharmacy?.organization_type, bill.pricingMode, bill.configurations);
@@ -74,6 +76,7 @@ const MediThreeTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portr
     adjustment: bill.adjustment || 0,
     taxTotal: isNonGst ? 0 : (bill.totalGst || 0),
     grandTotal: bill.total || 0,
+    printGrandTotal: getPrintGrandTotal(bill),
   };
 
   const paginatedItems = useMemo(() => {
@@ -409,14 +412,14 @@ const MediThreeTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portr
                         ifscCode={companyIfscCode}
                         className="bank-details medi-three-bank-line"
                       />
-                      <div><strong>Amount in words:</strong> {numberToWords(totals.grandTotal)}</div>
+                      <div><strong>Amount in words:</strong> {numberToWords(totals.printGrandTotal)}</div>
                     </div>
                     <div className="invoice-bottom medi-three-summary-right">
                       <div className="row"><span>Sub Total</span><strong>{totals.subTotal.toFixed(2)}</strong></div>
                       {!isIncludingDiscountMode && totals.tradeDiscount > 0 && <div className="row"><span>Trade Discount</span><strong>-{totals.tradeDiscount.toFixed(2)}</strong></div>}
                       {totals.discount > 0 && <div className="row"><span>Discount</span><strong>-{totals.discount.toFixed(2)}</strong></div>}
                       <div className="row"><span>Tax Total</span><strong>{totals.taxTotal.toFixed(2)}</strong></div>
-                      <div className="row grand"><span>Grand Total</span><span>{totals.grandTotal.toFixed(2)}</span></div>
+                      <div className="row grand"><span>Grand Total</span><span>{totals.printGrandTotal.toFixed(2)}</span></div>
                     </div>
                   </div>
                 ) : (

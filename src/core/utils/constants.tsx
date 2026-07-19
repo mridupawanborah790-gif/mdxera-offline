@@ -1,4 +1,4 @@
-﻿
+
 import React from 'react';
 import type { NavItem } from '@core/types';
 
@@ -266,6 +266,7 @@ export const navigation: NavItem[] = [
     icon: RoleIcon,
     roles: ['owner', 'admin', 'manager', 'purchase', 'clerk'],
     children: [
+      { id: 'priceMaster', name: 'Price Master', href: '#', icon: FileTextIcon, roles: ['owner', 'admin', 'manager'] },
       { id: 'doctorsMaster', name: 'Doctor’s Master', href: '#', icon: StethoscopeIcon, roles: ['owner', 'admin', 'manager', 'purchase', 'clerk'] },
       {
         id: 'mbcCardParent',

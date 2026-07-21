@@ -22,6 +22,7 @@ import { supabase } from '@core/db/supabaseClient';
 import { reserveVoucherNumber, resetVoucherCursors, warmupVoucherSeries } from '@core/voucher/voucherService';
 import { isOnline } from '@core/sync/networkMonitor';
 import { normalizeStockHandlingConfig } from '@core/utils/stockHandling';
+import PricingPriorityCanvas from './PricingPriorityCanvas';
 
 type DemoBusinessType = 'RETAIL' | 'DISTRIBUTOR';
 type DuplicateHandlingMode = 'SKIP' | 'UPDATE';
@@ -1127,6 +1128,26 @@ const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
                                             description="Allow inventory to drop below zero if needed."
                                         />
                                     </div>
+
+                                    {/* ── Pricing Priority Canvas ────────────────────────────── */}
+                                    <div className="space-y-4 md:col-span-2">
+                                        <PricingPriorityCanvas
+                                            value={localConfigs.pricingPriority}
+                                            onChange={(nextPriority) => {
+                                                setLocalConfigs(prev => {
+                                                    const updated = {
+                                                        ...prev,
+                                                        pricingPriority: nextPriority,
+                                                        _isDirty: true,
+                                                    };
+                                                    // Immediately persist so POS always reads the correct priority
+                                                    onUpdateConfigurations(updated);
+                                                    return updated;
+                                                });
+                                            }}
+                                        />
+                                    </div>
+
 
 
                                     <div className="space-y-4 md:col-span-2">

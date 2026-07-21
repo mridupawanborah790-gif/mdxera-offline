@@ -1,4 +1,4 @@
-﻿import type { AppConfigurations, BillItem, LineAmountCalculationMode } from '@core/types';
+import type { AppConfigurations, BillItem, LineAmountCalculationMode } from '@core/types';
 
 export type SchemeDiscountCalculationBase = 'subtotal' | 'after_trade_discount' | 'ask_user';
 export type TaxCalculationBaseOption = 'subtotal' | 'after_trade_discount' | 'after_all_discounts';
@@ -207,3 +207,28 @@ export const calculateLineNetAmount = (item: BillItem, configurations?: AppConfi
   const scheme = Math.min(afterTrade, getSchemeDiscountAmount(item, schemeBaseAmount));
   return Math.max(0, afterTrade - scheme);
 };
+
+export const getPrintGrandTotal = (bill: { items?: any[]; roundOff?: number; total?: number; billType?: string } | null | undefined): number => {
+  if (!bill) return 0;
+  const items = bill.items || [];
+  const isNonGst = (bill as any).billType === 'non-gst';
+  const hasFkPrice = items.some((it: any) => it.fk_price_applied != null);
+  if (!hasFkPrice) return bill.total || 0;
+
+  const roundOff = bill.roundOff || 0;
+  const fkSum = items.reduce((sum: number, it: any) => {
+    if (it.fk_price_applied != null) {
+      const fkRate = Number(it.fk_price_applied);
+      const qty = Number(it.quantity || it.qty || 0);
+      const lineTaxable = qty * fkRate;
+      const gstPercent = isNonGst ? 0 : Number(it.gstPercent || 0);
+      const lineGst = lineTaxable * (gstPercent / 100);
+      return sum + lineTaxable + lineGst;
+    }
+    return sum + Number(it.finalAmount || it.amount || 0);
+  }, 0);
+
+  return Number((fkSum + roundOff).toFixed(2));
+};
+
+

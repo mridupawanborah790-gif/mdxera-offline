@@ -2,7 +2,7 @@ import { db } from '@core/db/client';
 import { TABLE } from '@core/db/schema';
 import { SyncQueue } from '@core/sync/SyncQueue';
 import { supabase } from '@core/db/supabaseClient';
-import type { RegisteredPharmacy, Customer } from '@core/types';
+import type { RegisteredPharmacy, Customer, CustomerPriceMasterEntry } from '@core/types';
 
 function serialize(obj: Record<string, unknown>): Record<string, unknown> {
   const r: Record<string, unknown> = {};
@@ -82,4 +82,58 @@ export async function saveCustomerPriceList(
   const row = serialize(entry);
   await db.upsert(TABLE.CUSTOMER_PRICE_LIST, row);
   await SyncQueue.enqueue('INSERT', TABLE.CUSTOMER_PRICE_LIST, row.id as string, row, user.organization_id);
+}
+
+export async function fetchPriceMaster(user: RegisteredPharmacy): Promise<CustomerPriceMasterEntry[]> {
+  const rows = await db.select(
+    `SELECT * FROM ${TABLE.CUSTOMER_PRICE_LIST} WHERE organization_id = ? ORDER BY updated_at DESC`,
+    [user.organization_id]
+  );
+  if (rows.length > 0) return rows as unknown as CustomerPriceMasterEntry[];
+
+  const { data } = await supabase
+    .from('customer_price_list')
+    .select('*')
+    .eq('organization_id', user.organization_id);
+
+  if (data?.length) await db.bulkUpsert(TABLE.CUSTOMER_PRICE_LIST, data.map(serialize));
+  return (data ?? []) as unknown as CustomerPriceMasterEntry[];
+}
+
+export async function fetchPriceForCustomerItem(
+  customerId: string,
+  inventoryItemId: string,
+  user: RegisteredPharmacy
+): Promise<CustomerPriceMasterEntry | null> {
+  const rows = await db.select(
+    `SELECT * FROM ${TABLE.CUSTOMER_PRICE_LIST} WHERE organization_id = ? AND customer_id = ? AND material_id = ? AND status = 'active' LIMIT 1`,
+    [user.organization_id, customerId, inventoryItemId]
+  );
+  return (rows[0] as unknown as CustomerPriceMasterEntry) ?? null;
+}
+
+export async function savePriceMasterEntry(
+  entry: CustomerPriceMasterEntry,
+  user: RegisteredPharmacy
+): Promise<void> {
+  await db.execute(
+    `UPDATE ${TABLE.CUSTOMER_PRICE_LIST} SET status = 'inactive', modified_at = ? WHERE organization_id = ? AND customer_id = ? AND material_id = ? AND status = 'active' AND id != ?`,
+    [new Date().toISOString(), user.organization_id, entry.customer_id, entry.material_id, entry.id]
+  );
+  const row = serialize(entry as unknown as Record<string, unknown>);
+  await db.upsert(TABLE.CUSTOMER_PRICE_LIST, row);
+  await SyncQueue.enqueue('INSERT', TABLE.CUSTOMER_PRICE_LIST, row.id as string, row, user.organization_id);
+}
+
+export async function updatePriceMasterStatus(
+  id: string,
+  status: 'active' | 'inactive',
+  user: RegisteredPharmacy
+): Promise<void> {
+  const now = new Date().toISOString();
+  await db.execute(
+    `UPDATE ${TABLE.CUSTOMER_PRICE_LIST} SET status = ?, modified_at = ? WHERE id = ? AND organization_id = ?`,
+    [status, now, id, user.organization_id]
+  );
+  await SyncQueue.enqueue('UPDATE', TABLE.CUSTOMER_PRICE_LIST, id, { id, status, modified_at: now }, user.organization_id);
 }

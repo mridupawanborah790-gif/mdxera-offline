@@ -1,10 +1,10 @@
-﻿
+
 
 import React, { useMemo } from 'react';
 import type { DetailedBill, InventoryItem, AppConfigurations } from '@core/types';
 import { numberToWords } from "@core/utils/numberToWords";
 import { formatPackLooseQuantity } from "@core/utils/quantity";
-import { getDisplaySchemePercent, hasLineLevelSchemeDiscount, isRateFieldAvailable, resolveEffectivePricingMode, resolvePosLineAmountCalculationMode } from "@core/utils/billing";
+import { getDisplaySchemePercent, hasLineLevelSchemeDiscount, isRateFieldAvailable, resolveEffectivePricingMode, resolvePosLineAmountCalculationMode, getPrintGrandTotal } from "@core/utils/billing";
 import BankDetailsInline from './BankDetailsInline';
 
 interface TemplateProps {
@@ -104,10 +104,11 @@ const GftTemplate: React.FC<TemplateProps> = ({ bill }) => {
     const adjustment = bill.adjustment || 0;
     const totalTaxFromBill = isNonGst ? 0 : (bill.totalGst || 0);
     const grandTotal = bill.total || 0;
+    const printGrandTotal = getPrintGrandTotal(bill);
 
     const tradeDiscount = bill.totalItemDiscount || 0;
     const schemeDiscount = (bill.items || []).reduce((sum, item) => sum + Number(item.schemeDiscountAmount || 0), 0);
-    return { items: itemsWithCalculations, itemChunks, subtotal, totalCgst, totalSgst, totalTaxFromBill, tradeDiscount, schemeDiscount, billDiscount, adjustment, roundOff, grandTotal };
+    return { items: itemsWithCalculations, itemChunks, subtotal, totalCgst, totalSgst, totalTaxFromBill, tradeDiscount, schemeDiscount, billDiscount, adjustment, roundOff, grandTotal, printGrandTotal };
   }, [bill, isNonGst, isIncludingDiscountMode]);
 
   const termsList = bill.pharmacy.terms_and_conditions 
@@ -264,14 +265,14 @@ const GftTemplate: React.FC<TemplateProps> = ({ bill }) => {
                       className="text-[10px] text-gray-700 mb-1 leading-tight"
                     />
                     <p className="font-bold underline mb-1 text-xs">Amount In Words:</p>
-                    <p className="capitalize italic font-medium">{numberToWords(billDetails.grandTotal || 0)}</p>
+                    <p className="capitalize italic font-medium">{numberToWords(billDetails.printGrandTotal || 0)}</p>
                 </div>
                 
                 <div className="p-2 flex-1 flex justify-between items-start">
                     {bill.pharmacy.bank_upi_id && !isNonGst && (
                         <div className="text-center ml-2">
                              <img
-                                src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(`upi://pay?pa=${bill.pharmacy.bank_upi_id}&pn=${encodeURIComponent(bill.pharmacy.pharmacy_name)}&am=${(billDetails.grandTotal || 0).toFixed(2)}&cu=INR`)}`}
+                                src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(`upi://pay?pa=${bill.pharmacy.bank_upi_id}&pn=${encodeURIComponent(bill.pharmacy.pharmacy_name)}&am=${(billDetails.printGrandTotal || 0).toFixed(2)}&cu=INR`)}`}
                                 alt="UPI QR"
                                 className="w-20 h-20 border border-black p-0.5 rendering-pixelated"
                             />
@@ -308,7 +309,7 @@ const GftTemplate: React.FC<TemplateProps> = ({ bill }) => {
                 <div className="border-t-2 border-black p-2 bg-gray-100">
                     <div className="flex justify-between text-lg font-extrabold text-[#2e3b84]">
                         <span>Grand Total:</span>
-                        <span>₹ {(billDetails.grandTotal || 0).toFixed(2)}</span>
+                        <span>₹ {(billDetails.printGrandTotal || 0).toFixed(2)}</span>
                     </div>
                 </div>
 

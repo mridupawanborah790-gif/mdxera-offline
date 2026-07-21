@@ -1,10 +1,10 @@
-﻿
+
 
 import React, { useMemo } from 'react';
 import type { DetailedBill, InventoryItem, AppConfigurations } from '@core/types';
 import { formatPackLooseQuantity } from "@core/utils/quantity";
 import { numberToWords } from "@core/utils/numberToWords";
-import { resolveEffectivePricingMode, resolvePosLineAmountCalculationMode } from "@core/utils/billing";
+import { resolveEffectivePricingMode, resolvePosLineAmountCalculationMode, getPrintGrandTotal } from "@core/utils/billing";
 import BankDetailsInline from './BankDetailsInline';
 
 interface TemplateProps {
@@ -100,8 +100,10 @@ const MediOneTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrai
     const roundOff = bill.roundOff || 0;
     const adjustment = bill.adjustment || 0;
     const grandTotal = bill.total || 0;
+    const hasFkPrice = (bill.items || []).some((it: any) => it.fk_price_applied != null);
+    const printGrandTotal = getPrintGrandTotal(bill);
 
-    return { items, itemChunks, subtotalValue, totalGst: (isNonGst ? 0 : (bill.totalGst || 0)), billDiscount, adjustment, roundOff, grandTotal };
+    return { items, itemChunks, subtotalValue, totalGst: (isNonGst ? 0 : (bill.totalGst || 0)), billDiscount, adjustment, roundOff, grandTotal, printGrandTotal, hasFkPrice };
   }, [bill, isNonGst, isIncludingDiscountMode]);
 
   return (
@@ -248,7 +250,7 @@ const MediOneTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrai
                         className="bank-details text-[7pt] text-gray-700 mb-1 leading-tight"
                       />
                       <p className="amount-in-words text-[7.5pt] font-semibold uppercase italic leading-tight">
-                        {numberToWords(calculations.grandTotal)}
+                        {numberToWords(calculations.printGrandTotal)}
                       </p>
                       <div className="mt-4 text-[7pt] text-gray-500 italic">
                         <p>Subject to local jurisdiction. E.&O.E.</p>
@@ -271,7 +273,7 @@ const MediOneTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrai
                       </div>
                       <div className="flex justify-between font-semibold text-blue-900 border-t border-black pt-1 text-[11pt]">
                           <span>NET AMT:</span>
-                          <span>₹ {calculations.grandTotal.toFixed(2)}</span>
+                          <span>₹ {calculations.printGrandTotal.toFixed(2)}</span>
                       </div>
                   </div>
               </div>

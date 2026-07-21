@@ -127,13 +127,15 @@ const ManualSalesEntry = React.forwardRef<any, ManualSalesEntryProps>(({ current
     fetchHistory();
   }, [currentUser, customerId]);
 
+  const isPriceMasterEnabled = configurations.displayOptions?.enablePriceMaster ?? true;
+
   // Load Price Master data once on mount
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser || !isPriceMasterEnabled) return;
     fetchPriceMaster(currentUser)
       .then(setPriceMasterEntries)
       .catch(() => { /* non-fatal: fall back to inventory pricing */ });
-  }, [currentUser]);
+  }, [currentUser, isPriceMasterEnabled]);
 
   const activeLine = useMemo(() => {
     if (hoveredLineId) return lines.find(l => l.id === hoveredLineId);
@@ -249,7 +251,7 @@ const ManualSalesEntry = React.forwardRef<any, ManualSalesEntryProps>(({ current
     const inventoryRate = getRateByTier(item);
 
     // Look up active Price Master entry for this customer+item
-    const priceEntry = cId
+    const priceEntry = (isPriceMasterEnabled && cId)
       ? priceMasterEntries.find(
           p => p.customer_id === cId &&
                p.material_id === item.id &&

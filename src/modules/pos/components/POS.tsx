@@ -439,12 +439,14 @@ const POS = forwardRef<any, POSProps>(({
     const [cartItems, setCartItems] = useState<BillItem[]>([]);
     const [priceMasterEntries, setPriceMasterEntries] = useState<CustomerPriceMasterEntry[]>([]);
 
+    const isPriceMasterEnabled = configurations?.displayOptions?.enablePriceMaster ?? true;
+
     useEffect(() => {
-        if (!currentUser) return;
+        if (!currentUser || !isPriceMasterEnabled) return;
         fetchPriceMaster(currentUser)
             .then(setPriceMasterEntries)
             .catch(() => { /* non-fatal fallback */ });
-    }, [currentUser]);
+    }, [currentUser, isPriceMasterEnabled]);
 
     useEffect(() => {
         if (!selectedCustomer?.id || cartItems.length === 0) return;
@@ -453,7 +455,7 @@ const POS = forwardRef<any, POSProps>(({
             if (!inventoryItem) return item;
 
             const rateValue = resolveSalesRate(inventoryItem, selectedCustomer?.defaultRateTier);
-            const priceMasterRecord = priceMasterEntries.find(p => p.customer_id === selectedCustomer.id && (p.material_id === inventoryItem.id || p.material_id === inventoryItem.code) && p.status === 'active');
+            const priceMasterRecord = isPriceMasterEnabled ? priceMasterEntries.find(p => p.customer_id === selectedCustomer.id && (p.material_id === inventoryItem.id || p.material_id === inventoryItem.code) && p.status === 'active') : null;
             const custActualPrice = priceMasterRecord?.special_price != null ? Number(priceMasterRecord.special_price) : undefined;
             const fkPriceVal = priceMasterRecord?.fk_price != null ? Number(priceMasterRecord.fk_price) : undefined;
             const posPriorities = [
@@ -2083,7 +2085,7 @@ const POS = forwardRef<any, POSProps>(({
         const rateValue = resolveSalesRate(pricingSource, selectedCustomer?.defaultRateTier);
 
         // Resolve Price Master pricing (Customer Actual Price vs FK Price vs Inventory)
-        const priceMasterRecord = selectedCustomer?.id
+        const priceMasterRecord = isPriceMasterEnabled && selectedCustomer?.id
             ? priceMasterEntries.find(p => p.customer_id === selectedCustomer.id && (p.material_id === batch.id || p.material_id === batch.code) && p.status === 'active')
             : null;
         const custActualPrice = priceMasterRecord?.special_price != null ? Number(priceMasterRecord.special_price) : undefined;

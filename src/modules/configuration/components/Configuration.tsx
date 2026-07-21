@@ -1127,26 +1127,34 @@ const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
                                             setEnabled={(v) => handleConfigChange('displayOptions', 'enableNegativeStock', v)}
                                             description="Allow inventory to drop below zero if needed."
                                         />
+                                        <Toggle 
+                                            label="Enable Price Master Module" 
+                                            enabled={localConfigs.displayOptions?.enablePriceMaster ?? true}
+                                            setEnabled={(v) => handleConfigChange('displayOptions', 'enablePriceMaster', v)}
+                                            description="Enable or disable the Price Master module & customer-specific pricing features across the application."
+                                        />
                                     </div>
 
                                     {/* ── Pricing Priority Canvas ────────────────────────────── */}
-                                    <div className="space-y-4 md:col-span-2">
-                                        <PricingPriorityCanvas
-                                            value={localConfigs.pricingPriority}
-                                            onChange={(nextPriority) => {
-                                                setLocalConfigs(prev => {
-                                                    const updated = {
-                                                        ...prev,
-                                                        pricingPriority: nextPriority,
-                                                        _isDirty: true,
-                                                    };
-                                                    // Immediately persist so POS always reads the correct priority
-                                                    onUpdateConfigurations(updated);
-                                                    return updated;
-                                                });
-                                            }}
-                                        />
-                                    </div>
+                                    {(localConfigs.displayOptions?.enablePriceMaster ?? true) && (
+                                        <div className="space-y-4 md:col-span-2">
+                                            <PricingPriorityCanvas
+                                                value={localConfigs.pricingPriority}
+                                                onChange={(nextPriority) => {
+                                                    setLocalConfigs(prev => {
+                                                        const updated = {
+                                                            ...prev,
+                                                            pricingPriority: nextPriority,
+                                                            _isDirty: true,
+                                                        };
+                                                        // Immediately persist so POS always reads the correct priority
+                                                        onUpdateConfigurations(updated);
+                                                        return updated;
+                                                    });
+                                                }}
+                                            />
+                                        </div>
+                                    )}
 
 
 

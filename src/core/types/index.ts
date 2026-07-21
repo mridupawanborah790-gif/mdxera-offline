@@ -210,6 +210,7 @@ export interface AppConfigurations {
         aisensyApiKey?: string;
         aisensyCampaignName?: string;
         networkMode?: 'auto' | 'online' | 'offline';
+        enablePriceMaster?: boolean;
     };
     modules?: { [key: string]: ModuleConfig };
     discountRules?: DiscountRule[];

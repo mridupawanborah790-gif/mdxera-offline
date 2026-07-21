@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import Sidebar from '@core/components/layout/Sidebar';
 import Header from '@core/components/layout/Header';
@@ -333,6 +333,14 @@ const App: React.FC = () => {
     const [businessRoles, setBusinessRoles] = useState<BusinessRole[]>([]);
 
     const [configurations, setConfigurations] = useState<AppConfigurations>({ organization_id: '' });
+
+    const effectiveHiddenScreens = useMemo(() => {
+        const set = new Set(hiddenScreens);
+        if ((configurations?.displayOptions?.enablePriceMaster ?? true) === false) {
+            set.add('priceMaster');
+        }
+        return set;
+    }, [hiddenScreens, configurations?.displayOptions?.enablePriceMaster]);
     const [defaultCustomerControlGlId, setDefaultCustomerControlGlId] = useState<string>('');
     const [defaultSupplierControlGlId, setDefaultSupplierControlGlId] = useState<string>('');
     const [bankOptions, setBankOptions] = useState<Array<{ id: string; bankName: string; accountName: string; accountNumber: string; linkedBankGlId?: string; defaultBank?: boolean; activeStatus?: string }>>([]);
@@ -417,6 +425,7 @@ const App: React.FC = () => {
     const pageContainerRefs = useRef<Record<string, HTMLDivElement | null>>({});
     const pageScrollPositionsRef = useRef<Record<string, number>>({});
     const previousPageRef = useRef('dashboard');
+    const hasNotifiedPartialSyncRef = useRef(false);
 
     const getScreenStateStorageKey = useCallback((user: RegisteredPharmacy) => {
         let windowLabel = 'main';
@@ -516,6 +525,9 @@ const App: React.FC = () => {
 
     const addNotification = useCallback((message: string, type: 'success' | 'error' | 'warning' = 'success') => {
         setNotifications(prev => {
+            if (prev.some(n => n.message === message && n.type === type)) {
+                return prev;
+            }
             // Ensure ID is unique even for rapid calls
             let id = Date.now();
             while (prev.some(n => n.id === id)) {
@@ -743,12 +755,16 @@ const App: React.FC = () => {
                 .map((result, index) => ({ result, label: loadJobs[index][0] }))
                 .filter(entry => entry.result.status === 'rejected');
             if (failedLoads.length > 0) {
-                const labels = failedLoads.map(entry => entry.label).join(', ');
-                const message = `Partial sync completed. Some modules failed to refresh (${labels}).`;
-                addNotification(message, 'warning');
-                if (mode === 'initial') setAppLoadError(message);
-            } else if (mode === 'initial') {
-                setAppLoadError(null);
+                if (!hasNotifiedPartialSyncRef.current) {
+                    addNotification("Partially synced. Sync will continue running in background.", 'warning');
+                    hasNotifiedPartialSyncRef.current = true;
+                }
+                if (mode === 'initial') {
+                    setAppLoadError("Partially synced. Sync will continue running in background.");
+                }
+            } else {
+                hasNotifiedPartialSyncRef.current = false;
+                if (mode === 'initial') setAppLoadError(null);
             }
 
             if (freshProfile) setCurrentUser(freshProfile);
@@ -1158,7 +1174,7 @@ const App: React.FC = () => {
         const isDailyReportLink = pageId.startsWith('dailyReports:');
         const resolvedPageId = isDailyReportLink ? 'dailyReports' : pageId;
 
-        if (!canAccessScreen(resolvedPageId, currentUser, teamMembers, businessRoles, 'view')) {
+        if (!canAccessScreen(resolvedPageId, currentUser, teamMembers, businessRoles, 'view') || (resolvedPageId === 'priceMaster' && (configurations?.displayOptions?.enablePriceMaster ?? true) === false)) {
             addNotification('Access denied for this module.', 'error');
             return;
         }
@@ -2708,7 +2724,7 @@ const App: React.FC = () => {
         const config: ModuleConfig = { visible: true, fields: configurations.modules?.[configId]?.fields || {} };
 
         try {
-            if (pageId !== 'moduleVisibility' && hiddenScreens.has(pageId)) {
+            if (pageId !== 'moduleVisibility' && effectiveHiddenScreens.has(pageId)) {
                 return (
                     <div className="flex-1 flex items-center justify-center bg-gray-50 p-8">
                         <div className="bg-white border-2 border-gray-400 p-6 text-center">
@@ -3599,7 +3615,7 @@ const App: React.FC = () => {
                         currentPage={currentPage}
                         onNavigate={handleNavigate}
                         currentUser={currentUser}
-                        navigationItems={filterNavByVisibility(filterNavigationByPermissions(navigation, currentUser, teamMembers, businessRoles), hiddenScreens)}
+                        navigationItems={filterNavByVisibility(filterNavigationByPermissions(navigation, currentUser, teamMembers, businessRoles), effectiveHiddenScreens)}
                         configurations={configurations}
                         onToggleMasterExplorer={toggleSidebar}
                         brandName="MDXERA"

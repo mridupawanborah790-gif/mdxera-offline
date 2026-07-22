@@ -1189,6 +1189,8 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
             <JournalEntryViewerModal
                 isOpen={!!journalTransaction}
                 onClose={() => setJournalTransaction(null)}
+                invoiceId={journalTransaction?.id}
+                invoiceNumber={journalTransaction?.invoiceNumber || journalTransaction?.id}
                 documentType="SALES"
                 currentUser={currentUser}
                 isPosted={(journalTransaction?.status || '') === 'completed'}

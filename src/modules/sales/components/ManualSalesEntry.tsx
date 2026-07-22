@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Card from '@core/components/ui/Card';
-import { Customer, InventoryItem, RegisteredPharmacy, Transaction, AppConfigurations, CustomerPriceMasterEntry } from '@core/types';
+import { Customer, InventoryItem, RegisteredPharmacy, Transaction, AppConfigurations, CustomerPriceMasterEntry, MaterialPriceMasterEntry } from '@core/types';
 import * as storage from '@core/services/storageService';
 import { fuzzyMatch } from '@core/utils/search';
 import { handleEnterToNextField } from '@core/utils/navigation';
 import { fetchGlMasterForBooks, fetchGlAssignmentsForBooks, fetchSetOfBooksById } from '@modules/accounting/services/accountingService';
 import { fetchTransactions } from '@modules/sales/services/salesService';
-import { fetchPriceMaster } from '@modules/customers/services/customerService';
+import { fetchPriceMaster, fetchMaterialPriceMaster } from '@modules/customers/services/customerService';
 
 interface ManualSalesEntryProps {
   currentUser: RegisteredPharmacy | null;
@@ -36,7 +36,7 @@ type ManualLine = {
   displayRate: number;             // actual rate shown on line item and used for system total
   fkPrice?: number;                // FK Price — stored for print-time use ONLY
   customerActualPrice?: number;    // from Price Master (audit)
-  pricingModeUsed?: 'fk_price' | 'customer_price_master' | 'inventory'; // audit
+  pricingModeUsed?: 'fk_price' | 'customer_price_master' | 'material_price_master' | 'inventory'; // audit
 };
 
 const round2 = (n: number) => Number((n || 0).toFixed(2));
@@ -73,6 +73,7 @@ const ManualSalesEntry = React.forwardRef<any, ManualSalesEntryProps>(({ current
   const [hoveredLineId, setHoveredLineId] = useState<string | null>(null);
   const [activeLineId, setActiveLineId] = useState<string | null>(null);
   const [priceMasterEntries, setPriceMasterEntries] = useState<CustomerPriceMasterEntry[]>([]);
+  const [materialPriceEntries, setMaterialPriceEntries] = useState<MaterialPriceMasterEntry[]>([]);
   const [salesGlId, setSalesGlId] = useState('');
   const [discountGlId, setDiscountGlId] = useState('');
   const [taxGlId, setTaxGlId] = useState('');
@@ -135,6 +136,9 @@ const ManualSalesEntry = React.forwardRef<any, ManualSalesEntryProps>(({ current
     fetchPriceMaster(currentUser)
       .then(setPriceMasterEntries)
       .catch(() => { /* non-fatal: fall back to inventory pricing */ });
+    fetchMaterialPriceMaster(currentUser)
+      .then(setMaterialPriceEntries)
+      .catch(() => { /* non-fatal */ });
   }, [currentUser, isPriceMasterEnabled]);
 
   const activeLine = useMemo(() => {
@@ -250,49 +254,50 @@ const ManualSalesEntry = React.forwardRef<any, ManualSalesEntryProps>(({ current
   const resolvePricing = (item: InventoryItem, cId: string) => {
     const inventoryRate = getRateByTier(item);
 
-    // Look up active Price Master entry for this customer+item
+    // Look up active Customer Price Master entry for this customer+item
     const priceEntry = (isPriceMasterEnabled && cId)
       ? priceMasterEntries.find(
           p => p.customer_id === cId &&
-               p.material_id === item.id &&
+               (p.material_id === item.id || p.material_id === item.code) &&
                p.status === 'active'
         )
       : null;
 
-    const customerActualPrice = priceEntry?.special_price != null
-      ? Number(priceEntry.special_price)
-      : undefined;
-    const fkPrice = priceEntry?.fk_price != null
-      ? Number(priceEntry.fk_price)
-      : undefined;
+    // Look up active Material Price Master entry for this item
+    const materialPriceRecord = isPriceMasterEnabled
+      ? materialPriceEntries.find(
+          p => (p.material_id === item.id || p.material_id === item.code) &&
+               p.status === 'active'
+        )
+      : null;
+
+    const customerActualPrice = priceEntry?.special_price != null ? Number(priceEntry.special_price) : undefined;
+    const fkPrice = priceEntry?.fk_price != null ? Number(priceEntry.fk_price) : undefined;
+    const matPrice = materialPriceRecord?.price != null ? Number(materialPriceRecord.price) : undefined;
 
     const priorities = [
       configurations.pricingPriority?.priority1 ?? 'customer_price_master',
-      configurations.pricingPriority?.priority2 ?? 'fk_price',
+      configurations.pricingPriority?.priority2 ?? 'material_price_master',
       configurations.pricingPriority?.priority3 ?? 'inventory',
     ];
 
     let displayRate = inventoryRate;
-    let resolvedFkPrice: number | undefined;
-    let pricingModeUsed: 'fk_price' | 'customer_price_master' | 'inventory' = 'inventory';
+    let resolvedFkPrice: number | undefined = fkPrice;
+    let pricingModeUsed: 'fk_price' | 'customer_price_master' | 'material_price_master' | 'inventory' = 'inventory';
 
     for (const priority of priorities) {
-      if (priority === 'fk_price' && fkPrice !== undefined) {
-        // FK Price wins for print total only; line item still uses actual/customer rate
-        displayRate = customerActualPrice ?? inventoryRate;
-        resolvedFkPrice = fkPrice;
-        pricingModeUsed = 'fk_price';
-        break;
-      }
       if (priority === 'customer_price_master' && customerActualPrice !== undefined) {
         displayRate = customerActualPrice;
-        resolvedFkPrice = undefined; // no FK price involved
         pricingModeUsed = 'customer_price_master';
+        break;
+      }
+      if (priority === 'material_price_master' && matPrice !== undefined) {
+        displayRate = matPrice;
+        pricingModeUsed = 'material_price_master';
         break;
       }
       if (priority === 'inventory') {
         displayRate = inventoryRate;
-        resolvedFkPrice = undefined;
         pricingModeUsed = 'inventory';
         break;
       }

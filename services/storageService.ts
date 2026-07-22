@@ -2156,6 +2156,7 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
                 await saveData('inventory', existingInv, user, true);
             } else {
                 const uPP = change.item.unitsPerPack || 1;
+                const sameNameCode = currentInventory.find(i => (i.name || '').trim().toLowerCase() === (change.item.name || '').trim().toLowerCase() && i.code)?.code;
                 const newInv: Omit<InventoryItem, 'id'> = {
                     organization_id: user.organization_id,
                     name: change.item.name,
@@ -2171,7 +2172,7 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
                     mrp: change.item.mrp,
                     gstPercent: change.item.gstPercent || 0,
                     hsnCode: change.item.hsnCode || '',
-                    code: change.item.materialCode || '',
+                    code: change.item.materialCode || sameNameCode || '',
                     rateA: change.item.rateA,
                     rateB: change.item.rateB,
                     rateC: change.item.rateC,
@@ -2202,6 +2203,31 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
                 if (data) original = fromSupabase('purchases', data);
             } catch (err) {
                 console.warn('[storage:updatePurchase] Failed to fetch original from remote:', err);
+            }
+        }
+
+        // Offline fallback: IDB is disabled in this build (ENABLE_INDEXED_DB = false),
+        // so idb.get() always returns null. Read the original record from the in-memory
+        // cache first (fastest, always up-to-date within the session), then fall back to
+        // SQLite so that the hold→completed status transition fires stock inward correctly.
+        if (!original) {
+            const cached = (memoryCache['PURCHASES'] || []).find((r: any) => r.id === p.id) as Purchase | undefined;
+            if (cached) {
+                original = cached;
+                console.info('[storage:updatePurchase] Resolved original from memory cache.');
+            } else {
+                try {
+                    const rows = await sqliteDb.select<Record<string, any>>(
+                        `SELECT * FROM purchases WHERE id = ? AND organization_id = ?`,
+                        [p.id, user.organization_id]
+                    );
+                    if (rows && rows.length > 0) {
+                        original = fromSupabase('purchases', decodeSqliteRow('purchases', rows[0])) as Purchase;
+                        console.info('[storage:updatePurchase] Resolved original from SQLite.');
+                    }
+                } catch (err) {
+                    console.warn('[storage:updatePurchase] Failed to fetch original from SQLite:', err);
+                }
             }
         }
 
@@ -2258,12 +2284,13 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
                     await saveData('inventory', existingInv, user, true);
                 } else {
                     const uPP = change.item.unitsPerPack || 1;
+                    const sameNameCode = currentInventory.find(i => (i.name || '').trim().toLowerCase() === (change.item.name || '').trim().toLowerCase() && i.code)?.code;
                     const newInv: Omit<InventoryItem, 'id'> = {
                         organization_id: user.organization_id,
                         name: change.item.name, brand: change.item.brand || '', category: change.item.category || 'General', manufacturer: change.item.manufacturer || '',
                         stock: change.units, purchaseFree: change.freeUnits, unitsPerPack: uPP, batch: change.item.batch || 'UNSET',
                         expiry: normalizeImportDate(change.item.expiry) || '', purchasePrice: change.item.purchasePrice, mrp: change.item.mrp,
-                        gstPercent: change.item.gstPercent || 0, hsnCode: change.item.hsnCode || '', code: change.item.materialCode || '',
+                        gstPercent: change.item.gstPercent || 0, hsnCode: change.item.hsnCode || '', code: change.item.materialCode || sameNameCode || '',
                         rateA: change.item.rateA, rateB: change.item.rateB, rateC: change.item.rateC, minStockLimit: 10, is_active: true
                     };
                     logStockMovement({ transactionType: 'purchase-inward', voucherId: p.id, item: newInv.name, batch: newInv.batch || 'UNSET', qty: change.units, qtyIn: change.units, stockBefore: 0, stockAfter: change.units, organizationId: user.organization_id, validationResult: 'allowed', mode: 'strict' });
@@ -2350,6 +2377,7 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
             } else if (diff > 0) {
                 // New inventory item created during update
                 const uPP = data.item.unitsPerPack || 1;
+                const sameNameCode = currentInventory.find(i => (i.name || '').trim().toLowerCase() === (data.item.name || '').trim().toLowerCase() && i.code)?.code;
                 const newInv: Omit<InventoryItem, 'id'> = {
                     organization_id: user.organization_id,
                     name: data.item.name,
@@ -2365,7 +2393,7 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
                     mrp: data.item.mrp,
                     gstPercent: data.item.gstPercent || 0,
                     hsnCode: data.item.hsnCode || '',
-                    code: data.item.materialCode || '',
+                    code: data.item.materialCode || sameNameCode || '',
                     rateA: data.item.rateA,
                     rateB: data.item.rateB,
                     rateC: data.item.rateC,

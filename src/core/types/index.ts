@@ -229,9 +229,9 @@ export interface AppConfigurations {
         voucherNumberingMode?: 'reset' | 'continue';
     };
     pricingPriority?: {
-        priority1: 'fk_price' | 'customer_price_master' | 'inventory';
-        priority2: 'fk_price' | 'customer_price_master' | 'inventory';
-        priority3: 'fk_price' | 'customer_price_master' | 'inventory';
+        priority1: 'customer_price_master' | 'material_price_master' | 'inventory';
+        priority2: 'customer_price_master' | 'material_price_master' | 'inventory';
+        priority3: 'customer_price_master' | 'material_price_master' | 'inventory';
     };
     _isDirty?: boolean;
 }
@@ -361,7 +361,7 @@ export interface BillItem {
     packUnit?: string;
     fk_price_applied?: number | null;
     customer_actual_price?: number | null;
-    pricing_mode_used?: 'fk_price' | 'customer_price_master' | 'inventory';
+    pricing_mode_used?: 'fk_price' | 'customer_price_master' | 'material_price_master' | 'inventory';
     packType?: string;
     taxBasis?: TaxCalculationBasis;
     appliedDiscountId?: string;
@@ -954,6 +954,22 @@ export interface CustomerPriceMasterEntry {
     status: 'active' | 'inactive';
     item_name?: string;
     customer_name?: string;
+    created_at?: string;
+    updated_at?: string;
+    created_by?: string;
+    modified_by?: string;
+    modified_at?: string;
+    _sync_status?: string;
+    _local_only?: number;
+}
+
+export interface MaterialPriceMasterEntry {
+    id: string;
+    organization_id: string;
+    material_id: string;
+    price: number;
+    status: 'active' | 'inactive';
+    item_name?: string;
     created_at?: string;
     updated_at?: string;
     created_by?: string;

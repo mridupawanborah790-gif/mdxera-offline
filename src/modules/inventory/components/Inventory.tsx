@@ -220,9 +220,24 @@ const Inventory: React.FC<InventoryProps> = ({
     }, [baseFilteredItems, lowStockFilter, searchTerm, expiryFilter, parseInventoryExpiryDate, expiryWindow]);
 
     const groupedItems = useMemo<GroupedInventoryRow[]>(() => {
-        const map = new Map<string, InventoryItem[]>();
-        const toKey = (item: InventoryItem) => `${(item.code || '').trim().toLowerCase()}|${(item.name || '').trim().toLowerCase()}`;
+        const nameToCodeMap = new Map<string, string>();
+        filteredItems.forEach(item => {
+            const nameKey = (item.name || '').trim().toLowerCase();
+            const code = (item.code || '').trim().toLowerCase();
+            if (nameKey && code && !nameToCodeMap.has(nameKey)) {
+                nameToCodeMap.set(nameKey, code);
+            }
+        });
 
+        const toKey = (item: InventoryItem) => {
+            const directCode = (item.code || '').trim().toLowerCase();
+            const nameKey = (item.name || '').trim().toLowerCase();
+            const resolvedCode = directCode || nameToCodeMap.get(nameKey);
+            if (resolvedCode) return `code:${resolvedCode}`;
+            return `name:${nameKey}`;
+        };
+
+        const map = new Map<string, InventoryItem[]>();
         filteredItems.forEach(item => {
             const key = toKey(item);
             if (!map.has(key)) map.set(key, []);
@@ -230,7 +245,7 @@ const Inventory: React.FC<InventoryProps> = ({
         });
 
         const rows = Array.from(map.entries()).map(([key, items]) => {
-            const representative = items[0];
+            const representative = items.find(i => Boolean((i.code || '').trim())) || items[0];
             const totalStock = items.reduce((sum, item) => sum + (Number(item.stock) || 0), 0);
             const unitsPerPack = Math.max(1, Number(representative.unitsPerPack) || 1);
             const totalPackQty = Math.floor(totalStock / unitsPerPack);

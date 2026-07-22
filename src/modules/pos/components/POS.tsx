@@ -17,8 +17,8 @@ import { isDateInActiveFiscalYear, resolveFiscalYearConfig } from '@core/utils/f
 import { extractPrescription } from '@core/services/geminiService';
 import * as storage from '@core/services/storageService';
 import { supabase } from '@core/db/supabaseClient';
-import { InventoryItem, Customer, Transaction, BillItem, AppConfigurations, RegisteredPharmacy, Medicine, Purchase, FileInput, MasterPriceMaintainRecord, SalesChallan, DoctorMaster, OrganizationMember, CustomerPriceMasterEntry } from '@core/types';
-import { fetchPriceMaster } from '@modules/customers/services/customerService';
+import { InventoryItem, Customer, Transaction, BillItem, AppConfigurations, RegisteredPharmacy, Medicine, Purchase, FileInput, MasterPriceMaintainRecord, SalesChallan, DoctorMaster, OrganizationMember, CustomerPriceMasterEntry, MaterialPriceMasterEntry } from '@core/types';
+import { fetchPriceMaster, fetchMaterialPriceMaster } from '@modules/customers/services/customerService';
 import { handleEnterToNextField } from '@core/utils/navigation';
 import { fuzzyMatch } from '@core/utils/search';
 import { calculateCustomerReceivableBreakdown, formatExpiryToMMYY, getOutstandingBalance, parseNumber, checkIsExpired, formatVoucherNo } from '@core/utils/helpers';
@@ -438,6 +438,7 @@ const POS = forwardRef<any, POSProps>(({
     const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0]);
     const [cartItems, setCartItems] = useState<BillItem[]>([]);
     const [priceMasterEntries, setPriceMasterEntries] = useState<CustomerPriceMasterEntry[]>([]);
+    const [materialPriceEntries, setMaterialPriceEntries] = useState<MaterialPriceMasterEntry[]>([]);
 
     const isPriceMasterEnabled = configurations?.displayOptions?.enablePriceMaster ?? true;
 
@@ -445,6 +446,9 @@ const POS = forwardRef<any, POSProps>(({
         if (!currentUser || !isPriceMasterEnabled) return;
         fetchPriceMaster(currentUser)
             .then(setPriceMasterEntries)
+            .catch(() => { /* non-fatal fallback */ });
+        fetchMaterialPriceMaster(currentUser)
+            .then(setMaterialPriceEntries)
             .catch(() => { /* non-fatal fallback */ });
     }, [currentUser, isPriceMasterEnabled]);
 
@@ -456,46 +460,42 @@ const POS = forwardRef<any, POSProps>(({
 
             const rateValue = resolveSalesRate(inventoryItem, selectedCustomer?.defaultRateTier);
             const priceMasterRecord = isPriceMasterEnabled ? priceMasterEntries.find(p => p.customer_id === selectedCustomer.id && (p.material_id === inventoryItem.id || p.material_id === inventoryItem.code) && p.status === 'active') : null;
+            const materialPriceRecord = isPriceMasterEnabled ? materialPriceEntries.find(p => (p.material_id === inventoryItem.id || p.material_id === inventoryItem.code) && p.status === 'active') : null;
+
             const custActualPrice = priceMasterRecord?.special_price != null ? Number(priceMasterRecord.special_price) : undefined;
             const fkPriceVal = priceMasterRecord?.fk_price != null ? Number(priceMasterRecord.fk_price) : undefined;
+            const matPriceVal = materialPriceRecord?.price != null ? Number(materialPriceRecord.price) : undefined;
+
             const posPriorities = [
                 configurations?.pricingPriority?.priority1 ?? 'customer_price_master',
-                configurations?.pricingPriority?.priority2 ?? 'fk_price',
+                configurations?.pricingPriority?.priority2 ?? 'material_price_master',
                 configurations?.pricingPriority?.priority3 ?? 'inventory',
             ];
             let posDisplayMrp = Number(inventoryItem.mrp);
             let posDisplayRate = rateValue;
-            let posFkPrice: number | undefined;
-            let posPricingModeUsed: 'fk_price' | 'customer_price_master' | 'inventory' = 'inventory';
+            let posFkPrice: number | undefined = fkPriceVal;
+            let posPricingModeUsed: 'fk_price' | 'customer_price_master' | 'material_price_master' | 'inventory' = 'inventory';
 
             for (const prio of posPriorities) {
-                if (prio === 'fk_price' && fkPriceVal !== undefined) {
-                    if (custActualPrice !== undefined) {
-                        posDisplayRate = custActualPrice;
-                        posDisplayMrp = Number((custActualPrice * (1 + Number(inventoryItem.gstPercent || 0) / 100)).toFixed(2));
-                    } else {
-                        posDisplayRate = rateValue;
-                    }
-                    posFkPrice = fkPriceVal;
-                    posPricingModeUsed = 'fk_price';
-                    break;
-                }
                 if (prio === 'customer_price_master' && custActualPrice !== undefined) {
                     posDisplayRate = custActualPrice;
                     posDisplayMrp = Number((custActualPrice * (1 + Number(inventoryItem.gstPercent || 0) / 100)).toFixed(2));
-                    posFkPrice = undefined;
                     posPricingModeUsed = 'customer_price_master';
+                    break;
+                }
+                if (prio === 'material_price_master' && matPriceVal !== undefined) {
+                    posDisplayRate = matPriceVal;
+                    posDisplayMrp = Number((matPriceVal * (1 + Number(inventoryItem.gstPercent || 0) / 100)).toFixed(2));
+                    posPricingModeUsed = 'material_price_master';
                     break;
                 }
                 if (prio === 'inventory') {
                     posDisplayMrp = Number(inventoryItem.mrp);
                     posDisplayRate = rateValue;
-                    posFkPrice = undefined;
                     posPricingModeUsed = 'inventory';
                     break;
                 }
             }
-
 
             return {
                 ...item,
@@ -506,7 +506,7 @@ const POS = forwardRef<any, POSProps>(({
                 pricing_mode_used: posPricingModeUsed,
             };
         }));
-    }, [selectedCustomer, priceMasterEntries, inventory, configurations?.pricingPriority]);
+    }, [selectedCustomer, priceMasterEntries, materialPriceEntries, inventory, configurations?.pricingPriority]);
 
     const liveInventory = useMemo(() => {
         return inventory.map(i => {
@@ -2084,44 +2084,44 @@ const POS = forwardRef<any, POSProps>(({
         } : batch;
         const rateValue = resolveSalesRate(pricingSource, selectedCustomer?.defaultRateTier);
 
-        // Resolve Price Master pricing (Customer Actual Price vs FK Price vs Inventory)
-        const priceMasterRecord = isPriceMasterEnabled && selectedCustomer?.id
+        // Resolve Price Master pricing (Customer Actual Price vs Material Price vs FK Price vs Inventory)
+        const priceMasterRecord = (isPriceMasterEnabled && selectedCustomer?.id)
             ? priceMasterEntries.find(p => p.customer_id === selectedCustomer.id && (p.material_id === batch.id || p.material_id === batch.code) && p.status === 'active')
             : null;
+        const materialPriceRecord = isPriceMasterEnabled
+            ? materialPriceEntries.find(p => (p.material_id === batch.id || p.material_id === batch.code) && p.status === 'active')
+            : null;
+
         const custActualPrice = priceMasterRecord?.special_price != null ? Number(priceMasterRecord.special_price) : undefined;
         const fkPriceVal = priceMasterRecord?.fk_price != null ? Number(priceMasterRecord.fk_price) : undefined;
+        const matPriceVal = materialPriceRecord?.price != null ? Number(materialPriceRecord.price) : undefined;
+
         const posPriorities = [
             configurations?.pricingPriority?.priority1 ?? 'customer_price_master',
-            configurations?.pricingPriority?.priority2 ?? 'fk_price',
+            configurations?.pricingPriority?.priority2 ?? 'material_price_master',
             configurations?.pricingPriority?.priority3 ?? 'inventory',
         ];
         let posDisplayMrp = Number(activePriceRecord?.mrp || batch.mrp);
         let posDisplayRate = rateValue;
-        let posFkPrice: number | undefined;
-        let posPricingModeUsed: 'fk_price' | 'customer_price_master' | 'inventory' = 'inventory';
+        let posFkPrice: number | undefined = fkPriceVal;
+        let posPricingModeUsed: 'fk_price' | 'customer_price_master' | 'material_price_master' | 'inventory' = 'inventory';
+
         for (const prio of posPriorities) {
-            if (prio === 'fk_price' && fkPriceVal !== undefined) {
-                if (custActualPrice !== undefined) {
-                    posDisplayRate = custActualPrice;
-                    posDisplayMrp = Number((custActualPrice * (1 + Number(batch.gstPercent || 0) / 100)).toFixed(2));
-                } else {
-                    posDisplayRate = rateValue;
-                }
-                posFkPrice = fkPriceVal;
-                posPricingModeUsed = 'fk_price';
-                break;
-            }
             if (prio === 'customer_price_master' && custActualPrice !== undefined) {
                 posDisplayRate = custActualPrice;
                 posDisplayMrp = Number((custActualPrice * (1 + Number(batch.gstPercent || 0) / 100)).toFixed(2));
-                posFkPrice = undefined;
                 posPricingModeUsed = 'customer_price_master';
+                break;
+            }
+            if (prio === 'material_price_master' && matPriceVal !== undefined) {
+                posDisplayRate = matPriceVal;
+                posDisplayMrp = Number((matPriceVal * (1 + Number(batch.gstPercent || 0) / 100)).toFixed(2));
+                posPricingModeUsed = 'material_price_master';
                 break;
             }
             if (prio === 'inventory') {
                 posDisplayMrp = Number(activePriceRecord?.mrp || batch.mrp);
                 posDisplayRate = rateValue;
-                posFkPrice = undefined;
                 posPricingModeUsed = 'inventory';
                 break;
             }

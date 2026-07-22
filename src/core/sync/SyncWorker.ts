@@ -55,6 +55,7 @@ const TABLE_PRIORITY: Record<string, number> = {
   inventory:             40,
   supplier_product_map:  41,
   customer_price_list:   42,
+  material_price_list:   43,
 
   // Transactions (depend on masters + inventory)
   purchases:             50,

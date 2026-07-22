@@ -52,6 +52,7 @@ const FOREGROUND_TABLES: string[] = [
   TABLE.DOCTOR_MASTER,
   TABLE.SUPPLIER_PRODUCT_MAP,
   TABLE.CUSTOMER_PRICE_LIST,
+  TABLE.MATERIAL_PRICE_LIST,
   TABLE.MBC_CARD_TYPES,
   TABLE.MBC_CARD_TEMPLATES,
   // Moved from background to block UI until all history is present:

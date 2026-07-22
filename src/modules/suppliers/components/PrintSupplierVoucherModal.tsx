@@ -143,7 +143,7 @@ const PrintSupplierVoucherModal: React.FC<PrintSupplierVoucherModalProps> = ({
                 </div>
 
                 <div className="flex-1 overflow-y-auto bg-gray-50 p-8 print:p-0 print:bg-white">
-                    <div id="voucher-print-area" className={`relative bg-white shadow-sm mx-auto print:shadow-none print:border-none text-black font-sans ${isA5 ? 'p-6 max-w-[148mm] min-h-[210mm]' : 'p-12 max-w-[210mm] min-h-[297mm] border border-gray-200 shadow-sm'}`}>
+                    <div id="voucher-print-area" className={`relative bg-white shadow-sm mx-auto print:shadow-none print:border-none text-black font-sans ${isA5 ? 'p-3 max-w-[148mm] min-h-[210mm]' : 'p-5 max-w-[210mm] min-h-[297mm] border border-gray-200 shadow-sm'}`}>
                         
                         {voucher.status === 'cancelled' && (
                             <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-50 overflow-hidden">
@@ -283,7 +283,7 @@ const PrintSupplierVoucherModal: React.FC<PrintSupplierVoucherModalProps> = ({
                         overflow: visible !important;
                     }
                     #voucher-print-area { 
-                        padding: ${isA5 ? '8mm 10mm' : '15mm 20mm'} !important; 
+                        padding: ${isA5 ? '3mm 4mm' : '5mm 6mm'} !important; 
                         border: none !important; 
                         width: 100% !important; 
                         max-width: none !important; 

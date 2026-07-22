@@ -15,6 +15,7 @@ import { SQL_014_VOUCHER_SERIES_STATE } from './014_voucher_series_state';
 import { SQL_015_SYNC_META_PER_ORG } from './015_sync_meta_per_org';
 import { SQL_016_MBC_CARD_VALUE_HISTORY } from './016_mbc_card_value_history';
 import { SQL_017_CUSTOMER_PRICE_MASTER } from './017_customer_price_master';
+import { SQL_018_MATERIAL_PRICE_MASTER } from './018_material_price_master';
 
 export interface Migration {
   version: number;
@@ -40,4 +41,5 @@ export const MIGRATIONS: Migration[] = [
   { version: 15, name: '015_sync_meta_per_org', sql: SQL_015_SYNC_META_PER_ORG },
   { version: 16, name: '016_mbc_card_value_history', sql: SQL_016_MBC_CARD_VALUE_HISTORY },
   { version: 17, name: '017_customer_price_master', sql: SQL_017_CUSTOMER_PRICE_MASTER },
+  { version: 18, name: '018_material_price_master', sql: SQL_018_MATERIAL_PRICE_MASTER },
 ];

@@ -2,7 +2,7 @@ import { db } from '@core/db/client';
 import { TABLE } from '@core/db/schema';
 import { SyncQueue } from '@core/sync/SyncQueue';
 import { supabase } from '@core/db/supabaseClient';
-import type { RegisteredPharmacy, Customer, CustomerPriceMasterEntry } from '@core/types';
+import type { RegisteredPharmacy, Customer, CustomerPriceMasterEntry, MaterialPriceMasterEntry } from '@core/types';
 
 function serialize(obj: Record<string, unknown>): Record<string, unknown> {
   const r: Record<string, unknown> = {};
@@ -136,4 +136,46 @@ export async function updatePriceMasterStatus(
     [status, now, id, user.organization_id]
   );
   await SyncQueue.enqueue('UPDATE', TABLE.CUSTOMER_PRICE_LIST, id, { id, status, modified_at: now }, user.organization_id);
+}
+
+export async function fetchMaterialPriceMaster(user: RegisteredPharmacy): Promise<MaterialPriceMasterEntry[]> {
+  const rows = await db.select(
+    `SELECT * FROM ${TABLE.MATERIAL_PRICE_LIST} WHERE organization_id = ? ORDER BY updated_at DESC`,
+    [user.organization_id]
+  );
+  if (rows.length > 0) return rows as unknown as MaterialPriceMasterEntry[];
+
+  const { data } = await supabase
+    .from('material_price_list')
+    .select('*')
+    .eq('organization_id', user.organization_id);
+
+  if (data?.length) await db.bulkUpsert(TABLE.MATERIAL_PRICE_LIST, data.map(serialize));
+  return (data ?? []) as unknown as MaterialPriceMasterEntry[];
+}
+
+export async function saveMaterialPriceMasterEntry(
+  entry: MaterialPriceMasterEntry,
+  user: RegisteredPharmacy
+): Promise<void> {
+  await db.execute(
+    `UPDATE ${TABLE.MATERIAL_PRICE_LIST} SET status = 'inactive', modified_at = ? WHERE organization_id = ? AND material_id = ? AND status = 'active' AND id != ?`,
+    [new Date().toISOString(), user.organization_id, entry.material_id, entry.id]
+  );
+  const row = serialize(entry as unknown as Record<string, unknown>);
+  await db.upsert(TABLE.MATERIAL_PRICE_LIST, row);
+  await SyncQueue.enqueue('INSERT', TABLE.MATERIAL_PRICE_LIST, row.id as string, row, user.organization_id);
+}
+
+export async function updateMaterialPriceMasterStatus(
+  id: string,
+  status: 'active' | 'inactive',
+  user: RegisteredPharmacy
+): Promise<void> {
+  const now = new Date().toISOString();
+  await db.execute(
+    `UPDATE ${TABLE.MATERIAL_PRICE_LIST} SET status = ?, modified_at = ? WHERE id = ? AND organization_id = ?`,
+    [status, now, id, user.organization_id]
+  );
+  await SyncQueue.enqueue('UPDATE', TABLE.MATERIAL_PRICE_LIST, id, { id, status, modified_at: now }, user.organization_id);
 }

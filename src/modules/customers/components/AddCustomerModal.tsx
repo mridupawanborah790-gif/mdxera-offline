@@ -31,6 +31,8 @@ interface AddCustomerModalProps {
     initialName?: string;
     initialPhone?: string;
     getGlLabel?: (id?: string) => string;
+    /** Normalised list of existing customer names for duplicate detection */
+    existingNames?: string[];
 }
 
 const CUSTOMER_GROUP_OPTIONS = ['Sundry Debtors', 'Cash Customers', 'Corporate Customers', 'Retail Customers', 'Government Customers'] as const;
@@ -66,13 +68,14 @@ const createInitialState = (initialName?: string, initialPhone?: string) => ({
     overrideApprovalRequired: false,
 });
 
-const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ isOpen, onClose, onAdd, teamMembers = [], organizationId, defaultControlGlId, initialName, initialPhone, getGlLabel }) => {
+const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ isOpen, onClose, onAdd, teamMembers = [], organizationId, defaultControlGlId, initialName, initialPhone, getGlLabel, existingNames = [] }) => {
     const effectiveControlGlId = useMemo(() => defaultControlGlId || '', [defaultControlGlId]);
     const initialState = useMemo(() => ({ ...createInitialState(initialName, initialPhone), organization_id: organizationId, controlGlId: effectiveControlGlId }), [organizationId, effectiveControlGlId, initialName, initialPhone]);
 
     const [formData, setFormData] = useState(initialState);
     const [isPincodeLoading, setIsPincodeLoading] = useState(false);
     const [showConfirmClose, setShowConfirmClose] = useState(false);
+    const [nameError, setNameError] = useState('');
 
     const isDirty = useMemo(() => {
         return (
@@ -87,6 +90,7 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ isOpen, onClose, on
     useEffect(() => {
         if (isOpen) {
             setFormData(initialState);
+            setNameError('');
         }
     }, [isOpen, initialState]);
 
@@ -138,7 +142,14 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ isOpen, onClose, on
 
     const handleSubmit = () => {
         if (!formData.name.trim()) {
-            alert('Customer Name is required');
+            setNameError('Customer Name is required');
+            return;
+        }
+        // Duplicate name check (case-insensitive, trimmed)
+        const normalised = formData.name.trim().toUpperCase();
+        const isDuplicate = existingNames.some(n => n.trim().toUpperCase() === normalised);
+        if (isDuplicate) {
+            setNameError(`A customer named "${formData.name.trim()}" already exists. Please use a different name.`);
             return;
         }
         if (!organizationId) {
@@ -154,6 +165,7 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ isOpen, onClose, on
             return;
         }
 
+        setNameError('');
         const { openingBalance, asOfDate, ...customerData } = formData;
         const cleanData = {
             ...customerData,
@@ -177,7 +189,8 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ isOpen, onClose, on
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="md:col-span-2">
                                 <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Customer Name *</label>
-                                <input name="name" type="text" value={formData.name} onChange={handleChange} autoFocus className="w-full border border-gray-400 p-2 font-bold text-sm uppercase focus:bg-yellow-50 outline-none" placeholder="e.g. CITY CARE PHARMACY" />
+                                <input name="name" type="text" value={formData.name} onChange={e => { handleChange(e); setNameError(''); }} autoFocus className={`w-full border p-2 font-bold text-sm uppercase focus:bg-yellow-50 outline-none ${nameError ? 'border-red-500 bg-red-50' : 'border-gray-400'}`} placeholder="e.g. CITY CARE PHARMACY" />
+                                {nameError && <p className="mt-1 text-[10px] font-bold text-red-600 ml-1">{nameError}</p>}
                             </div>
                             <div>
                                 <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Phone Number</label>

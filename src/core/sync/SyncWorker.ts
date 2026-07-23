@@ -613,6 +613,9 @@ async function pushCodedRecordsIndividually(tableName: string, records: QueuedRe
 
   for (const record of records) {
     const rawPayload = JSON.parse(record.payload) as Record<string, unknown>;
+    if (!rawPayload.organization_id && record.organization_id) {
+      rawPayload.organization_id = record.organization_id;
+    }
     const recordId = String(rawPayload.id ?? '');
     let attempt = 0;
 
@@ -877,7 +880,21 @@ async function pushBatch(tableName: string, records: QueuedRecord[]): Promise<vo
   } else if (upserts.length > 0) {
     // Decode payloads once; we may renormalise them several times if the
     // server keeps reporting different unknown columns.
-    const rawPayloads = upserts.map((r) => JSON.parse(r.payload) as Record<string, unknown>);
+    const rawPayloads = upserts
+      .map((r) => {
+        const payload = JSON.parse(r.payload) as Record<string, unknown>;
+        if (!payload.organization_id && r.organization_id) {
+          payload.organization_id = r.organization_id;
+        }
+        return payload;
+      })
+      .filter((p) => {
+        if (tableName === 'customer_price_list' && !p.customer_id) {
+          console.warn('[sync] Discarding corrupt customer_price_list queue record missing customer_id:', p.id);
+          return false;
+        }
+        return true;
+      });
 
     // PGRST204 only ever names one missing column at a time, so a row that
     // carries N drifted columns needs up to N retries before it succeeds. We

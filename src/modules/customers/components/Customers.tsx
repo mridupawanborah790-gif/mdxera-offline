@@ -317,6 +317,7 @@ const CustomersPage: React.FC<CustomersProps> = ({ customers, teamMembers = [], 
                     teamMembers={teamMembers}
                     organizationId={currentUser?.organization_id || ''} 
                     getGlLabel={getGlLabel}
+                    existingNames={customers.map(c => c.name)}
                 />
             )}
 

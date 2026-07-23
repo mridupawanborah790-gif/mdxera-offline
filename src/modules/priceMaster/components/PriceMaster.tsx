@@ -61,6 +61,16 @@ const PriceMaster: React.FC<PriceMasterProps> = ({
   const [matShowItemDropdown, setMatShowItemDropdown] = useState(false);
   const [matSaving, setMatSaving] = useState(false);
 
+  // Confirmation Modal state for MRP warnings
+  const [mrpWarningModal, setMrpWarningModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    enteredPriceText: string;
+    latestMrpText: string;
+    onConfirm: () => void;
+  } | null>(null);
+
   // Load Customer Price Master entries
   const loadCustEntries = useCallback(async () => {
     if (!currentUser) return;
@@ -101,6 +111,28 @@ const PriceMaster: React.FC<PriceMasterProps> = ({
     if (safeMrp <= 0) return 0;
     if (safeGst <= 0) return safeMrp;
     return round2(safeMrp / (1 + safeGst / 100));
+  };
+
+  const getLatestBatchForItem = (itemId: string): InventoryItem | null => {
+    const targetItem = inventory.find(i => i.id === itemId);
+    if (!targetItem) return null;
+
+    const matchingBatches = inventory.filter(i =>
+      i.id === itemId ||
+      (i.code && targetItem.code && i.code === targetItem.code) ||
+      (i.name && targetItem.name && i.name.trim().toLowerCase() === targetItem.name.trim().toLowerCase())
+    );
+
+    if (matchingBatches.length === 0) return targetItem;
+
+    const sorted = [...matchingBatches].sort((a: any, b: any) => {
+      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      if (timeA !== timeB) return timeB - timeA;
+      return 0;
+    });
+
+    return sorted[0] || targetItem;
   };
 
   // ---------------------------------------------------------------------------
@@ -160,21 +192,8 @@ const PriceMaster: React.FC<PriceMasterProps> = ({
     setCustShowForm(true);
   };
 
-  const handleSaveCustEntry = async () => {
+  const doSaveCustEntry = async (actualPrice?: number, fkPrice?: number) => {
     if (!currentUser) return;
-    if (!custFormCustomerId) return addNotification('Please select a customer', 'error');
-    if (!custFormItemId) return addNotification('Please select an inventory item', 'error');
-    if (!custFormActualPrice && !custFormFkPrice)
-      return addNotification('At least one price (Customer Rate or FK Rate) must be provided', 'error');
-
-    const actualPrice = custFormActualPrice ? parseFloat(custFormActualPrice) : undefined;
-    const fkPrice = custFormFkPrice ? parseFloat(custFormFkPrice) : undefined;
-
-    if (actualPrice !== undefined && actualPrice < 0)
-      return addNotification('Customer selling rate cannot be negative', 'error');
-    if (fkPrice !== undefined && fkPrice < 0)
-      return addNotification('FK rate cannot be negative', 'error');
-
     const item = inventory.find(i => i.id === custFormItemId);
     const customer = customers.find(c => c.id === custFormCustomerId);
 
@@ -208,6 +227,61 @@ const PriceMaster: React.FC<PriceMasterProps> = ({
     } finally {
       setCustSaving(false);
     }
+  };
+
+  const handleSaveCustEntry = async () => {
+    if (!currentUser) return;
+    if (!custFormCustomerId) return addNotification('Please select a customer', 'error');
+    if (!custFormItemId) return addNotification('Please select an inventory item', 'error');
+    if (!custFormActualPrice && !custFormFkPrice)
+      return addNotification('At least one price (Customer Rate or FK Rate) must be provided', 'error');
+
+    const actualPrice = custFormActualPrice ? parseFloat(custFormActualPrice) : undefined;
+    const fkPrice = custFormFkPrice ? parseFloat(custFormFkPrice) : undefined;
+
+    if (actualPrice !== undefined && actualPrice < 0)
+      return addNotification('Customer selling rate cannot be negative', 'error');
+    if (fkPrice !== undefined && fkPrice < 0)
+      return addNotification('FK rate cannot be negative', 'error');
+
+    // MRP Warning Check against latest batch
+    const latestBatch = getLatestBatchForItem(custFormItemId);
+    const latestMrp = latestBatch ? Number(latestBatch.mrp || 0) : 0;
+    const gstPercent = custSelectedItem ? Number(custSelectedItem.gstPercent || 0) : 0;
+
+    let warningMessage = '';
+    let enteredText = '';
+
+    if (latestMrp > 0) {
+      if (actualPrice !== undefined) {
+        const actualPriceInclGst = round2(actualPrice * (1 + gstPercent / 100));
+        if (actualPrice > latestMrp || actualPriceInclGst > latestMrp) {
+          warningMessage = `The entered customer price (₹${actualPrice.toFixed(2)}${gstPercent > 0 ? ` + GST = ₹${actualPriceInclGst.toFixed(2)}` : ''}) exceeds the MRP of the latest batch (₹${latestMrp.toFixed(2)}).`;
+          enteredText = `₹${actualPrice.toFixed(2)}${gstPercent > 0 ? ` (Incl. GST: ₹${actualPriceInclGst.toFixed(2)})` : ''}`;
+        }
+      }
+      if (!warningMessage && fkPrice !== undefined) {
+        const fkPriceInclGst = round2(fkPrice * (1 + gstPercent / 100));
+        if (fkPrice > latestMrp || fkPriceInclGst > latestMrp) {
+          warningMessage = `The entered FK rate (₹${fkPrice.toFixed(2)}${gstPercent > 0 ? ` + GST = ₹${fkPriceInclGst.toFixed(2)}` : ''}) exceeds the MRP of the latest batch (₹${latestMrp.toFixed(2)}).`;
+          enteredText = `₹${fkPrice.toFixed(2)}${gstPercent > 0 ? ` (Incl. GST: ₹${fkPriceInclGst.toFixed(2)})` : ''}`;
+        }
+      }
+    }
+
+    if (warningMessage) {
+      setMrpWarningModal({
+        isOpen: true,
+        title: 'Warning: Price Exceeds Latest Batch MRP',
+        message: warningMessage,
+        enteredPriceText: enteredText,
+        latestMrpText: `₹${latestMrp.toFixed(2)}`,
+        onConfirm: () => doSaveCustEntry(actualPrice, fkPrice),
+      });
+      return;
+    }
+
+    await doSaveCustEntry(actualPrice, fkPrice);
   };
 
   const handleToggleCustStatus = async (entry: CustomerPriceMasterEntry) => {
@@ -289,15 +363,8 @@ const PriceMaster: React.FC<PriceMasterProps> = ({
     setMatShowForm(true);
   };
 
-  const handleSaveMatEntry = async () => {
+  const doSaveMatEntry = async (price: number) => {
     if (!currentUser) return;
-    if (!matFormItemId) return addNotification('Please select a material / inventory item', 'error');
-    if (!matFormPrice || isNaN(parseFloat(matFormPrice)))
-      return addNotification('Please enter a valid material selling rate', 'error');
-
-    const price = parseFloat(matFormPrice);
-    if (price < 0) return addNotification('Material selling rate cannot be negative', 'error');
-
     const item = inventory.find(i => i.id === matFormItemId);
 
     const entry: MaterialPriceMasterEntry = {
@@ -326,6 +393,46 @@ const PriceMaster: React.FC<PriceMasterProps> = ({
     } finally {
       setMatSaving(false);
     }
+  };
+
+  const handleSaveMatEntry = async () => {
+    if (!currentUser) return;
+    if (!matFormItemId) return addNotification('Please select a material / inventory item', 'error');
+    if (!matFormPrice || isNaN(parseFloat(matFormPrice)))
+      return addNotification('Please enter a valid material selling rate', 'error');
+
+    const price = parseFloat(matFormPrice);
+    if (price < 0) return addNotification('Material selling rate cannot be negative', 'error');
+
+    // MRP Warning Check against latest batch
+    const latestBatch = getLatestBatchForItem(matFormItemId);
+    const latestMrp = latestBatch ? Number(latestBatch.mrp || 0) : 0;
+    const gstPercent = matSelectedItem ? Number(matSelectedItem.gstPercent || 0) : 0;
+
+    let warningMessage = '';
+    let enteredText = '';
+
+    if (latestMrp > 0) {
+      const priceInclGst = round2(price * (1 + gstPercent / 100));
+      if (price > latestMrp || priceInclGst > latestMrp) {
+        warningMessage = `The entered material price (₹${price.toFixed(2)}${gstPercent > 0 ? ` + GST = ₹${priceInclGst.toFixed(2)}` : ''}) exceeds the MRP of the latest batch (₹${latestMrp.toFixed(2)}).`;
+        enteredText = `₹${price.toFixed(2)}${gstPercent > 0 ? ` (Incl. GST: ₹${priceInclGst.toFixed(2)})` : ''}`;
+      }
+    }
+
+    if (warningMessage) {
+      setMrpWarningModal({
+        isOpen: true,
+        title: 'Warning: Material Price Exceeds Latest Batch MRP',
+        message: warningMessage,
+        enteredPriceText: enteredText,
+        latestMrpText: `₹${latestMrp.toFixed(2)}`,
+        onConfirm: () => doSaveMatEntry(price),
+      });
+      return;
+    }
+
+    await doSaveMatEntry(price);
   };
 
   const handleToggleMatStatus = async (entry: MaterialPriceMasterEntry) => {
@@ -1020,6 +1127,70 @@ const PriceMaster: React.FC<PriceMasterProps> = ({
           </div>
         )}
       </div>
+
+      {/* =================================================================== */}
+      {/* MRP EXCEEDED CONFIRMATION WARNING MODAL                             */}
+      {/* =================================================================== */}
+      {mrpWarningModal?.isOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded shadow-2xl max-w-md w-full overflow-hidden border border-gray-400">
+            {/* Header matching theme */}
+            <div className="bg-primary text-white h-9 px-4 flex items-center justify-between border-b border-gray-600 shadow-sm">
+              <div className="flex items-center gap-2 font-black uppercase text-xs tracking-wider">
+                <span className="text-amber-300 text-sm">⚠️</span> {mrpWarningModal.title}
+              </div>
+              <button
+                onClick={() => setMrpWarningModal(null)}
+                className="text-white/80 hover:text-white font-bold text-sm leading-none"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-4 space-y-3 text-xs text-gray-700">
+              <p className="font-bold text-gray-900 leading-relaxed text-xs">
+                {mrpWarningModal.message}
+              </p>
+
+              <div className="bg-amber-50 border border-amber-300 rounded-sm p-3 grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <div className="text-[9px] uppercase font-black text-amber-800">Entered Price</div>
+                  <div className="font-black text-amber-950 text-sm">{mrpWarningModal.enteredPriceText}</div>
+                </div>
+                <div>
+                  <div className="text-[9px] uppercase font-black text-gray-600">Latest Batch MRP</div>
+                  <div className="font-black text-gray-900 text-sm">{mrpWarningModal.latestMrpText}</div>
+                </div>
+              </div>
+
+              <p className="text-[10px] text-gray-500 italic">
+                You can proceed if this rate is intentional, or click <strong>Change Price</strong> to adjust your values.
+              </p>
+            </div>
+
+            {/* Actions matching theme */}
+            <div className="bg-gray-100 px-4 py-3 border-t border-gray-300 flex justify-end gap-2">
+              <button
+                onClick={() => setMrpWarningModal(null)}
+                className="h-8 px-4 bg-gray-200 text-gray-700 text-xs font-black uppercase hover:bg-gray-300 transition-colors"
+              >
+                Change Price
+              </button>
+              <button
+                onClick={() => {
+                  const confirmAction = mrpWarningModal.onConfirm;
+                  setMrpWarningModal(null);
+                  confirmAction();
+                }}
+                className="h-8 px-4 bg-primary text-white text-xs font-black uppercase hover:opacity-90 transition-opacity"
+              >
+                Yes, Proceed & Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -116,10 +116,27 @@ export async function savePriceMasterEntry(
   entry: CustomerPriceMasterEntry,
   user: RegisteredPharmacy
 ): Promise<void> {
+  const now = new Date().toISOString();
+  // Find all existing active records for this org + customer + material
+  const existingActiveRows = await db.select(
+    `SELECT id FROM ${TABLE.CUSTOMER_PRICE_LIST} WHERE organization_id = ? AND customer_id = ? AND material_id = ? AND status = 'active' AND id != ?`,
+    [user.organization_id, entry.customer_id, entry.material_id, entry.id]
+  );
+
+  // Deactivate them locally
   await db.execute(
     `UPDATE ${TABLE.CUSTOMER_PRICE_LIST} SET status = 'inactive', modified_at = ? WHERE organization_id = ? AND customer_id = ? AND material_id = ? AND status = 'active' AND id != ?`,
-    [new Date().toISOString(), user.organization_id, entry.customer_id, entry.material_id, entry.id]
+    [now, user.organization_id, entry.customer_id, entry.material_id, entry.id]
   );
+
+  // Enqueue UPDATE queue items so old active entries are marked inactive in cloud DB
+  for (const oldRow of (existingActiveRows || [])) {
+    const oldId = (oldRow as any).id;
+    if (oldId) {
+      await SyncQueue.enqueue('UPDATE', TABLE.CUSTOMER_PRICE_LIST, oldId, { id: oldId, organization_id: user.organization_id, status: 'inactive', modified_at: now }, user.organization_id);
+    }
+  }
+
   const row = serialize(entry as unknown as Record<string, unknown>);
   await db.upsert(TABLE.CUSTOMER_PRICE_LIST, row);
   await SyncQueue.enqueue('INSERT', TABLE.CUSTOMER_PRICE_LIST, row.id as string, row, user.organization_id);
@@ -135,7 +152,7 @@ export async function updatePriceMasterStatus(
     `UPDATE ${TABLE.CUSTOMER_PRICE_LIST} SET status = ?, modified_at = ? WHERE id = ? AND organization_id = ?`,
     [status, now, id, user.organization_id]
   );
-  await SyncQueue.enqueue('UPDATE', TABLE.CUSTOMER_PRICE_LIST, id, { id, status, modified_at: now }, user.organization_id);
+  await SyncQueue.enqueue('UPDATE', TABLE.CUSTOMER_PRICE_LIST, id, { id, organization_id: user.organization_id, status, modified_at: now }, user.organization_id);
 }
 
 export async function fetchMaterialPriceMaster(user: RegisteredPharmacy): Promise<MaterialPriceMasterEntry[]> {
@@ -158,10 +175,24 @@ export async function saveMaterialPriceMasterEntry(
   entry: MaterialPriceMasterEntry,
   user: RegisteredPharmacy
 ): Promise<void> {
+  const now = new Date().toISOString();
+  const existingActiveRows = await db.select(
+    `SELECT id FROM ${TABLE.MATERIAL_PRICE_LIST} WHERE organization_id = ? AND material_id = ? AND status = 'active' AND id != ?`,
+    [user.organization_id, entry.material_id, entry.id]
+  );
+
   await db.execute(
     `UPDATE ${TABLE.MATERIAL_PRICE_LIST} SET status = 'inactive', modified_at = ? WHERE organization_id = ? AND material_id = ? AND status = 'active' AND id != ?`,
-    [new Date().toISOString(), user.organization_id, entry.material_id, entry.id]
+    [now, user.organization_id, entry.material_id, entry.id]
   );
+
+  for (const oldRow of (existingActiveRows || [])) {
+    const oldId = (oldRow as any).id;
+    if (oldId) {
+      await SyncQueue.enqueue('UPDATE', TABLE.MATERIAL_PRICE_LIST, oldId, { id: oldId, organization_id: user.organization_id, status: 'inactive', modified_at: now }, user.organization_id);
+    }
+  }
+
   const row = serialize(entry as unknown as Record<string, unknown>);
   await db.upsert(TABLE.MATERIAL_PRICE_LIST, row);
   await SyncQueue.enqueue('INSERT', TABLE.MATERIAL_PRICE_LIST, row.id as string, row, user.organization_id);
@@ -177,5 +208,5 @@ export async function updateMaterialPriceMasterStatus(
     `UPDATE ${TABLE.MATERIAL_PRICE_LIST} SET status = ?, modified_at = ? WHERE id = ? AND organization_id = ?`,
     [status, now, id, user.organization_id]
   );
-  await SyncQueue.enqueue('UPDATE', TABLE.MATERIAL_PRICE_LIST, id, { id, status, modified_at: now }, user.organization_id);
+  await SyncQueue.enqueue('UPDATE', TABLE.MATERIAL_PRICE_LIST, id, { id, organization_id: user.organization_id, status, modified_at: now }, user.organization_id);
 }

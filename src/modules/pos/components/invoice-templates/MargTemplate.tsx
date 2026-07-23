@@ -118,7 +118,13 @@ const MargTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrait' 
       const rate         = effectivePricingMode === 'mrp' ? (item.mrp ?? 0) : (item.rate ?? item.mrp ?? 0);
       const unitsPerPack = item.unitsPerPack || 1;
       const billedQty    = (item.quantity || 0) + ((item.looseQuantity || 0) / unitsPerPack);
-      const itemGross    = billedQty * rate;
+
+      // If an FK price was applied at billing time, use it for both the RATE
+      // column and the line AMOUNT so they are consistent with the grand total.
+      const fkRate       = item.fk_price_applied != null ? Number(item.fk_price_applied) : null;
+      const effectiveRate = fkRate != null ? fkRate : rate;
+
+      const itemGross    = billedQty * effectiveRate;
       const tradeDisc    = itemGross * ((item.discountPercent || 0) / 100);
       const lineFlat     = item.itemFlatDiscount || 0;
       const schemeDis    = item.schemeDiscountAmount || 0;
@@ -148,7 +154,7 @@ const MargTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrait' 
         expiry: item.expiry || (inventoryItem?.expiry
           ? new Date(inventoryItem.expiry).toLocaleDateString('en-GB', { month: '2-digit', year: '2-digit' })
           : ''),
-        billedQty, billedRate: rate,
+        billedQty, billedRate: effectiveRate,
         displayAmount: lineAmount,
         displayQty: formatPackLooseQuantity(item.quantity, item.looseQuantity, item.freeQuantity),
         taxableVal, gstAmt, lineTotal: lineAmount,

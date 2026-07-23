@@ -192,9 +192,12 @@ function deserializeJsonFields(row: Record<string, unknown>): Record<string, unk
 
 function serializeConfig(config: Partial<AppConfigurations>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
-  const jsonFields = ['invoice_config', 'purchase_config', 'purchase_order_config',
+  const jsonFields = [
+    'invoice_config', 'purchase_config', 'purchase_order_config',
     'medicine_master_config', 'physical_inventory_config', 'delivery_challan_config',
-    'sales_challan_config', 'display_options', 'modules', 'sidebar'];
+    'sales_challan_config', 'display_options', 'modules', 'sidebar',
+    'pricing_priority', 'fiscal_year_config', 'pos_config', 'purchase_entry_config'
+  ];
 
   for (const [k, v] of Object.entries(config)) {
     const snakeKey = k.replace(/([A-Z])/g, '_$1').toLowerCase();
@@ -208,11 +211,13 @@ function serializeConfig(config: Partial<AppConfigurations>): Record<string, unk
 function deserializeConfig(row: Record<string, unknown>): AppConfigurations {
   const parsed: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(row)) {
+    let val = v;
     if (typeof v === 'string' && (v.startsWith('{') || v.startsWith('['))) {
-      try { parsed[k] = JSON.parse(v); } catch { parsed[k] = v; }
-    } else {
-      parsed[k] = v;
+      try { val = JSON.parse(v); } catch { val = v; }
     }
+    parsed[k] = val;
+    const camelKey = k.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+    parsed[camelKey] = val;
   }
   return parsed as unknown as AppConfigurations;
 }

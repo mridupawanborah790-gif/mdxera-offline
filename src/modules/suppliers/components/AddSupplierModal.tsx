@@ -59,7 +59,9 @@ export const AddSupplierModal: React.FC<{
     prefillData?: Partial<Supplier>;
     defaultControlGlId?: string;
     getGlLabel?: (id?: string) => string;
-}> = ({ isOpen, onClose, onAdd, onDuplicate, organizationId, prefillData, defaultControlGlId, getGlLabel }) => {
+    /** Normalised list of existing supplier names for duplicate detection */
+    existingNames?: string[];
+}> = ({ isOpen, onClose, onAdd, onDuplicate, organizationId, prefillData, defaultControlGlId, getGlLabel, existingNames = [] }) => {
     const initialState = useMemo(() => ({
         ...createInitialState(),
         control_gl_id: defaultControlGlId || '',
@@ -73,11 +75,13 @@ export const AddSupplierModal: React.FC<{
     const [isSaving, setIsSaving] = useState(false);
     const [isPincodeLoading, setIsPincodeLoading] = useState(false);
     const [showConfirmClose, setShowConfirmClose] = useState(false);
+    const [nameError, setNameError] = useState('');
 
     useEffect(() => {
         if (isOpen) {
             setForm(initialState);
             setAsOfDate(new Date().toISOString().split('T')[0]);
+            setNameError('');
         }
     }, [isOpen, initialState]);
 
@@ -139,13 +143,21 @@ export const AddSupplierModal: React.FC<{
 
     const handleSubmit = async () => {
         if (!form.name.trim()) {
-            alert('Supplier Name is required.');
+            setNameError('Supplier Name is required.');
+            return;
+        }
+        // Duplicate name check (case-insensitive, trimmed)
+        const normalised = form.name.trim().toUpperCase();
+        const isDuplicate = existingNames.some(n => n.trim().toUpperCase() === normalised);
+        if (isDuplicate) {
+            setNameError(`A supplier named "${form.name.trim()}" already exists. Please use a different name.`);
             return;
         }
         if (!(form.supplier_group || '').trim()) {
             alert('Supplier Group is required.');
             return;
         }
+        setNameError('');
         setIsSaving(true);
         try {
             const result = await onAdd(form, form.opening_balance || 0, asOfDate);
@@ -167,7 +179,8 @@ export const AddSupplierModal: React.FC<{
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="md:col-span-2">
                                 <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Supplier Trade Name *</label>
-                                <input type="text" name="name" value={form.name} onChange={handleChange} autoFocus className="w-full border border-gray-400 p-2 font-bold text-sm uppercase focus:bg-yellow-50 outline-none" placeholder="e.g. GLOBAL PHARMA DISTRIBUTORS" />
+                                <input type="text" name="name" value={form.name} onChange={e => { handleChange(e); setNameError(''); }} autoFocus className={`w-full border p-2 font-bold text-sm uppercase focus:bg-yellow-50 outline-none ${nameError ? 'border-red-500 bg-red-50' : 'border-gray-400'}`} placeholder="e.g. GLOBAL PHARMA DISTRIBUTORS" />
+                                {nameError && <p className="mt-1 text-[10px] font-bold text-red-600 ml-1">{nameError}</p>}
                             </div>
                             <div>
                                 <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 ml-1">Contact Person</label>

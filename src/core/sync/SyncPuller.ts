@@ -236,6 +236,9 @@ function mirrorOwnerIdColumns(tableName: string, row: Record<string, unknown>): 
 // these values into the adapted payload so the link survives.
 const LOCAL_ONLY_PRESERVE: Record<string, string[]> = {
   inventory: ['code', 'material_id'],
+  // pricing_priority is stored locally but Supabase may not yet have the column
+  // (or may have an older/null value). Always keep the local user's priority order.
+  configurations: ['pricing_priority'],
 };
 
 async function upsertLocalRow(

@@ -354,6 +354,7 @@ const Suppliers: React.FC<SuppliersProps> = ({ suppliers, onAddSupplier, onBulkA
                     defaultControlGlId={defaultSupplierControlGlId}
                     organizationId={currentUser?.organization_id || ''}
                     getGlLabel={getGlLabel}
+                    existingNames={suppliers.map(s => s.name)}
                 />
             )}
 

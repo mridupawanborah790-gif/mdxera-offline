@@ -104,7 +104,7 @@ const SQLITE_JSON_COLUMNS: Record<string, string[]> = {
         'purchase_order_config', 'medicine_master_config',
         'physical_inventory_config', 'delivery_challan_config',
         'sales_challan_config', 'master_shortcuts', 'display_options',
-        'modules', 'sidebar',
+        'modules', 'sidebar', 'pricing_priority', 'fiscal_year_config',
     ],
     customers: ['ledger'],
     suppliers: ['ledger', 'payment_details'],

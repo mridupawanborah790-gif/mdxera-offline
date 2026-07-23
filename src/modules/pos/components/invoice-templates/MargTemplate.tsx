@@ -119,8 +119,17 @@ const MargTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrait' 
       const unitsPerPack = item.unitsPerPack || 1;
       const billedQty    = (item.quantity || 0) + ((item.looseQuantity || 0) / unitsPerPack);
 
-      // If an FK price was applied at billing time, use it for both the RATE
-      // column and the line AMOUNT so they are consistent with the grand total.
+      // Display rate and gross in the line items
+      const displayRate = rate;
+      const displayGross = billedQty * displayRate;
+      const displayTradeDisc = displayGross * ((item.discountPercent || 0) / 100);
+      const displayLineFlat = item.itemFlatDiscount || 0;
+      const displaySchemeDis = item.schemeDiscountAmount || 0;
+      const displayAmount = isIncludingDiscountMode
+        ? Math.max(0, displayGross - displayTradeDisc - displaySchemeDis - displayLineFlat)
+        : Math.max(0, displayGross);
+
+      // If an FK price was applied at billing time, use it for calculations
       const fkRate       = item.fk_price_applied != null ? Number(item.fk_price_applied) : null;
       const effectiveRate = fkRate != null ? fkRate : rate;
 
@@ -154,8 +163,9 @@ const MargTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrait' 
         expiry: item.expiry || (inventoryItem?.expiry
           ? new Date(inventoryItem.expiry).toLocaleDateString('en-GB', { month: '2-digit', year: '2-digit' })
           : ''),
-        billedQty, billedRate: effectiveRate,
-        displayAmount: lineAmount,
+        billedQty, 
+        billedRate: displayRate,
+        displayAmount: displayAmount,
         displayQty: formatPackLooseQuantity(item.quantity, item.looseQuantity, item.freeQuantity),
         taxableVal, gstAmt, lineTotal: lineAmount,
         displayName: (() => {
@@ -193,21 +203,9 @@ const MargTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrait' 
     if (hasFkPrice && !isNonGst) {
       let fkTaxable = 0;
       let fkGst = 0;
-      (bill.items || []).forEach((it: any) => {
-        const qty = Number(it.quantity || it.qty || 0);
-        const fkRate = it.fk_price_applied != null ? Number(it.fk_price_applied) : null;
-        if (fkRate != null) {
-          const lineTaxable = qty * fkRate;
-          const lineGst = lineTaxable * (Number(it.gstPercent || 0) / 100);
-          fkTaxable += lineTaxable;
-          fkGst += lineGst;
-        } else {
-          const lineAmount = Number(it.finalAmount || it.amount || 0);
-          const gstPct = Number(it.gstPercent || 0);
-          const lineTaxable = lineAmount / (1 + gstPct / 100);
-          fkTaxable += lineTaxable;
-          fkGst += lineAmount - lineTaxable;
-        }
+      items.forEach((it: any) => {
+        fkTaxable += it.taxableVal;
+        fkGst += it.gstAmt;
       });
       printSubtotal = fkTaxable;
       printTaxAmount = fkGst;

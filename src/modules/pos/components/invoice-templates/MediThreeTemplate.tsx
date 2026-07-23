@@ -35,7 +35,21 @@ const MediThreeTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portr
       const unitsPerPack = item.unitsPerPack || 1;
       const billedQty = (item.quantity || 0) + ((item.looseQuantity || 0) / unitsPerPack);
       const rate = effectivePricingMode === 'mrp' ? (item.mrp ?? 0) : (item.rate ?? item.mrp ?? 0);
-      const gross = billedQty * rate;
+      
+      // Display rate and gross in the line items
+      const displayRate = rate;
+      const displayGross = billedQty * displayRate;
+      const displayTradeDisc = displayGross * ((item.discountPercent || 0) / 100);
+      const displayFlat = item.itemFlatDiscount || 0;
+      const displayScheme = item.schemeDiscountAmount || 0;
+      const displayLineAmount = isIncludingDiscountMode
+        ? Math.max(0, displayGross - displayTradeDisc - displayFlat - displayScheme)
+        : Math.max(0, displayGross);
+
+      // If an FK price was applied at billing time, use it for calculations
+      const fkRate = (item as any).fk_price_applied != null ? Number((item as any).fk_price_applied) : null;
+      const effectiveRate = fkRate != null ? fkRate : rate;
+      const gross = billedQty * effectiveRate;
       const tradeDiscount = gross * ((item.discountPercent || 0) / 100);
       const flatDiscount = item.itemFlatDiscount || 0;
       const schemeDiscount = item.schemeDiscountAmount || 0;
@@ -62,7 +76,8 @@ const MediThreeTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portr
         taxable,
         gstAmount,
         lineAmount,
-        billedRate: rate
+        displayLineAmount,
+        billedRate: displayRate
       };
     });
 
@@ -394,7 +409,7 @@ const MediThreeTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portr
                       <td className="center">{(item.discountPercent || 0).toFixed(2)}</td>
                       <td className="center num">{item.sgstRate.toFixed(2)}%</td>
                       <td className="center num">{item.cgstRate.toFixed(2)}%</td>
-                      <td className="right num">{item.lineAmount.toFixed(2)}</td>
+                      <td className="right num">{item.displayLineAmount.toFixed(2)}</td>
                     </tr>
                   ))}
 

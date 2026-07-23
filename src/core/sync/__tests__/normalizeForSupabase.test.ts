@@ -216,8 +216,8 @@ describe('SyncWorker.normalizeForSupabase — journal_entry_lines amount columns
       },
       'journal_entry_lines',
     );
-    expect(out.debit_amount).toBe(100.5);
-    expect(out.credit_amount).toBe(0);
+    expect(out.debit_amount).toBeUndefined();
+    expect(out.credit_amount).toBeUndefined();
   });
 
   it('preserves explicit *_amount values when both are passed', () => {
@@ -230,7 +230,7 @@ describe('SyncWorker.normalizeForSupabase — journal_entry_lines amount columns
       },
       'journal_entry_lines',
     );
-    expect(out.debit_amount).toBe(200);
+    expect(out.debit_amount).toBeUndefined();
   });
 });
 

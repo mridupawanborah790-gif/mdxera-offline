@@ -39,7 +39,18 @@ const MediOneTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrai
       const rate = effectivePricingMode === 'mrp' ? (item.mrp ?? 0) : (item.rate ?? item.mrp ?? 0);
       const unitsPerPack = item.unitsPerPack || 1;
       const billedQty = (item.quantity || 0) + ((item.looseQuantity || 0) / unitsPerPack);
-      // If an FK price was applied at billing time, use it for both RATE and AMOUNT
+
+      // Display rate and gross in the line items
+      const displayRate = rate;
+      const displayGross = billedQty * displayRate;
+      const displayTradeDisc = displayGross * ((item.discountPercent || 0) / 100);
+      const displayFlat = item.itemFlatDiscount || 0;
+      const displayScheme = item.schemeDiscountAmount || 0;
+      const displayAmount = isIncludingDiscountMode
+        ? Math.max(0, displayGross - displayTradeDisc - displayScheme - displayFlat)
+        : Math.max(0, displayGross);
+
+      // If an FK price was applied at billing time, use it for calculations
       const fkRate = (item as any).fk_price_applied != null ? Number((item as any).fk_price_applied) : null;
       const effectiveRate = fkRate != null ? fkRate : rate;
       const grossAmount = billedQty * effectiveRate;
@@ -70,8 +81,8 @@ const MediOneTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrai
         expiry: item.expiry || (inventoryItem?.expiry ? new Date(inventoryItem.expiry).toLocaleDateString('en-GB', { month: '2-digit', year: '2-digit' }) : ''),
         taxableVal,
         gstAmt,
-        lineTotal: lineAmount,
-        billedRate: effectiveRate,
+        lineTotal: displayAmount,
+        billedRate: displayRate,
         displayName: (() => {
           const packLabel = item.packType?.trim() || inventoryItem?.packType?.trim() || '';
           return packLabel ? `${item.name} (${packLabel})` : item.name;

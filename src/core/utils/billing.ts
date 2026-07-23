@@ -208,7 +208,7 @@ export const calculateLineNetAmount = (item: BillItem, configurations?: AppConfi
   return Math.max(0, afterTrade - scheme);
 };
 
-export const getPrintGrandTotal = (bill: { items?: any[]; roundOff?: number; total?: number; billType?: string } | null | undefined): number => {
+export const getPrintGrandTotal = (bill: { items?: any[]; roundOff?: number; total?: number; billType?: string; pricingMode?: string; configurations?: any } | null | undefined): number => {
   if (!bill) return 0;
   const items = bill.items || [];
   const isNonGst = (bill as any).billType === 'non-gst';
@@ -225,7 +225,34 @@ export const getPrintGrandTotal = (bill: { items?: any[]; roundOff?: number; tot
       const lineGst = lineTaxable * (gstPercent / 100);
       return sum + lineTaxable + lineGst;
     }
-    return sum + Number(it.finalAmount || it.amount || 0);
+    
+    // Fallback: calculate the line's proper tax-inclusive price using the item's standard rate
+    const rate = (bill.pricingMode === 'mrp') ? (it.mrp ?? 0) : (it.rate ?? it.mrp ?? 0);
+    const unitsPerPack = it.unitsPerPack || 1;
+    const qty = Number(it.quantity || it.qty || 0) + (Number(it.looseQuantity || 0) / unitsPerPack);
+    const itemGross = qty * rate;
+    const discountPercent = Number(it.discountPercent || 0);
+    const tradeDisc = itemGross * (discountPercent / 100);
+    const lineFlat = Number(it.itemFlatDiscount || 0);
+    const schemeDis = Number(it.schemeDiscountAmount || 0);
+    
+    const lineAmountMode = resolvePosLineAmountCalculationMode(bill.configurations);
+    const isIncludingDiscountMode = lineAmountMode === 'including_discount';
+    const lineAmount = isIncludingDiscountMode
+      ? Math.max(0, itemGross - tradeDisc - schemeDis - lineFlat)
+      : Math.max(0, itemGross);
+      
+    const effectiveGst = isNonGst ? 0 : Number(it.gstPercent || 0);
+    const isInclusive = bill.pricingMode === 'mrp';
+    
+    const taxableVal = isInclusive && effectiveGst > 0
+      ? lineAmount / (1 + effectiveGst / 100) : lineAmount;
+    const gstAmt = isInclusive
+      ? lineAmount - taxableVal
+      : taxableVal * (effectiveGst / 100);
+      
+    const lineTotal = taxableVal + gstAmt;
+    return sum + lineTotal;
   }, 0);
 
   return Number((fkSum + roundOff).toFixed(2));

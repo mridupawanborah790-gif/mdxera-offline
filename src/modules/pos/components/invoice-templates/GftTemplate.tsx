@@ -37,7 +37,21 @@ const GftTemplate: React.FC<TemplateProps> = ({ bill }) => {
         const rate = effectivePricingMode === 'mrp' ? (item.mrp ?? 0) : (item.rate ?? item.mrp ?? 0);
         const unitsPerPack = item.unitsPerPack || 1;
         const billedQty = (item.quantity || 0) + ((item.looseQuantity || 0) / unitsPerPack);
-        const grossAmount = billedQty * rate;
+
+        // Display rate and gross in the line items
+        const displayRate = rate;
+        const displayGross = billedQty * displayRate;
+        const displayTradeDisc = displayGross * ((item.discountPercent || 0) / 100);
+        const displayFlat = item.itemFlatDiscount || 0;
+        const displayScheme = item.schemeDiscountAmount || 0;
+        const displayAmount = isIncludingDiscountMode
+          ? Math.max(0, displayGross - displayTradeDisc - displayScheme - displayFlat)
+          : Math.max(0, displayGross);
+
+        // If an FK price was applied at billing time, use it for calculations
+        const fkRate = (item as any).fk_price_applied != null ? Number((item as any).fk_price_applied) : null;
+        const effectiveRate = fkRate != null ? fkRate : rate;
+        const grossAmount = billedQty * effectiveRate;
         const tradeDiscountAmount = grossAmount * ((item.discountPercent || 0) / 100);
         const schemeDiscountAmount = item.schemeDiscountAmount || 0;
         const flatDiscountAmount = item.itemFlatDiscount || 0;
@@ -73,9 +87,9 @@ const GftTemplate: React.FC<TemplateProps> = ({ bill }) => {
           const packLabel = item.packType?.trim() || inventoryItem?.packType?.trim() || '';
           return packLabel ? `${item.name} (${packLabel})` : item.name;
         })(),
-            finalAmount: finalAmount,
+            finalAmount: displayAmount,
             taxableValue,
-            billedRate: rate
+            billedRate: displayRate
         };
     });
 

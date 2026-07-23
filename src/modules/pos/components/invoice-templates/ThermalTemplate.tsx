@@ -30,7 +30,20 @@ const ThermalTemplate: React.FC<TemplateProps> = ({ bill }) => {
       const rate = effectivePricingMode === 'mrp' ? (item.mrp ?? 0) : (item.rate ?? item.mrp ?? 0);
       const unitsPerPack = item.unitsPerPack || 1;
       const billedQty = (item.quantity || 0) + ((item.looseQuantity || 0) / unitsPerPack);
-      const grossAmount = rate * billedQty;
+
+      // Display rate and gross in the line items
+      const displayRate = rate;
+      const displayGross = rate * billedQty;
+      const displayTradeDisc = displayGross * ((item.discountPercent || 0) / 100);
+      const displayScheme = item.schemeDiscountAmount || 0;
+      const displayPrice = isIncludingDiscountMode
+        ? Math.max(0, displayGross - (displayTradeDisc + displayScheme))
+        : Math.max(0, displayGross);
+
+      // If an FK price was applied at billing time, use it for calculations
+      const fkRate = (item as any).fk_price_applied != null ? Number((item as any).fk_price_applied) : null;
+      const effectiveRate = fkRate != null ? fkRate : rate;
+      const grossAmount = effectiveRate * billedQty;
       const tradeDiscountAmount = grossAmount * ((item.discountPercent || 0) / 100);
       const schemeDiscountAmount = item.schemeDiscountAmount || 0;
       const itemTotalDiscount = tradeDiscountAmount + schemeDiscountAmount;
@@ -59,12 +72,13 @@ const ThermalTemplate: React.FC<TemplateProps> = ({ bill }) => {
         ...item,
         rate,
         finalPrice,
+        displayPrice,
         gstAmount,
         taxableValue,
         itemTotalDiscount,
         batch,
         expiry,
-        billedRate: rate
+        billedRate: displayRate
       };
     });
 
@@ -152,7 +166,7 @@ const ThermalTemplate: React.FC<TemplateProps> = ({ bill }) => {
               </td>
               <td className="py-0.5 text-center">{formatPackLooseQuantity(item.quantity, item.looseQuantity, item.freeQuantity)}</td>
               {showRateColumn && <td className="py-0.5 text-right">{(item.billedRate || 0).toFixed(2)}</td>}
-              <td className="py-0.5 text-right font-semibold">{item.finalPrice.toFixed(2)}</td>
+              <td className="py-0.5 text-right font-semibold">{item.displayPrice.toFixed(2)}</td>
             </tr>
           ))}
         </tbody>

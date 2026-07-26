@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import type { DetailedBill, InventoryItem, AppConfigurations } from '@core/types';
 import { numberToWords } from "@core/utils/numberToWords";
 import { formatPackLooseQuantity } from "@core/utils/quantity";
-import { isRateFieldAvailable, resolveEffectivePricingMode, resolvePosLineAmountCalculationMode, getPrintGrandTotal } from "@core/utils/billing";
+import { isRateFieldAvailable, resolveEffectivePricingMode, resolvePosLineAmountCalculationMode, getPrintGrandTotal, getDisplaySchemePercent, hasLineLevelSchemeDiscount } from "@core/utils/billing";
 import BankDetailsInline from './BankDetailsInline';
 
 interface TemplateProps {
@@ -18,6 +18,7 @@ const AbhigyanTemplate: React.FC<TemplateProps> = ({ bill }) => {
   const companyAccountNumber = (bill.pharmacy as any).bank_account_number || (bill.pharmacy as any).account_number;
   const companyIfscCode = (bill.pharmacy as any).bank_ifsc_code || (bill.pharmacy as any).ifsc_code;
   const showRateColumn = isRateFieldAvailable(bill.configurations);
+  const showSchemeColumn = (bill.items || []).some(item => hasLineLevelSchemeDiscount(item));
   const posLineAmountMode = resolvePosLineAmountCalculationMode(bill.configurations);
   const isIncludingDiscountMode = posLineAmountMode === 'including_discount';
 
@@ -217,12 +218,13 @@ const AbhigyanTemplate: React.FC<TemplateProps> = ({ bill }) => {
           <thead>
               <tr>
                   <th className="w-[5%]">Sl.</th>
-                  <th className="w-[36%] text-left">Description of Goods</th>
+                  <th style={{ width: showSchemeColumn ? '30%' : '36%' }} className="text-left">Description of Goods</th>
                   <th className="w-[9%]">Pack</th>
                   <th className="w-[10%]">HSN/SAC</th>
                   <th className="w-[8%]">GST</th>
                   <th className="w-[8%]">Qty</th>
                   {showRateColumn && <th className="w-[8%]">Rate</th>}
+                  {showSchemeColumn && <th className="w-[6%]">Sch%</th>}
                   <th className="w-[6%]">Per</th>
                   <th className="w-[10%] text-right">Amount</th>
               </tr>
@@ -236,6 +238,11 @@ const AbhigyanTemplate: React.FC<TemplateProps> = ({ bill }) => {
                       <td className="text-center">{item.gstRate}%</td>
                       <td className="text-center">{formatPackLooseQuantity(item.quantity, item.looseQuantity, item.freeQuantity)}</td>
                       {showRateColumn && <td className="text-center">{(item.billedRate ?? 0).toFixed(2)}</td>}
+                      {showSchemeColumn && (
+                          <td className="text-center font-bold text-emerald-700">
+                              {getDisplaySchemePercent(item) > 0 ? `${getDisplaySchemePercent(item).toFixed(1)}%` : ''}
+                          </td>
+                      )}
                       <td className="text-center">{item.unitLabel}</td>
                       <td className="text-right font-bold">{item.lineTotal.toFixed(2)}</td>
                   </tr>
@@ -250,12 +257,12 @@ const AbhigyanTemplate: React.FC<TemplateProps> = ({ bill }) => {
                       <React.Fragment key={rate}>
                         <tr className={idx === 0 ? "border-t-black row-min-h" : "row-min-h"}>
                             <td className="border-l border-r border-black"></td>
-                            <td className="text-right font-bold italic border-l border-r border-black" colSpan={6}>Output @{parseFloat(rate)/2}% CGST</td>
+                            <td className="text-right font-bold italic border-l border-r border-black" colSpan={6 + (showSchemeColumn ? 1 : 0)}>Output @{parseFloat(rate)/2}% CGST</td>
                             <td className="text-right border-l border-r border-black">{v.cgst.toFixed(2)}</td>
                         </tr>
                         <tr className="row-min-h">
                             <td className="border-l border-r border-black"></td>
-                            <td className="text-right font-bold italic border-l border-r border-black" colSpan={6}>Output @{parseFloat(rate)/2}% SGST</td>
+                            <td className="text-right font-bold italic border-l border-r border-black" colSpan={6 + (showSchemeColumn ? 1 : 0)}>Output @{parseFloat(rate)/2}% SGST</td>
                             <td className="text-right border-l border-r border-black">{v.sgst.toFixed(2)}</td>
                         </tr>
                       </React.Fragment>
@@ -263,10 +270,16 @@ const AbhigyanTemplate: React.FC<TemplateProps> = ({ bill }) => {
               })}
           </tbody>
           <tfoot>
+              {calculations.billDiscount > 0 && (
+                  <tr className="bg-emerald-50 text-emerald-800 border-t border-black text-[8pt]">
+                      <td colSpan={4 + 1 + (showRateColumn ? 1 : 0) + (showSchemeColumn ? 1 : 0)} className="p-1 text-right font-bold uppercase">Total Scheme Discount:</td>
+                      <td className="p-1 text-right font-bold">₹ {calculations.billDiscount.toFixed(2)}</td>
+                  </tr>
+              )}
               <tr className="bg-gray-50 border-t border-black">
                   <td colSpan={4} className="p-1 text-right font-bold uppercase text-[8pt]">Total</td>
                   <td className="p-1 text-center font-bold text-[8.5pt]">{totalQty.toFixed(2)}</td>
-                  <td colSpan={2}></td>
+                  <td colSpan={1 + (showRateColumn ? 1 : 0) + (showSchemeColumn ? 1 : 0)}></td>
                   <td className="p-1 text-right font-bold text-[9.5pt]">₹ {calculations.printGrandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
               </tr>
           </tfoot>

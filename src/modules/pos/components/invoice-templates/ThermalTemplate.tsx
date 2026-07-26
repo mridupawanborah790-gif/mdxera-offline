@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import type { DetailedBill, InventoryItem, AppConfigurations } from '@core/types';
 import { formatExpiryToMMYY } from "@core/utils/helpers";
 import { formatPackLooseQuantity } from "@core/utils/quantity";
-import { isRateFieldAvailable, resolveEffectivePricingMode, resolvePosLineAmountCalculationMode, getPrintGrandTotal } from "@core/utils/billing";
+import { isRateFieldAvailable, resolveEffectivePricingMode, resolvePosLineAmountCalculationMode, getPrintGrandTotal, getDisplaySchemePercent } from "@core/utils/billing";
 
 interface TemplateProps {
   bill: DetailedBill & { inventory?: InventoryItem[]; configurations: AppConfigurations; };
@@ -163,6 +163,11 @@ const ThermalTemplate: React.FC<TemplateProps> = ({ bill }) => {
                   {item.batch && item.expiry && <span> | </span>}
                   {item.expiry && <span>Exp {item.expiry}</span>}
                 </div>
+                {getDisplaySchemePercent(item) > 0 && (
+                  <div className="text-[8px] text-emerald-700 font-bold">
+                    Scheme Disc: {getDisplaySchemePercent(item).toFixed(2)}%
+                  </div>
+                )}
               </td>
               <td className="py-0.5 text-center">{formatPackLooseQuantity(item.quantity, item.looseQuantity, item.freeQuantity)}</td>
               {showRateColumn && <td className="py-0.5 text-right">{(item.billedRate || 0).toFixed(2)}</td>}
@@ -175,8 +180,11 @@ const ThermalTemplate: React.FC<TemplateProps> = ({ bill }) => {
       <div className="border-t border-dashed border-black mt-1 pt-1 space-y-0.5 text-[9px]">
         <div className="flex justify-between"><span>Items</span><span>{billDetails.totalQty}</span></div>
         <div className="flex justify-between"><span>Subtotal</span><span>₹{billDetails.subtotal.toFixed(2)}</span></div>
-        {billDetails.discount > 0 && (
-          <div className="flex justify-between"><span>Discount</span><span>-₹{billDetails.discount.toFixed(2)}</span></div>
+        {bill.totalItemDiscount > 0 && (
+          <div className="flex justify-between"><span>Trade Discount</span><span>-₹{bill.totalItemDiscount.toFixed(2)}</span></div>
+        )}
+        {bill.schemeDiscount > 0 && (
+          <div className="flex justify-between text-emerald-700 font-semibold"><span>Scheme Discount</span><span>-₹{bill.schemeDiscount.toFixed(2)}</span></div>
         )}
         <div className="flex justify-between"><span>Taxable Amount</span><span>₹{billDetails.taxableAmount.toFixed(2)}</span></div>
 

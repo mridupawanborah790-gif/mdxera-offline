@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import type { AppConfigurations, DetailedBill, InventoryItem } from '@core/types';
 import { numberToWords } from "@core/utils/numberToWords";
-import { isRateFieldAvailable, resolveEffectivePricingMode, resolvePosLineAmountCalculationMode, getPrintGrandTotal } from "@core/utils/billing";
+import { isRateFieldAvailable, resolveEffectivePricingMode, resolvePosLineAmountCalculationMode, getPrintGrandTotal, getDisplaySchemePercent, hasLineLevelSchemeDiscount } from "@core/utils/billing";
 import { formatPackLooseQuantity } from "@core/utils/quantity";
 import BankDetailsInline from './BankDetailsInline';
 
@@ -23,6 +23,7 @@ const MediThreeTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portr
   const companyAccountNumber = (bill.pharmacy as any).bank_account_number || (bill.pharmacy as any).account_number;
   const companyIfscCode = (bill.pharmacy as any).bank_ifsc_code || (bill.pharmacy as any).ifsc_code;
   const showRateColumn = isRateFieldAvailable(bill.configurations);
+  const showSchemeColumn = (bill.items || []).some(item => hasLineLevelSchemeDiscount(item));
   const posLineAmountMode = resolvePosLineAmountCalculationMode(bill.configurations);
   const isIncludingDiscountMode = posLineAmountMode === 'including_discount';
 
@@ -119,7 +120,7 @@ const MediThreeTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portr
   const columnWidths = isLandscape
     ? {
         sn: '3%',
-        description: '24%',
+        description: showSchemeColumn ? '20%' : '24%',
         manufacturer: '10%',
         pack: '6%',
         hsn: '7%',
@@ -129,13 +130,14 @@ const MediThreeTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portr
         rate: '6%',
         expiry: '6%',
         discount: '5%',
+        scheme: '4%',
         sgst: '4%',
         cgst: '4%',
         amount: '5%',
       }
     : {
         sn: '3%',
-        description: '18%',
+        description: showSchemeColumn ? '14%' : '18%',
         manufacturer: '8%',
         pack: '5%',
         hsn: '8%',
@@ -145,6 +147,7 @@ const MediThreeTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portr
         rate: '6%',
         expiry: '6%',
         discount: '5%',
+        scheme: '4%',
         sgst: '5%',
         cgst: '5%',
         amount: '10%',
@@ -388,6 +391,7 @@ const MediThreeTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portr
                     {showRateColumn && <th style={{ width: columnWidths.rate }}>Rate</th>}
                     <th style={{ width: columnWidths.expiry }}>Expiry</th>
                     <th style={{ width: columnWidths.discount }}>Disc%</th>
+                    {showSchemeColumn && <th style={{ width: columnWidths.scheme }}>Sch%</th>}
                     <th style={{ width: columnWidths.sgst }}>SGST</th>
                     <th style={{ width: columnWidths.cgst }}>CGST</th>
                     <th style={{ width: columnWidths.amount }}>Amount</th>
@@ -407,6 +411,11 @@ const MediThreeTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portr
                       {showRateColumn && <td className="right num">{(item.billedRate || 0).toFixed(2)}</td>}
                       <td className="center">{item.expiry}</td>
                       <td className="center">{(item.discountPercent || 0).toFixed(2)}</td>
+                      {showSchemeColumn && (
+                        <td className="center num text-emerald-700 font-semibold">
+                          {getDisplaySchemePercent(item) > 0 ? getDisplaySchemePercent(item).toFixed(2) : ''}
+                        </td>
+                      )}
                       <td className="center num">{item.sgstRate.toFixed(2)}%</td>
                       <td className="center num">{item.cgstRate.toFixed(2)}%</td>
                       <td className="right num">{item.displayLineAmount.toFixed(2)}</td>
@@ -432,7 +441,7 @@ const MediThreeTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portr
                     <div className="invoice-bottom medi-three-summary-right">
                       <div className="row"><span>Sub Total</span><strong>{totals.subTotal.toFixed(2)}</strong></div>
                       {!isIncludingDiscountMode && totals.tradeDiscount > 0 && <div className="row"><span>Trade Discount</span><strong>-{totals.tradeDiscount.toFixed(2)}</strong></div>}
-                      {totals.discount > 0 && <div className="row"><span>Discount</span><strong>-{totals.discount.toFixed(2)}</strong></div>}
+                      {totals.discount > 0 && <div className="row text-emerald-700 font-semibold"><span>Scheme Discount</span><strong>-{totals.discount.toFixed(2)}</strong></div>}
                       <div className="row"><span>Tax Total</span><strong>{totals.taxTotal.toFixed(2)}</strong></div>
                       <div className="row grand"><span>Grand Total</span><span>{totals.printGrandTotal.toFixed(2)}</span></div>
                     </div>

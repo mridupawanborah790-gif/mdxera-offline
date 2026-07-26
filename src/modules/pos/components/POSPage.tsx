@@ -922,7 +922,7 @@ const POS = forwardRef<any, POSProps>(({
             return normalized !== '' && !['NEW-STOCK', 'NEW-BATCH', 'N/A', 'NA'].includes(normalized);
         };
 
-        const candidateBatches = productWrapper.batches.filter(b => isValidBatch(b.batch));
+        const candidateBatches = productWrapper.batches.filter(b => isValidBatch(b.batch) || Number(b.stock || 0) > 0);
 
         if (candidateBatches.length === 1) {
             addSelectedBatchToGrid(candidateBatches[0]);

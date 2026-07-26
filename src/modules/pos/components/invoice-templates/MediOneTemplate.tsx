@@ -4,7 +4,7 @@ import React, { useMemo } from 'react';
 import type { DetailedBill, InventoryItem, AppConfigurations } from '@core/types';
 import { formatPackLooseQuantity } from "@core/utils/quantity";
 import { numberToWords } from "@core/utils/numberToWords";
-import { resolveEffectivePricingMode, resolvePosLineAmountCalculationMode, getPrintGrandTotal } from "@core/utils/billing";
+import { resolveEffectivePricingMode, resolvePosLineAmountCalculationMode, getPrintGrandTotal, getDisplaySchemePercent, hasLineLevelSchemeDiscount } from "@core/utils/billing";
 import BankDetailsInline from './BankDetailsInline';
 
 interface TemplateProps {
@@ -24,6 +24,7 @@ const MediOneTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrai
   const companyBankName = (bill.pharmacy as any).bank_account_name || (bill.pharmacy as any).bank_name;
   const companyAccountNumber = (bill.pharmacy as any).bank_account_number || (bill.pharmacy as any).account_number;
   const companyIfscCode = (bill.pharmacy as any).bank_ifsc_code || (bill.pharmacy as any).ifsc_code;
+  const showSchemeColumn = (bill.items || []).some(item => hasLineLevelSchemeDiscount(item));
   const posLineAmountMode = resolvePosLineAmountCalculationMode(bill.configurations);
   const isIncludingDiscountMode = posLineAmountMode === 'including_discount';
 
@@ -219,12 +220,13 @@ const MediOneTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrai
             <thead>
               <tr>
                 <th className="w-[5%]">#</th>
-                <th className="text-left w-[32%]">Item Description</th>
+                <th style={{ width: showSchemeColumn ? '26%' : '32%' }} className="text-left">Item Description</th>
                 <th className="w-[8%]">Pack</th>
                 <th className="w-[12%]">Batch</th>
                 <th className="w-[8%]">Exp</th>
                 <th className="w-[8%]">Qty</th>
                 <th className="w-[10%] text-right">MRP</th>
+                {showSchemeColumn && <th className="w-[6%] text-right">Sch%</th>}
                 <th className="w-[17%] text-right">Amount</th>
               </tr>
             </thead>
@@ -237,6 +239,11 @@ const MediOneTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrai
                   <td className="text-center text-[7pt]">{item.expiry}</td>
                   <td className="text-center font-semibold">{formatPackLooseQuantity(item.quantity, item.looseQuantity, item.freeQuantity)}</td>
                   <td className="text-right">{(item.mrp || 0).toFixed(2)}</td>
+                  {showSchemeColumn && (
+                    <td className="text-right text-emerald-700 font-semibold">
+                      {getDisplaySchemePercent(item) > 0 ? `${getDisplaySchemePercent(item).toFixed(1)}%` : ''}
+                    </td>
+                  )}
                   <td className="text-right font-semibold">{(item.lineTotal || 0).toFixed(2)}</td>
                 </tr>
               ))}
@@ -245,7 +252,7 @@ const MediOneTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrai
             {pageIdx === calculations.itemChunks.length - 1 && (
                 <tfoot>
                     <tr className="bg-gray-50">
-                        <td colSpan={5} className="text-right p-1 uppercase text-[7pt]">Page Total Items:</td>
+                        <td colSpan={5 + (showSchemeColumn ? 1 : 0)} className="text-right p-1 uppercase text-[7pt]">Page Total Items:</td>
                         <td className="text-center p-1">{chunk.reduce((sum, i) => sum + i.quantity, 0)}</td>
                         <td colSpan={2} className="text-right p-1 text-[9pt]">₹ {chunk.reduce((sum, i) => sum + (i.lineTotal || 0), 0).toFixed(2)}</td>
                     </tr>
@@ -281,10 +288,12 @@ const MediOneTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrai
                             <span>+{(calculations.totalGst || 0).toFixed(2)}</span>
                         </div>
                       )}
-                      <div className="flex justify-between font-bold text-emerald-700">
-                          <span>Savings:</span>
-                          <span>-{(calculations.billDiscount || 0).toFixed(2)}</span>
-                      </div>
+                      {calculations.billDiscount > 0 && (
+                        <div className="flex justify-between font-bold text-emerald-700">
+                            <span>Scheme Disc:</span>
+                            <span>-{(calculations.billDiscount || 0).toFixed(2)}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between font-semibold text-blue-900 border-t border-black pt-1 text-[11pt]">
                           <span>NET AMT:</span>
                           <span>₹ {calculations.printGrandTotal.toFixed(2)}</span>

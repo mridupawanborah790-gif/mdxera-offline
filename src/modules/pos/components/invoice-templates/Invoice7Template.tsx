@@ -1,7 +1,7 @@
 import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DetailedBill, InventoryItem, AppConfigurations } from '@core/types';
 import { formatPackLooseQuantity } from "@core/utils/quantity";
-import { isRateFieldAvailable, resolveEffectivePricingMode, resolvePosLineAmountCalculationMode, getPrintGrandTotal } from "@core/utils/billing";
+import { isRateFieldAvailable, resolveEffectivePricingMode, resolvePosLineAmountCalculationMode, getPrintGrandTotal, getDisplaySchemePercent } from "@core/utils/billing";
 
 interface TemplateProps {
   bill: DetailedBill & { inventory?: InventoryItem[]; configurations: AppConfigurations; };
@@ -296,7 +296,14 @@ const Invoice7Template: React.FC<TemplateProps> = ({ bill }) => {
                         <td className="py-0.5 text-center">{formatPackLooseQuantity(item.quantity, item.looseQuantity, item.freeQuantity)}</td>
                         <td className="py-0.5 pr-1 break-words">
                           <div className="font-semibold">{item.name}</div>
-                          <div className="text-[7px] text-gray-700">GST {item.gstPercent || 0}%</div>
+                          <div className="text-[7px] text-gray-700">
+                            GST {item.gstPercent || 0}%
+                            {getDisplaySchemePercent(item) > 0 && (
+                              <span className="text-emerald-700 font-bold ml-1">
+                                (Sch: {getDisplaySchemePercent(item).toFixed(2)}%)
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-0.5 text-right font-semibold">{item.displayPrice.toFixed(2)}</td>
                       </tr>
@@ -310,7 +317,12 @@ const Invoice7Template: React.FC<TemplateProps> = ({ bill }) => {
               <div className="footer">
                 <div className="border-t border-dashed border-black mt-1 pt-1 space-y-0.5 text-[8px]">
                   <div className="flex justify-between"><span>Subtotal</span><span>₹{billDetails.subtotal.toFixed(2)}</span></div>
-                  {billDetails.discount > 0 && <div className="flex justify-between"><span>Discount</span><span>-₹{billDetails.discount.toFixed(2)}</span></div>}
+                  {bill.totalItemDiscount > 0 && (
+                    <div className="flex justify-between"><span>Trade Discount</span><span>-₹{bill.totalItemDiscount.toFixed(2)}</span></div>
+                  )}
+                  {bill.schemeDiscount > 0 && (
+                    <div className="flex justify-between text-emerald-700 font-semibold"><span>Scheme Discount</span><span>-₹{bill.schemeDiscount.toFixed(2)}</span></div>
+                  )}
                   <div className="flex justify-between"><span>Taxable</span><span>₹{billDetails.taxableAmount.toFixed(2)}</span></div>
                   {!isNonGst && <div className="flex justify-between"><span>GST</span><span>₹{billDetails.totalGst.toFixed(2)}</span></div>}
                 </div>

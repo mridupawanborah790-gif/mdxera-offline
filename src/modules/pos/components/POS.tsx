@@ -2008,7 +2008,7 @@ const POS = forwardRef<any, POSProps>(({
     };
     const triggerBatchSelection = (productWrapper: { item: InventoryItem; batches: InventoryItem[] }) => {
         const candidateBatches = productWrapper.batches
-            .filter(b => isRealBatch(b.batch));
+            .filter(b => isRealBatch(b.batch) || Number(b.stock || 0) > 0);
 
         if (candidateBatches.length === 1) {
             addSelectedBatchToGrid(candidateBatches[0]);

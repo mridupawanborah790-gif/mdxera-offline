@@ -8,8 +8,28 @@ interface GeminiOcrRequest {
 }
 
 const cleanJsonString = (text: string): string => {
-    if (!text) return '[]';
-    return text.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/\s*```$/, '').trim();
+    if (!text) return '{}';
+    
+    // 1. Remove <think>...</think> reasoning blocks (emitted by reasoning models like Qwen / Llama)
+    let cleaned = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+    // 2. Extract content inside ```json ... ``` or ``` ... ``` codeblock if present
+    const codeBlockMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    if (codeBlockMatch && codeBlockMatch[1]) {
+        cleaned = codeBlockMatch[1].trim();
+    }
+
+    // 3. Locate first '{' or '[' and last '}' or ']' to isolate pure JSON
+    const firstBrace = cleaned.search(/[\{\[]/);
+    const lastBrace = Math.max(cleaned.lastIndexOf('}'), cleaned.lastIndexOf(']'));
+    
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        cleaned = cleaned.substring(firstBrace, lastBrace + 1).trim();
+    } else {
+        return '{}';
+    }
+
+    return cleaned || '{}';
 };
 
 const toNumeric = (value: any): number | undefined => {
@@ -35,7 +55,7 @@ const getPreferredAiModel = (): string => {
         // legacy fallbacks (kept so existing .env entries don't break)
         env.VITE_GEMINI_MODEL ||
         env.VITE_GOOGLE_MODEL ||
-        'meta-llama/llama-4-scout-17b-16e-instruct',
+        'qwen/qwen3.6-27b',
     ).trim();
 };
 
@@ -44,14 +64,76 @@ const getAiFunctionName = (): string => {
     return String(env.VITE_AI_FUNCTION || 'groq_ai').trim();
 };
 
+const getOpenAiApiKey = (): string => {
+    const env = (import.meta as any).env || {};
+    return String(env.VITE_OPENAI_API_KEY || '').trim();
+};
+
 const callGeminiOcr = async (request: string | GeminiOcrRequest): Promise<any> => {
+    const payload: GeminiOcrRequest = typeof request === 'string' ? { prompt: request } : request;
+    const openAiApiKey = getOpenAiApiKey();
+
+    if (openAiApiKey) {
+        const model = getPreferredAiModel() !== 'qwen/qwen3.6-27b' ? getPreferredAiModel() : 'gpt-4o-mini';
+        const content: any[] = [];
+        if (payload.prompt) {
+            content.push({ type: 'text', text: payload.prompt });
+        }
+        if (payload.files && payload.files.length > 0) {
+            for (const file of payload.files) {
+                if (file?.data && file?.mimeType) {
+                    const base64 = file.data.replace(/^data:[^;]+;base64,/, '');
+                    content.push({
+                        type: 'image_url',
+                        image_url: { url: `data:${file.mimeType};base64,${base64}` },
+                    });
+                }
+            }
+        }
+
+        const openAiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${openAiApiKey}`,
+            },
+            body: JSON.stringify({
+                model,
+                messages: [{ role: 'user', content: content.length > 1 ? content : (content[0]?.text ?? '') }],
+                max_tokens: 4096,
+                temperature: 0,
+                response_format: { type: "json_object" },
+            }),
+        });
+
+        if (!openAiResponse.ok) {
+            const errText = await openAiResponse.text();
+            throw new Error(`OpenAI API error (${openAiResponse.status}): ${errText}`);
+        }
+
+        const openAiResult = await openAiResponse.json();
+        const text = openAiResult?.choices?.[0]?.message?.content || '';
+
+        return {
+            success: true,
+            data: {
+                candidates: [
+                    {
+                        content: {
+                            parts: [{ text }],
+                        },
+                    },
+                ],
+            },
+        };
+    }
+
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
         throw new Error("Supabase configuration is missing.");
     }
 
     const model = getPreferredAiModel();
     const functionName = getAiFunctionName();
-    const payload: GeminiOcrRequest = typeof request === 'string' ? { prompt: request } : request;
 
     const response = await fetch(`${SUPABASE_URL}/functions/v1/${functionName}`, {
         method: 'POST',
@@ -72,7 +154,14 @@ const callGeminiOcr = async (request: string | GeminiOcrRequest): Promise<any> =
         throw new Error(`OCR function failed (${response.status}): ${details}`);
     }
 
-    const result = await response.json();
+    let result: any;
+    try {
+        result = await response.json();
+    } catch {
+        const text = await response.text().catch(() => '');
+        throw new Error(`OCR function returned invalid JSON: ${text.slice(0, 150)}`);
+    }
+
     if (!result?.success) {
         throw new Error(result?.error || 'OCR function returned unsuccessful response');
     }

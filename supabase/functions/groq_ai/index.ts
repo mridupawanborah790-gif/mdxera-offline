@@ -38,7 +38,7 @@ interface RequestBody {
   max_tokens?: number;
 }
 
-const DEFAULT_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
+const DEFAULT_MODEL = 'qwen/qwen3.6-27b';
 
 /** Strip any `data:image/...;base64,` prefix so the value is pure base64. */
 const stripDataUrlPrefix = (raw: string): string => raw.replace(/^data:[^;]+;base64,/, '');

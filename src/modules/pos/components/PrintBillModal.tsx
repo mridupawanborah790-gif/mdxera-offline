@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { cacheRemoteAsset } from '@core/utils/assetCache';
 // Fix: Added AppConfigurations to imports
@@ -25,11 +25,72 @@ interface PrintBillModalProps {
   medicines: Medicine[];
 }
 
-const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, medicines: _medicines }) => {
+const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill: rawBill, medicines: _medicines }) => {
   const [template, setTemplate] = useState<'medi-1' | 'marg' | 'gft' | 'abhigyan' | 'medi-3' | 'thermal' | 'invoice-7'>('marg');
   const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('landscape');
   const [isSharing, setIsSharing] = useState(false);
   const [isSendingApi, setIsSendingApi] = useState(false);
+
+  const bill = useMemo(() => {
+    if (!rawBill) return null;
+    
+    const displayOptions = rawBill.configurations?.displayOptions || {};
+    const schemeBase = displayOptions.schemeDiscountCalculationBase || 'after_trade_discount';
+    const pricingMode = rawBill.pricingMode;
+    const organizationType = rawBill.pharmacy?.organization_type;
+    
+    const effectivePricingMode = (() => {
+      const colRateVisible = rawBill.configurations?.modules?.pos?.fields?.colRate !== false;
+      if (!colRateVisible) return 'mrp';
+      if (organizationType === 'Distributor') return 'rate';
+      if (pricingMode) return pricingMode;
+      if (displayOptions.pricingMode) return displayOptions.pricingMode;
+      return 'mrp';
+    })();
+    
+    const processedItems = (rawBill.items || []).map(item => {
+      // Calculate scheme discount amount dynamically
+      const unitsPerPack = item.unitsPerPack || 1;
+      const billedQty = (item.quantity || 0) + ((item.looseQuantity || 0) / unitsPerPack);
+      const rate = effectivePricingMode === 'mrp' ? (item.mrp ?? 0) : (item.rate ?? item.mrp ?? 0);
+      
+      const itemGross = billedQty * rate;
+      const itemTradeDisc = itemGross * ((item.discountPercent || 0) / 100);
+      const itemFlatDisc = Math.max(0, item.itemFlatDiscount || 0);
+      const lineAfterTrade = Math.max(0, itemGross - itemTradeDisc - itemFlatDisc);
+      
+      // Determine scheme base
+      const resolvedSchemeBase = (() => {
+        const baseRule = item.schemeCalculationBasis || (schemeBase === 'subtotal' ? 'before_discount' : 'after_discount');
+        if (baseRule === 'before_discount') return 'subtotal';
+        return 'after_trade_discount';
+      })();
+      
+      const schemeBaseAmount = resolvedSchemeBase === 'subtotal' ? itemGross : lineAfterTrade;
+      const schemePercent = typeof item.schemeDisplayPercent === 'number' 
+        ? item.schemeDisplayPercent 
+        : Number(item.schemeDiscountPercent || 0);
+        
+      let calculatedSchemeAmount = 0;
+      if (schemePercent > 0) {
+        calculatedSchemeAmount = Math.max(0, schemeBaseAmount * (schemePercent / 100));
+      } else if (item.schemeDiscountAmount) {
+        calculatedSchemeAmount = item.schemeDiscountAmount;
+      }
+      
+      const schemeDiscountAmount = Math.min(lineAfterTrade, calculatedSchemeAmount);
+      
+      return {
+        ...item,
+        schemeDiscountAmount
+      };
+    });
+    
+    return {
+      ...rawBill,
+      items: processedItems
+    };
+  }, [rawBill]);
 
   const handleWhatsAppApiSend = async () => {
     if (!bill) return;
@@ -360,8 +421,39 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, 
         <div className="flex-1 overflow-y-auto bg-gray-100 p-4 print:p-0 print:bg-white print:overflow-visible">
             <div
               id="print-area"
-              className={`invoice-container p-0 text-black bg-white shadow-lg mx-auto overflow-visible print:shadow-none print:mx-0 ${isInvoice7 ? 'w-[100mm] max-w-[100mm]' : (isThermal ? 'w-[76mm]' : (isLandscape ? 'w-[210mm] min-h-[148mm]' : 'w-[148mm] min-h-[210mm]'))} ${template === 'medi-3' || isThermal || isInvoice7 ? 'h-auto overflow-visible' : ''}`}
+              className={`relative invoice-container p-0 text-black bg-white shadow-lg mx-auto overflow-visible print:shadow-none print:mx-0 ${isInvoice7 ? 'w-[100mm] max-w-[100mm]' : (isThermal ? 'w-[76mm]' : (isLandscape ? 'w-[210mm] min-h-[148mm]' : 'w-[148mm] min-h-[210mm]'))} ${template === 'medi-3' || isThermal || isInvoice7 ? 'h-auto overflow-visible' : ''}`}
             >
+                {bill.pharmacy && bill.pharmacy.watermark_type && bill.pharmacy.watermark_type !== 'none' && (
+                    <div 
+                        className="watermark-container absolute inset-0 pointer-events-none select-none flex items-center justify-center"
+                        style={{ 
+                            opacity: bill.pharmacy.watermark_opacity !== undefined ? bill.pharmacy.watermark_opacity : 0.15,
+                            zIndex: 0 
+                        }}
+                    >
+                        {bill.pharmacy.watermark_type === 'logo' && bill.pharmacy.pharmacy_logo_url ? (
+                            <img 
+                                src={bill.pharmacy.pharmacy_logo_url} 
+                                alt="Watermark Logo" 
+                                className="max-w-[55%] max-h-[55%] object-contain"
+                            />
+                        ) : bill.pharmacy.watermark_type === 'name' ? (
+                            <span 
+                                style={{ 
+                                    fontSize: isThermal ? '28px' : (isInvoice7 ? '32px' : '48px'), 
+                                    fontWeight: 900, 
+                                    transform: 'rotate(-45deg)', 
+                                    whiteSpace: 'nowrap',
+                                    fontFamily: 'monospace',
+                                    letterSpacing: '0.05em'
+                                }}
+                                className="text-gray-800 uppercase tracking-widest text-center"
+                            >
+                                {bill.pharmacy.pharmacy_name || 'PHARMACY WATERMARK'}
+                            </span>
+                        ) : null}
+                    </div>
+                )}
                 {renderTemplate()}
             </div>
         </div>
@@ -455,7 +547,16 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill, 
           #print-bill-modal-container * {
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
-          }
+        }
+
+        #print-area {
+          position: relative !important;
+          background-color: #ffffff !important;
+        }
+        #print-area > div:not(.watermark-container) {
+          background-color: transparent !important;
+          position: relative !important;
+          z-index: 10 !important;
         }
       `}</style>
     </div>,

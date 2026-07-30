@@ -896,7 +896,8 @@ const normalizeMaterialMasterType = (value: unknown): string | undefined => {
                 'bank_upi_id', 'authorized_signatory', 'pharmacy_logo_url', 'dashboard_logo_url', 
                 'terms_and_conditions', 'purchase_order_terms', 'organization_type', 'subscription_plan', 
                 'subscription_status', 'subscription_id', 'is_active', 'is_blocked',
-                'fk_price_applied', 'customer_actual_price', 'pricing_mode_used'
+                'fk_price_applied', 'customer_actual_price', 'pricing_mode_used',
+                'watermark_type', 'watermark_opacity'
             ];
 
             // Skip key conversion for these specific metadata fields that contain IDs
@@ -993,7 +994,8 @@ const normalizeMaterialMasterType = (value: unknown): string | undefined => {
                 'bank_upi_id', 'authorized_signatory', 'pharmacy_logo_url', 'dashboard_logo_url', 
                 'terms_and_conditions', 'purchase_order_terms', 'organization_type', 'subscription_plan', 
                 'subscription_status', 'subscription_id', 'is_active', 'is_blocked',
-                'fk_price_applied', 'customer_actual_price', 'pricing_mode_used'
+                'fk_price_applied', 'customer_actual_price', 'pricing_mode_used',
+                'watermark_type', 'watermark_opacity'
             ];
             
             // JSONB config columns whose contents are read by SQL using camelCase keys — never snake_case them.

@@ -271,6 +271,8 @@ export interface RegisteredPharmacy {
     subscription_plan?: string;
     subscription_status?: string;
     subscription_id?: string;
+    watermark_type?: 'none' | 'logo' | 'name';
+    watermark_opacity?: number;
     created_at?: string;
     updated_at?: string;
 }

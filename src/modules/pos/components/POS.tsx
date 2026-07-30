@@ -1384,7 +1384,42 @@ const POS = forwardRef<any, POSProps>(({
             customerAddress: customerAddress || (selectedCustomer as any)?.address || '',
             referredBy: referredBy || '',
             doctorId: doctorId || null,
-            items: cartItems,
+            items: cartItems.map(item => {
+                const unitsPerPack = item.unitsPerPack || 1;
+                const billedQty = (item.quantity || 0) + ((item.looseQuantity || 0) / unitsPerPack);
+                const rate = localPricingMode === 'mrp' ? (item.mrp ?? 0) : (item.rate ?? item.mrp ?? 0);
+                const itemGross = billedQty * rate;
+                const itemTradeDisc = itemGross * ((item.discountPercent || 0) / 100);
+                const itemFlatDisc = Math.max(0, item.itemFlatDiscount || 0);
+                const lineAfterTrade = Math.max(0, itemGross - itemTradeDisc - itemFlatDisc);
+                
+                const resolvedSchemeBase = (() => {
+                    const rawSchemeBase = configurations?.displayOptions?.schemeDiscountCalculationBase || 'after_trade_discount';
+                    const schemeBase = rawSchemeBase === 'ask_user' ? 'after_trade_discount' : rawSchemeBase;
+                    const baseRule = item.schemeCalculationBasis || (schemeBase === 'subtotal' ? 'before_discount' : 'after_discount');
+                    if (baseRule === 'before_discount') return 'subtotal';
+                    return 'after_trade_discount';
+                })();
+                
+                const schemeBaseAmount = resolvedSchemeBase === 'subtotal' ? itemGross : lineAfterTrade;
+                const schemePercent = typeof item.schemeDisplayPercent === 'number' 
+                    ? item.schemeDisplayPercent 
+                    : Number(item.schemeDiscountPercent || 0);
+                    
+                let calculatedSchemeAmount = 0;
+                if (schemePercent > 0) {
+                    calculatedSchemeAmount = Math.max(0, schemeBaseAmount * (schemePercent / 100));
+                } else if (item.schemeDiscountAmount) {
+                    calculatedSchemeAmount = item.schemeDiscountAmount;
+                }
+                
+                const schemeDiscountAmount = Math.min(lineAfterTrade, calculatedSchemeAmount);
+                
+                return {
+                    ...item,
+                    schemeDiscountAmount
+                };
+            }),
             total: grandTotal,
             subtotal: parseFloat(totals.subtotal.toFixed(2)),
             totalItemDiscount: totals.tradeDiscount,

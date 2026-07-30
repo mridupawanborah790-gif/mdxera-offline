@@ -274,7 +274,168 @@ const Settings: React.FC<SettingsProps> = ({ currentUser, onUpdateProfile, addNo
                             </div>
                         </section>
 
-                        {/* 5. Database Synchronisation */}
+                        {/* 5. Print Watermark Settings */}
+                        <section className="space-y-6">
+                            <div className="border-b-2 border-primary pb-2">
+                                <h3 className="text-lg font-black text-primary uppercase tracking-tight">Print Watermark Settings</h3>
+                            </div>
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+                                {/* Left Side: Settings Panel */}
+                                <div className="lg:col-span-2 space-y-6">
+                                    <div className="space-y-2">
+                                        <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">
+                                            Watermark Type
+                                        </label>
+                                        <div className="grid grid-cols-3 gap-3">
+                                            {[
+                                                { id: 'none', label: 'None', desc: 'No watermark' },
+                                                { id: 'logo', label: 'Pharmacy Logo', desc: 'Logo URL above' },
+                                                { id: 'name', label: 'Pharmacy Name', desc: 'Trade Name above' }
+                                            ].map((opt) => (
+                                                <button
+                                                    key={opt.id}
+                                                    type="button"
+                                                    onClick={() => setFormData(prev => prev ? ({ ...prev, watermark_type: opt.id as any }) : null)}
+                                                    className={`p-3 text-left border-2 transition-all flex flex-col justify-between h-20 ${
+                                                        (formData.watermark_type || 'none') === opt.id
+                                                            ? 'border-primary bg-yellow-50/55 shadow-sm'
+                                                            : 'border-gray-300 bg-white hover:border-gray-400'
+                                                    }`}
+                                                >
+                                                    <span className="text-xs font-black uppercase text-gray-800 tracking-wide">{opt.label}</span>
+                                                    <span className="text-[9px] text-gray-500 font-bold leading-normal uppercase">{opt.desc}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <div className="flex justify-between items-center ml-1">
+                                            <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest">
+                                                Watermark Opacity
+                                            </label>
+                                            <span className="text-xs font-black text-primary bg-yellow-100 border border-primary/20 px-2 py-0.5 rounded-sm">
+                                                {Math.round((formData.watermark_opacity !== undefined ? formData.watermark_opacity : 0.15) * 100)}%
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center gap-4">
+                                            <span className="text-[10px] font-black text-gray-400">5%</span>
+                                            <input
+                                                type="range"
+                                                min="0.05"
+                                                max="1.00"
+                                                step="0.05"
+                                                value={formData.watermark_opacity !== undefined ? formData.watermark_opacity : 0.15}
+                                                onChange={(e) => {
+                                                    const val = parseFloat(e.target.value);
+                                                    setFormData(prev => prev ? ({ ...prev, watermark_opacity: val }) : null);
+                                                }}
+                                                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary hover:bg-gray-300 transition-colors"
+                                            />
+                                            <span className="text-[10px] font-black text-gray-400">100%</span>
+                                        </div>
+                                        <p className="text-[9px] text-gray-500 font-bold uppercase italic mt-1 ml-1">
+                                            * A lower opacity (e.g. 10% - 20%) is recommended to ensure text readability on printed bills.
+                                        </p>
+                                    </div>
+                                </div>
+
+                                {/* Right Side: Live Preview Container */}
+                                <div className="space-y-2 flex flex-col items-center">
+                                    <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest text-left w-full ml-1">
+                                        Watermark Live Preview
+                                    </label>
+                                    <div className="relative w-full max-w-[280px] h-[340px] bg-white border border-gray-400 shadow-md p-4 flex flex-col justify-between select-none overflow-hidden text-black">
+                                        {/* Mock Bill watermark container */}
+                                        {(formData.watermark_type && formData.watermark_type !== 'none') && (
+                                            <div 
+                                                className="absolute inset-0 pointer-events-none flex items-center justify-center z-0"
+                                                style={{ opacity: formData.watermark_opacity !== undefined ? formData.watermark_opacity : 0.15 }}
+                                            >
+                                                {formData.watermark_type === 'logo' ? (
+                                                    formData.pharmacy_logo_url ? (
+                                                        <img 
+                                                            src={formData.pharmacy_logo_url} 
+                                                            alt="Preview logo" 
+                                                            className="max-w-[70%] max-h-[70%] object-contain"
+                                                            onError={(e) => {
+                                                                (e.target as HTMLElement).style.display = 'none';
+                                                                const parent = (e.target as HTMLElement).parentElement;
+                                                                if (parent && !parent.querySelector('.placeholder-fallback')) {
+                                                                    const fallback = document.createElement('div');
+                                                                    fallback.className = 'placeholder-fallback flex flex-col items-center justify-center';
+                                                                    fallback.innerHTML = `<span class="text-3xl">🏥</span><span class="text-[8px] font-black uppercase text-gray-400 mt-1">Logo URL</span>`;
+                                                                    parent.appendChild(fallback);
+                                                                }
+                                                            }}
+                                                        />
+                                                    ) : (
+                                                        <div className="flex flex-col items-center justify-center">
+                                                            <span className="text-4xl text-gray-300">🏥</span>
+                                                            <span className="text-[8px] font-black uppercase text-red-500 mt-2 text-center max-w-[90%]">
+                                                                No Logo URL configured
+                                                            </span>
+                                                        </div>
+                                                    )
+                                                ) : formData.watermark_type === 'name' ? (
+                                                    <span 
+                                                        style={{ 
+                                                            fontSize: '24px', 
+                                                            fontWeight: 900, 
+                                                            transform: 'rotate(-45deg)', 
+                                                            whiteSpace: 'nowrap',
+                                                            fontFamily: 'monospace',
+                                                            letterSpacing: '0.05em'
+                                                        }}
+                                                        className="text-gray-800 uppercase tracking-widest text-center"
+                                                    >
+                                                        {formData.pharmacy_name || 'PHARMACY NAME'}
+                                                    </span>
+                                                ) : null}
+                                            </div>
+                                        )}
+
+                                        {/* Mock Bill content layers to show watermark under text */}
+                                        <div className="relative z-10 space-y-3 opacity-90 text-[10px] font-mono leading-tight">
+                                            <div className="text-center border-b border-dashed border-gray-400 pb-2">
+                                                <div className="font-bold text-[11px] uppercase tracking-wide">{formData.pharmacy_name || 'PHARMACY NAME'}</div>
+                                                <div className="text-[8px] text-gray-600">PREVIEW RECEIPT</div>
+                                                <div className="text-[8px] text-gray-500">TEL: {formData.mobile || '9999999999'}</div>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <div className="flex justify-between font-bold text-[9px] border-b border-gray-300 pb-0.5">
+                                                    <span>ITEM NAME</span>
+                                                    <span>QTY</span>
+                                                    <span>TOTAL</span>
+                                                </div>
+                                                <div className="flex justify-between text-[8px]">
+                                                    <span>PARACETAMOL 650</span>
+                                                    <span>10</span>
+                                                    <span>₹18.00</span>
+                                                </div>
+                                                <div className="flex justify-between text-[8px]">
+                                                    <span>AMOXYCILLIN 500</span>
+                                                    <span>6</span>
+                                                    <span>₹72.00</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="relative z-10 border-t border-dashed border-gray-400 pt-2 opacity-90 text-[9px] font-mono space-y-1">
+                                            <div className="flex justify-between font-bold text-[10px]">
+                                                <span>GRAND TOTAL</span>
+                                                <span>₹90.00</span>
+                                            </div>
+                                            <div className="text-[7px] text-gray-500 text-center uppercase tracking-wider mt-2 border-t border-gray-200 pt-1">
+                                                * Thank You, Visit Again! *
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+
+                        {/* 6. Database Synchronisation */}
                         {(onResyncAll || onFreshInstallSync) && (
                             <section className="space-y-4 pt-4 border-t-2 border-primary">
                                 <div className="pb-1">

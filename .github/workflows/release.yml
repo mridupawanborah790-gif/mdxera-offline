@@ -129,6 +129,18 @@ jobs:
           else
             echo "Tag $TAG_NAME already exists in target repository."
           fi
+          
+          RELEASE_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: token $TARGET_TOKEN" https://api.github.com/repos/mridupawanborah790-gif/mdxera-software-releases/releases/tags/$TAG_NAME)
+          if [ "$RELEASE_RESPONSE" != "200" ]; then
+            echo "Release for $TAG_NAME not found in target repository. Creating it..."
+            curl -s -X POST \
+              -H "Authorization: token $TARGET_TOKEN" \
+              -H "Accept: application/vnd.github.v3+json" \
+              https://api.github.com/repos/mridupawanborah790-gif/mdxera-software-releases/releases \
+              -d "{\"tag_name\":\"$TAG_NAME\",\"name\":\"MDXera ERP $TAG_NAME\",\"body\":\"See the full changelog below. Auto-update users will pick this release up on next app launch.\",\"draft\":false,\"prerelease\":false,\"target_commitish\":\"main\"}"
+          else
+            echo "Release for $TAG_NAME already exists in target repository."
+          fi
 
       - name: Build & publish (tauri-action)
         uses: tauri-apps/tauri-action@v0

@@ -94,27 +94,40 @@ jobs:
             echo "APPLE_TEAM_ID=${{ secrets.APPLE_TEAM_ID }}" >> $GITHUB_ENV
           fi
 
-      - name: Initialize target repo if empty
+      - name: Ensure target repo has release tag
         shell: bash
         env:
           TARGET_TOKEN: ${{ secrets.RELEASES_REPO_PAT }}
+          TAG_NAME: ${{ steps.tag.outputs.name }}
         run: |
           RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: token $TARGET_TOKEN" https://api.github.com/repos/mridupawanborah790-gif/mdxera-software-releases/branches/main)
+          
+          TEMP_DIR=$(mktemp -d)
+          cd "$TEMP_DIR"
+          
           if [ "$RESPONSE" != "200" ]; then
             echo "Target repository main branch not found or empty. Initializing..."
             git config --global user.name "github-actions[bot]"
             git config --global user.email "github-actions[bot]@users.noreply.github.com"
-            TEMP_DIR=$(mktemp -d)
-            cd "$TEMP_DIR"
             git init
             git checkout -b main
             echo "# MDXera Software Releases" > README.md
             git add README.md
             git commit -m "Initial commit from Release Workflow"
             git remote add origin https://x-access-token:$TARGET_TOKEN@github.com/mridupawanborah790-gif/mdxera-software-releases.git
-            git push -u origin main || echo "Push failed or repository already initialized by another job."
+            git push -u origin main
           else
-            echo "Target repository is already initialized."
+            echo "Cloning target repository..."
+            git clone https://x-access-token:$TARGET_TOKEN@github.com/mridupawanborah790-gif/mdxera-software-releases.git .
+          fi
+          
+          TAG_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: token $TARGET_TOKEN" https://api.github.com/repos/mridupawanborah790-gif/mdxera-software-releases/git/refs/tags/$TAG_NAME)
+          if [ "$TAG_RESPONSE" != "200" ]; then
+            echo "Tag $TAG_NAME not found in target repository. Creating and pushing it..."
+            git tag "$TAG_NAME"
+            git push origin "$TAG_NAME" || echo "Tag push failed or already created by another job."
+          else
+            echo "Tag $TAG_NAME already exists in target repository."
           fi
 
       - name: Build & publish (tauri-action)

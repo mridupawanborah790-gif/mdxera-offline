@@ -94,6 +94,29 @@ jobs:
             echo "APPLE_TEAM_ID=${{ secrets.APPLE_TEAM_ID }}" >> $GITHUB_ENV
           fi
 
+      - name: Initialize target repo if empty
+        shell: bash
+        env:
+          TARGET_TOKEN: ${{ secrets.RELEASES_REPO_PAT }}
+        run: |
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: token $TARGET_TOKEN" https://api.github.com/repos/mridupawanborah790-gif/mdxera-software-releases/branches/main)
+          if [ "$RESPONSE" != "200" ]; then
+            echo "Target repository main branch not found or empty. Initializing..."
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            TEMP_DIR=$(mktemp -d)
+            cd "$TEMP_DIR"
+            git init
+            git checkout -b main
+            echo "# MDXera Software Releases" > README.md
+            git add README.md
+            git commit -m "Initial commit from Release Workflow"
+            git remote add origin https://x-access-token:$TARGET_TOKEN@github.com/mridupawanborah790-gif/mdxera-software-releases.git
+            git push -u origin main || echo "Push failed or repository already initialized by another job."
+          else
+            echo "Target repository is already initialized."
+          fi
+
       - name: Build & publish (tauri-action)
         uses: tauri-apps/tauri-action@v0
         env:

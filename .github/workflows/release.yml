@@ -97,10 +97,12 @@ jobs:
       - name: Build & publish (tauri-action)
         uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASES_REPO_PAT }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
+          owner: mridupawanborah790-gif
+          repo: mdxera-software-releases
           tagName: ${{ steps.tag.outputs.name }}
           releaseName: 'MDXera ERP ${{ steps.tag.outputs.name }}'
           releaseBody: |

@@ -3596,8 +3596,6 @@ const POS = forwardRef<any, POSProps>(({
                             isOpen={isInsightsOpen}
                             product={activeIntelItem}
                             purchases={purchases}
-                            sales={salesHistory}
-                            loading={isInsightsLoading}
                             onClose={closeInsightsPanel}
                         />
 

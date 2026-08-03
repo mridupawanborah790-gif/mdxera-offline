@@ -53,19 +53,18 @@ export async function syncOrgRoster(user: RegisteredPharmacy): Promise<void> {
     // 2. Also fetch the owner profile (sometimes not in team_members)
     const { data: profileRow } = await supabase
       .from('profiles')
-      .select('user_id, organization_id, email, full_name, pharmacy_name, role, is_active')
+      .select('*')
       .eq('organization_id', orgId)
       .eq('user_id', user.id);
 
     if (profileRow && profileRow.length > 0) {
+      const { adaptRowForSqlite } = await import('@core/sync/columnFilter');
       for (const row of profileRow) {
         try {
-          const cols = Object.keys(row);
-          const placeholders = cols.map(() => '?').join(', ');
-          await db.execute(
-            `INSERT OR REPLACE INTO ${TABLE.PROFILES} (${cols.join(', ')}) VALUES (${placeholders})`,
-            Object.values(row)
-          );
+          const adapted = await adaptRowForSqlite('profiles', row, { syncStatus: 'synced' });
+          if (adapted) {
+            await db.upsert('profiles', adapted);
+          }
         } catch (rowErr) {
           console.debug('[rosterSync] profile row skipped:', (rowErr as Error)?.message);
         }

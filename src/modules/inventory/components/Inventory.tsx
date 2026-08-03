@@ -7,7 +7,8 @@ import ExportInventoryModal from '../components/ExportInventoryModal';
 import MrpChangeLogModal from '../components/MrpChangeLogModal';
 import InventoryBatchDetailModal from '../components/InventoryBatchDetailModal';
 import SyncMaterialMasterModal from '../components/SyncMaterialMasterModal';
-import type { InventoryItem, RegisteredPharmacy, ModuleConfig, AppConfigurations, Medicine, MrpChangeLogEntry, PermissionSet } from '@core/types';
+import type { InventoryItem, RegisteredPharmacy, ModuleConfig, AppConfigurations, Medicine, MrpChangeLogEntry, PermissionSet, Purchase } from '@core/types';
+import PurchaseHistoryModal from './PurchaseHistoryModal';
 import { fuzzyMatch } from '@core/utils/search';
 import { formatExpiryToMMYY, normalizeImportDate } from '@core/utils/helpers';
 import { configurableModules } from '@core/utils/constants';
@@ -55,6 +56,7 @@ interface InventoryProps {
     onRefresh?: () => Promise<void> | void;
     onAddMedicineMaster?: (med: Omit<Medicine, 'id'>) => Promise<Medicine | void> | Medicine | void;
     permissions?: PermissionSet;
+    purchases?: Purchase[];
 }
 
 interface GroupedInventoryRow {
@@ -94,6 +96,7 @@ const Inventory: React.FC<InventoryProps> = ({
     onRefresh,
     onAddMedicineMaster,
     permissions,
+    purchases = [],
 }) => {
     const defaultPermissions: PermissionSet = {
         view: true,
@@ -118,6 +121,8 @@ const Inventory: React.FC<InventoryProps> = ({
     const [rowsPerPage, setRowsPerPage] = useState<number>(DEFAULT_ITEMS_PER_PAGE);
     const [isMrpLogOpen, setIsMrpLogOpen] = useState(false);
     const [detailRowKey, setDetailRowKey] = useState<string | null>(null);
+    const [isPurchaseHistoryOpen, setIsPurchaseHistoryOpen] = useState(false);
+    const [purchaseHistoryProduct, setPurchaseHistoryProduct] = useState<{ name: string; code?: string; brand?: string } | null>(null);
     const [expiryFilter, setExpiryFilter] = useState<'all' | 'nearExpiry' | 'expired'>('all');
     const columnSelectorRef = useRef<HTMLDivElement>(null);
     const tableBodyRef = useRef<HTMLTableSectionElement>(null);
@@ -340,7 +345,7 @@ const Inventory: React.FC<InventoryProps> = ({
                 return;
             }
 
-            const isModalOpen = !!itemToEdit || isAddModalOpen || isExportModalOpen || !!detailRowKey;
+            const isModalOpen = !!itemToEdit || isAddModalOpen || isExportModalOpen || !!detailRowKey || isMrpLogOpen || isPurchaseHistoryOpen || isSyncMasterModalOpen;
             if (isModalOpen || isColumnSelectorOpen) return;
 
             if (e.key === 'ArrowDown') {
@@ -368,6 +373,17 @@ const Inventory: React.FC<InventoryProps> = ({
             } else if (e.key === 'F3' && perms.export) {
                 e.preventDefault();
                 setIsExportModalOpen(true);
+            } else if (e.key === 'F4') {
+                e.preventDefault();
+                const selectedRow = paginatedItems[selectedIndex];
+                if (selectedRow) {
+                    setPurchaseHistoryProduct({
+                        name: selectedRow.name || '',
+                        code: selectedRow.representative?.code || undefined,
+                        brand: selectedRow.representative?.brand || undefined
+                    });
+                    setIsPurchaseHistoryOpen(true);
+                }
             } else if (e.key === 'Enter') {
                 e.preventDefault();
                 const selectedRow = paginatedItems[selectedIndex];
@@ -378,7 +394,7 @@ const Inventory: React.FC<InventoryProps> = ({
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [paginatedItems, selectedIndex, itemToEdit, isAddModalOpen, isExportModalOpen, isColumnSelectorOpen, currentPage, totalPages, detailRowKey, perms.entry, perms.export, searchInputRef]);
+    }, [paginatedItems, selectedIndex, itemToEdit, isAddModalOpen, isExportModalOpen, isColumnSelectorOpen, currentPage, totalPages, detailRowKey, perms.entry, perms.export, searchInputRef, isMrpLogOpen, isPurchaseHistoryOpen, isSyncMasterModalOpen]);
 
     const isFieldVisible = (fieldId: string) => config?.fields?.[fieldId] !== false;
 
@@ -943,6 +959,19 @@ const Inventory: React.FC<InventoryProps> = ({
                 />
             )}
             <MrpChangeLogModal isOpen={isMrpLogOpen} onClose={() => setIsMrpLogOpen(false)} logs={mrpChangeLogs} />
+            {isPurchaseHistoryOpen && purchaseHistoryProduct && (
+                <PurchaseHistoryModal
+                    isOpen={isPurchaseHistoryOpen}
+                    onClose={() => {
+                        setIsPurchaseHistoryOpen(false);
+                        setPurchaseHistoryProduct(null);
+                    }}
+                    productName={purchaseHistoryProduct.name}
+                    representativeCode={purchaseHistoryProduct.code}
+                    brandName={purchaseHistoryProduct.brand}
+                    purchases={purchases}
+                />
+            )}
             {isSyncMasterModalOpen && (
                 <SyncMaterialMasterModal
                     isOpen={isSyncMasterModalOpen}

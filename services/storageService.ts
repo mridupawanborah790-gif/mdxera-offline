@@ -1541,22 +1541,27 @@ export const saveData = async (tableName: string, data: any, user: RegisteredPha
 
         if (
             memoryCacheOrgScope[storeKey] === user.organization_id &&
-            memoryCache[storeKey] &&
-            memoryCache[storeKey].length > 0
+            memoryCache[storeKey] !== undefined &&
+            memoryCache[storeKey] !== null
         ) {
             return [...memoryCache[storeKey]];
         }
 
         try {
             await hydrateMemoryCacheFromSqlite(user.organization_id);
-            if (memoryCache[storeKey] && memoryCache[storeKey].length > 0) {
+            if (memoryCache[storeKey] !== undefined && memoryCache[storeKey] !== null) {
                 return [...memoryCache[storeKey]];
             }
         } catch {
             /* fall through */
         }
 
-        const cached = await idb.getAll(STORES[storeKey]);
+        let cached: any[] = [];
+        try {
+            cached = await idb.getAll(STORES[storeKey]);
+        } catch (e) {
+            console.warn(`[storage] IndexedDB read failed for ${tableName}:`, e);
+        }
 
         if (cached && cached.length > 0) {
             memoryCache[storeKey] = [...cached];

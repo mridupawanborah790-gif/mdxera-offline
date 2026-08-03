@@ -858,11 +858,66 @@ const App: React.FC = () => {
         return fromPage !== toPage;
     }, []);
 
+    const handleNavigate = useCallback((pageId: string, skipPrompt = false) => {
+        const isDailyReportLink = pageId.startsWith('dailyReports:');
+        const resolvedPageId = isDailyReportLink ? 'dailyReports' : pageId;
+
+        if (!canAccessScreen(resolvedPageId, currentUser, teamMembers, businessRoles, 'view') || (resolvedPageId === 'priceMaster' && (configurations?.displayOptions?.enablePriceMaster ?? true) === false)) {
+            addNotification('Access denied for this module.', 'error');
+            return;
+        }
+
+        if (!skipPrompt && shouldPromptBeforeLeaving(currentPage, resolvedPageId)) {
+            setPendingNavigation({ pageId, skipPrompt });
+            setShowEscSavePrompt(true);
+            return;
+        }
+
+        if (isDailyReportLink) {
+            setCurrentDailyReportId(pageId.replace('dailyReports:', ''));
+        }
+        if (resolvedPageId === 'ewayLoginSetup') {
+            setEwayLoginSetupReturnPage(currentPage || 'dashboard');
+        }
+
+        // --- HISTORY TRACKING ---
+        if (currentPage !== resolvedPageId) {
+            setHistory(prev => {
+                // Limit history size to 20 to prevent bloat
+                const next = [...prev, currentPage].slice(-20);
+                return next;
+            });
+        }
+        // ------------------------
+
+        setCurrentPage(resolvedPageId);
+        if (resolvedPageId !== 'manualSupplierInvoice' && resolvedPageId !== 'manualPurchaseEntry' && resolvedPageId !== 'automatedPurchaseEntry') {
+            setEditingPurchase(null);
+            setPurchaseCopyDraft(null);
+        }
+        if (resolvedPageId !== 'pos' && resolvedPageId !== 'nonGstPos') {
+            setEditingSale(null);
+        }
+    }, [addNotification, businessRoles, currentPage, currentUser, shouldPromptBeforeLeaving, teamMembers]);
+
     // Global ESC Key Listener
     useEffect(() => {
         setActiveScreenScope(currentPage);
 
         const handleKeyDown = (e: KeyboardEvent) => {
+            if (currentPage === 'dashboard') {
+                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') {
+                    e.preventDefault();
+                    handleNavigate('inventory');
+                    return;
+                }
+                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+                    e.preventDefault();
+                    handleNavigate('pos');
+                    return;
+                }
+            }
+
             if (e.key === 'Tab' && currentPage === 'dashboard') {
                 e.preventDefault();
                 setActiveDashboardMenu(prev => prev === 'left' ? 'right' : 'left');
@@ -889,7 +944,7 @@ const App: React.FC = () => {
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [currentPage, activeDashboardMenu]);
+    }, [currentPage, activeDashboardMenu, handleNavigate]);
 
     const handleEscSave = async () => {
         setShowEscSavePrompt(false);
@@ -1169,48 +1224,6 @@ const App: React.FC = () => {
     const handleReload = useCallback(async () => {
         if (currentUser) await loadData(currentUser, 'sync');
     }, [currentUser, loadData]);
-
-    const handleNavigate = useCallback((pageId: string, skipPrompt = false) => {
-        const isDailyReportLink = pageId.startsWith('dailyReports:');
-        const resolvedPageId = isDailyReportLink ? 'dailyReports' : pageId;
-
-        if (!canAccessScreen(resolvedPageId, currentUser, teamMembers, businessRoles, 'view') || (resolvedPageId === 'priceMaster' && (configurations?.displayOptions?.enablePriceMaster ?? true) === false)) {
-            addNotification('Access denied for this module.', 'error');
-            return;
-        }
-
-        if (!skipPrompt && shouldPromptBeforeLeaving(currentPage, resolvedPageId)) {
-            setPendingNavigation({ pageId, skipPrompt });
-            setShowEscSavePrompt(true);
-            return;
-        }
-
-        if (isDailyReportLink) {
-            setCurrentDailyReportId(pageId.replace('dailyReports:', ''));
-        }
-        if (resolvedPageId === 'ewayLoginSetup') {
-            setEwayLoginSetupReturnPage(currentPage || 'dashboard');
-        }
-
-        // --- HISTORY TRACKING ---
-        if (currentPage !== resolvedPageId) {
-            setHistory(prev => {
-                // Limit history size to 20 to prevent bloat
-                const next = [...prev, currentPage].slice(-20);
-                return next;
-            });
-        }
-        // ------------------------
-
-        setCurrentPage(resolvedPageId);
-        if (resolvedPageId !== 'manualSupplierInvoice' && resolvedPageId !== 'manualPurchaseEntry' && resolvedPageId !== 'automatedPurchaseEntry') {
-            setEditingPurchase(null);
-            setPurchaseCopyDraft(null);
-        }
-        if (resolvedPageId !== 'pos' && resolvedPageId !== 'nonGstPos') {
-            setEditingSale(null);
-        }
-    }, [addNotification, businessRoles, currentPage, currentUser, shouldPromptBeforeLeaving, teamMembers]);
 
     const handleBack = useCallback(() => {
         const prevPage = history.length > 0 ? history[history.length - 1] : 'dashboard';
@@ -3134,6 +3147,7 @@ const App: React.FC = () => {
                 case 'inventory':
                     return <Inventory
                         inventory={inventory} medicines={medicines} currentUser={currentUser}
+                        purchases={purchases}
                         onCreatePurchaseOrder={() => { }} config={config} onUpdateConfig={(newConfig) => handleUpdateModuleConfig('inventory', newConfig)}
                         onBulkAddInventory={(list) => storage.saveBulkData('inventory', list, currentUser)}
                         onAddProduct={handleAddInventoryItem} onUpdateProduct={handleUpdateInventoryItem}

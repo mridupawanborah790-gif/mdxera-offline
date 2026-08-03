@@ -4,6 +4,7 @@ import Modal from '@core/components/ui/Modal';
 import { Customer, Transaction } from '@core/types';
 import { fuzzyMatch } from '@core/utils/search';
 import { buildCustomerInvoiceOutstandingMap, calculateCustomerReceivableBreakdown, getOutstandingBalance } from '@core/utils/helpers';
+import CustomerLedgerModal from './CustomerLedgerModal';
 
 interface CustomerSearchModalProps {
     isOpen: boolean;
@@ -19,6 +20,7 @@ const uniformTextStyle = "text-2xl font-normal tracking-tight uppercase leading-
 const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClose, customers, transactions = [], onSelect, initialSearch = '' }) => {
     const [searchTerm, setSearchTerm] = useState(initialSearch);
     const [selectedIndex, setSelectedIndex] = useState(0);
+    const [isLedgerModalOpen, setIsLedgerModalOpen] = useState(false);
     const searchInputRef = useRef<HTMLInputElement>(null);
     const resultsContainerRef = useRef<HTMLDivElement>(null);
 
@@ -67,6 +69,8 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
     }, [selectedIndex]);
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (isLedgerModalOpen) return;
+
         if (e.key === 'ArrowDown') {
             e.preventDefault();
             setSelectedIndex(prev => (prev + 1) % Math.max(1, filtered.length));
@@ -78,6 +82,11 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
             e.stopPropagation();
             if (filtered[selectedIndex]) {
                 onSelect(filtered[selectedIndex]);
+            }
+        } else if (e.key === 'F4') {
+            e.preventDefault();
+            if (filtered[selectedIndex]) {
+                setIsLedgerModalOpen(true);
             }
         } else if (e.key === 'Escape') {
             e.preventDefault();
@@ -96,7 +105,7 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                         <span className="text-xs font-black uppercase tracking-[0.2em]">Customer Selection Matrix</span>
                     </div>
-                    <span className="text-[10px] font-bold uppercase opacity-70">↑/↓ Navigate | Enter Select | Esc Close</span>
+                    <span className="text-[10px] font-bold uppercase opacity-70">↑/↓ Navigate | F4 Ledger | Enter Select | Esc Close</span>
                 </div>
 
                 <div className="p-2 bg-white dark:bg-zinc-900 border-b-2 border-primary/10">
@@ -186,6 +195,14 @@ const CustomerSearchModal: React.FC<CustomerSearchModalProps> = ({ isOpen, onClo
                      </button>
                 </div>
             </div>
+
+            {isLedgerModalOpen && filtered[selectedIndex] && (
+                <CustomerLedgerModal
+                    isOpen={isLedgerModalOpen}
+                    onClose={() => setIsLedgerModalOpen(false)}
+                    customer={filtered[selectedIndex]}
+                />
+            )}
         </Modal>
     );
 };

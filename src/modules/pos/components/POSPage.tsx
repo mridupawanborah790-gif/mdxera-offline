@@ -856,6 +856,9 @@ const POS = forwardRef<any, POSProps>(({
                 if (!isMounted) return;
                 setSalesHistory((rows || []).filter((row: Transaction) => row.organization_id === currentUser.organization_id && row.status === 'completed'));
             })
+            .catch((err) => {
+                console.error('[POSPage] fetchTransactions failed:', err);
+            })
             .finally(() => {
                 if (isMounted) setIsInsightsLoading(false);
             });
@@ -1874,8 +1877,6 @@ const POS = forwardRef<any, POSProps>(({
                             isOpen={isInsightsOpen}
                             product={activeIntelItem}
                             purchases={purchases}
-                            sales={salesHistory}
-                            loading={isInsightsLoading}
                             onClose={() => setIsInsightsOpen(false)}
                         />
 

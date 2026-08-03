@@ -1455,6 +1455,9 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
                 if (!isMounted) return;
                 setSalesHistory((rows || []).filter((row: Transaction) => row.organization_id === currentUser.organization_id));
             })
+            .catch((err) => {
+                console.error('[PurchaseForm] fetchTransactions failed:', err);
+            })
             .finally(() => {
                 if (isMounted) setIsInsightsLoading(false);
             });
@@ -2913,8 +2916,6 @@ const PurchaseForm = forwardRef<any, PurchaseFormProps>(({
                             isOpen={isInsightsOpen}
                             product={activeIntelItem}
                             purchases={purchases}
-                            sales={salesHistory}
-                            loading={isInsightsLoading}
                             onClose={() => setIsInsightsOpen(false)}
                         />
 

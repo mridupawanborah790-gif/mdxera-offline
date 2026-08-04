@@ -48,15 +48,15 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill: 
       return 'mrp';
     })();
     
-    const processedItems = (rawBill.items || []).map(item => {
+    const processedItems = (rawBill.items || []).map((item: any) => {
       // Calculate scheme discount amount dynamically
-      const unitsPerPack = item.unitsPerPack || 1;
-      const billedQty = (item.quantity || 0) + ((item.looseQuantity || 0) / unitsPerPack);
-      const rate = effectivePricingMode === 'mrp' ? (item.mrp ?? 0) : (item.rate ?? item.mrp ?? 0);
+      const unitsPerPack = Number(item.unitsPerPack || 1) || 1;
+      const billedQty = Number(item.quantity || 0) + (Number(item.looseQuantity || 0) / unitsPerPack);
+      const rate = effectivePricingMode === 'mrp' ? Number(item.mrp ?? 0) : Number(item.rate ?? item.mrp ?? 0);
       
       const itemGross = billedQty * rate;
-      const itemTradeDisc = itemGross * ((item.discountPercent || 0) / 100);
-      const itemFlatDisc = Math.max(0, item.itemFlatDiscount || 0);
+      const itemTradeDisc = itemGross * (Number(item.discountPercent || 0) / 100);
+      const itemFlatDisc = Math.max(0, Number(item.itemFlatDiscount || 0));
       const lineAfterTrade = Math.max(0, itemGross - itemTradeDisc - itemFlatDisc);
       
       // Determine scheme base
@@ -75,20 +75,36 @@ const PrintBillModal: React.FC<PrintBillModalProps> = ({ isOpen, onClose, bill: 
       if (schemePercent > 0) {
         calculatedSchemeAmount = Math.max(0, schemeBaseAmount * (schemePercent / 100));
       } else if (item.schemeDiscountAmount) {
-        calculatedSchemeAmount = item.schemeDiscountAmount;
+        calculatedSchemeAmount = Number(item.schemeDiscountAmount || 0);
       }
       
       const schemeDiscountAmount = Math.min(lineAfterTrade, calculatedSchemeAmount);
       
       return {
         ...item,
+        quantity: Number(item.quantity || 0),
+        looseQuantity: Number(item.looseQuantity || 0),
+        mrp: Number(item.mrp || 0),
+        rate,
+        billedRate: Number(item.billedRate ?? item.rate ?? item.mrp ?? 0),
+        discountPercent: Number(item.discountPercent || 0),
+        itemFlatDiscount: Number(item.itemFlatDiscount || 0),
+        gstPercent: Number(item.gstPercent || 0),
+        displayAmount: Number((item as any).displayAmount ?? (item as any).amount ?? lineAfterTrade ?? 0),
         schemeDiscountAmount
       };
     });
     
     return {
       ...rawBill,
-      items: processedItems
+      items: processedItems,
+      subtotal: Number(rawBill.subtotal || 0),
+      totalGst: Number(rawBill.totalGst || 0),
+      roundOff: Number(rawBill.roundOff || 0),
+      total: Number(rawBill.total || 0),
+      schemeDiscount: Number(rawBill.schemeDiscount || 0),
+      totalItemDiscount: Number(rawBill.totalItemDiscount || 0),
+      adjustment: Number(rawBill.adjustment || 0)
     };
   }, [rawBill]);
 

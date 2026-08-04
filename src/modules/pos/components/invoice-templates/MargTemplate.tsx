@@ -440,7 +440,7 @@ const MargTemplate: React.FC<TemplateProps> = ({ bill, orientation = 'portrait' 
       {showRateColumn          && <td style={{ textAlign: 'right',  color: '#1e40af' }}>{(item.billedRate || 0).toFixed(2)}</td>}
       {showTradeDiscountColumn && <td style={{ textAlign: 'center', color: '#dc2626' }}>{item.discountPercent || '0'}</td>}
       {showSchemeColumn        && <td style={{ textAlign: 'center', color: '#059669' }}>{getDisplaySchemePercent(item) > 0 ? getDisplaySchemePercent(item).toFixed(2) : ''}</td>}
-      <td style={{ textAlign: 'center' }}>{(item.gstPercent || 0).toFixed(0)}</td>
+      <td style={{ textAlign: 'center' }}>{Number(item.gstPercent || 0).toFixed(0)}</td>
       <td style={{ textAlign: 'right', color: '#111827' }}>{(item.displayAmount || 0).toFixed(2)}</td>
     </tr>
   );
